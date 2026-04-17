@@ -25,7 +25,8 @@ from anolis_composer_backend import paths as paths_module
 from anolis_composer_backend import projects as projects_module
 from anolis_workbench_backend import exporter as exporter_module
 
-_WB_DIR = pathlib.Path(__file__).resolve().parent.parent
+_BACKEND_DIR = pathlib.Path(__file__).resolve().parent
+_WB_DIR = _BACKEND_DIR.parent
 
 
 def _env_int(name: str, default: int) -> int:
@@ -56,7 +57,7 @@ HOST = os.getenv("ANOLIS_WORKBENCH_HOST", "127.0.0.1")
 PORT = _env_int("ANOLIS_WORKBENCH_PORT", 3010)
 OPERATOR_UI_BASE = os.getenv("ANOLIS_OPERATOR_UI_BASE", "http://localhost:3000").rstrip("/")
 OPEN_BROWSER = _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", True)
-FRONTEND_DIR = _WB_DIR / "frontend"
+FRONTEND_DIR = (_WB_DIR / "frontend") if (_WB_DIR / "frontend").is_dir() else (_BACKEND_DIR / "frontend")
 
 _WORKSPACE_ROUTE_RE = re.compile(r"^/projects/[^/]+(?:/(?:compose|commission|operate))?/?$")
 

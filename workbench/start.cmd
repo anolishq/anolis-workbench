@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0\..\.."
+cd /d "%~dp0\.."
 echo Starting Anolis Workbench...
 where python >nul 2>&1
 if %ERRORLEVEL% equ 0 (

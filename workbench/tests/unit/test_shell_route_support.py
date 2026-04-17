@@ -1,4 +1,4 @@
-"""Route and shell contract tests for tools/workbench."""
+"""Route and shell contract tests for the extracted workbench."""
 
 from __future__ import annotations
 

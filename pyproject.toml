@@ -27,7 +27,24 @@ anolis_workbench_backend = "workbench/backend"
 anolis_composer_backend = "system-composer/backend"
 
 [tool.setuptools.package-data]
-anolis_workbench_backend = ["schemas/*.json"]
+anolis_workbench_backend = [
+    "schemas/*.json",
+    "frontend/*.html",
+    "frontend/css/*.css",
+    "frontend/js/*.js",
+    "frontend/js/composer/*.js",
+    "frontend/js/composer/forms/*.js",
+    "frontend/js/operate/*.js",
+]
+anolis_composer_backend = [
+    "frontend/*.html",
+    "frontend/css/*.css",
+    "frontend/js/*.js",
+    "frontend/js/forms/*.js",
+    "catalog/*.json",
+    "schema/*.json",
+    "templates/*/system.json",
+]
 
 # ---------------------------------------------------------------------------
 # Ruff

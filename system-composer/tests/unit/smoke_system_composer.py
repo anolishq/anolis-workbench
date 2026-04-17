@@ -1,14 +1,19 @@
-"""System Composer smoke test — run from the anolis repo root."""
+"""System Composer smoke test for the extracted anolis-workbench repo."""
 
 import json
+import os
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
+_ENV = dict(os.environ)
+_ENV["ANOLIS_COMPOSER_OPEN_BROWSER"] = "0"
+
 proc = subprocess.Popen(
-    [sys.executable, "tools/system-composer/backend/server.py"],
+    [sys.executable, "-m", "anolis_composer_backend.server"],
+    env=_ENV,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.PIPE,
 )

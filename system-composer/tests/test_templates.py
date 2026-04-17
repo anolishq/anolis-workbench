@@ -1,7 +1,7 @@
 """Render-and-validate tests for all bundled templates.
 
-Run with:  python -m pytest tools/system-composer/tests/
-Or standalone: python tools/system-composer/tests/test_templates.py
+Run with:  python -m pytest system-composer/tests/
+Or standalone: python system-composer/tests/test_templates.py
 """
 
 import copy

@@ -12,8 +12,10 @@ import warnings
 
 BACKEND_DIR = pathlib.Path(__file__).resolve().parent
 COMPOSER_DIR = BACKEND_DIR.parent
-TOOLS_DIR = COMPOSER_DIR.parent
-REPO_ROOT = TOOLS_DIR.parent
+REPO_ROOT = COMPOSER_DIR.parent
+
+_SOURCE_ASSET_ROOT = COMPOSER_DIR
+_PACKAGED_ASSET_ROOT = BACKEND_DIR
 
 _LEGACY_SYSTEMS_ROOT = REPO_ROOT / "systems"
 _DEFAULT_SYSTEMS_ROOT = pathlib.Path.home() / ".anolis" / "systems"
@@ -32,10 +34,31 @@ def _resolve_systems_root() -> pathlib.Path:
 
 SYSTEMS_ROOT = _resolve_systems_root()
 DATA_ROOT = SYSTEMS_ROOT.parent
-TEMPLATES_ROOT = COMPOSER_DIR / "templates"
-FRONTEND_DIR = COMPOSER_DIR / "frontend"
-CATALOG_PATH = COMPOSER_DIR / "catalog" / "providers.json"
-SYSTEM_SCHEMA_PATH = COMPOSER_DIR / "schema" / "system.schema.json"
+
+
+def _select_asset_path(source_path: pathlib.Path, packaged_path: pathlib.Path) -> pathlib.Path:
+    """Prefer source-tree assets in editable/dev mode, fallback to package data."""
+    if source_path.exists():
+        return source_path
+    return packaged_path
+
+
+TEMPLATES_ROOT = _select_asset_path(
+    _SOURCE_ASSET_ROOT / "templates",
+    _PACKAGED_ASSET_ROOT / "templates",
+)
+FRONTEND_DIR = _select_asset_path(
+    _SOURCE_ASSET_ROOT / "frontend",
+    _PACKAGED_ASSET_ROOT / "frontend",
+)
+CATALOG_PATH = _select_asset_path(
+    _SOURCE_ASSET_ROOT / "catalog" / "providers.json",
+    _PACKAGED_ASSET_ROOT / "catalog" / "providers.json",
+)
+SYSTEM_SCHEMA_PATH = _select_asset_path(
+    _SOURCE_ASSET_ROOT / "schema" / "system.schema.json",
+    _PACKAGED_ASSET_ROOT / "schema" / "system.schema.json",
+)
 
 
 def resolve_repo_path(path_value: str) -> pathlib.Path:
