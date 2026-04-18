@@ -135,10 +135,10 @@ def _pid_exists(pid: int) -> bool:
         import ctypes
 
         PROCESS_QUERY_INFORMATION = 0x0400
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)  # type: ignore[attr-defined]
         if handle == 0:
             return False
-        ctypes.windll.kernel32.CloseHandle(handle)
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
         return True
     # Unix
     try:

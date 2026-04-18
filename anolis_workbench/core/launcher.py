@@ -84,10 +84,10 @@ def _pid_exists(pid: int) -> bool:
         import ctypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)  # type: ignore[attr-defined]
         if handle == 0:
             return False
-        ctypes.windll.kernel32.CloseHandle(handle)
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
         return True
 
     try:
@@ -131,14 +131,14 @@ def _terminate_pid(pid: int, timeout_s: float = 5.0) -> None:
 
         PROCESS_TERMINATE = 0x0001
         SYNCHRONIZE = 0x00100000
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, False, pid)
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, False, pid)  # type: ignore[attr-defined]
         if handle == 0:
             return
         try:
-            ctypes.windll.kernel32.TerminateProcess(handle, 1)
-            ctypes.windll.kernel32.WaitForSingleObject(handle, int(timeout_s * 1000))
+            ctypes.windll.kernel32.TerminateProcess(handle, 1)  # type: ignore[attr-defined]
+            ctypes.windll.kernel32.WaitForSingleObject(handle, int(timeout_s * 1000))  # type: ignore[attr-defined]
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
         return
 
     try:
