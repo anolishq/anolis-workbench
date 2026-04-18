@@ -187,9 +187,12 @@ jobs:
       - name: Run smoke checks
         run: |
           set -euxo pipefail
-          /tmp/smoke-venv/bin/anolis-workbench --help
-          /tmp/smoke-venv/bin/anolis-package --help
-          /tmp/smoke-venv/bin/anolis-validate --help
+          # anolis-workbench starts a blocking server; use --version and --help to verify it
+          # exits cleanly. Use timeout as a safety net in case something blocks unexpectedly.
+          timeout 10 /tmp/smoke-venv/bin/anolis-workbench --version
+          timeout 10 /tmp/smoke-venv/bin/anolis-workbench --help
+          timeout 10 /tmp/smoke-venv/bin/anolis-package --help
+          timeout 10 /tmp/smoke-venv/bin/anolis-validate --help
           echo "Smoke test passed for anolis-workbench==${{ inputs.version }}"
 
   create-release:
