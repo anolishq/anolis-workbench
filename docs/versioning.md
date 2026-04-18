@@ -5,8 +5,20 @@ This document defines versioning for anolis-workbench.
 ## Scope
 
 - Distribution name: anolis-workbench
-- Version source of truth: pyproject.toml project.version
-- Release trigger input version must exactly match pyproject.toml
+- Version source of truth: `pyproject.toml` `project.version`
+- Release trigger input version must exactly match `pyproject.toml`
+
+Desktop wrapper alignment:
+
+- Tauri desktop wrapper (`desktop/src-tauri`) follows the same product semver as
+  the Python package release.
+- Desktop installer artifacts are published under the same Git tag (`v<version>`)
+  as Python package releases.
+- Desktop release validation enforces cross-file version lockstep across:
+  - `pyproject.toml`
+  - `desktop/package.json`
+  - `desktop/src-tauri/Cargo.toml`
+  - `desktop/src-tauri/tauri.conf.json`
 
 ## Scheme
 
@@ -32,14 +44,19 @@ Changes to those contracts must follow contract governance and drift checks.
 A release is accepted only when all of the following are true:
 
 1. Requested version is valid semver
-2. Requested version equals pyproject.toml project.version
-3. Target tag (v<version>) does not already exist
+2. Requested version equals `pyproject.toml` `project.version`
+3. Target tag (`v<version>`) does not already exist
 4. Reusable CI gate passes
 5. Build artifacts are created successfully
 6. PyPI publish succeeds (OIDC trusted publishing)
 7. Clean-install smoke checks pass
 
 GitHub release creation occurs only after publish and smoke checks pass.
+
+Desktop release rule:
+
+- Native desktop bundles and SBOM artifacts are attached to the same release tag
+  through `desktop-release.yml`.
 
 ## Pre-release
 

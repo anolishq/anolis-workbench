@@ -212,3 +212,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Tauri desktop
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

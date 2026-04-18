@@ -48,6 +48,27 @@ anolis-validate <package.anpkg>
 python contracts/validate-handoff-packages.py <package.anpkg>
 ```
 
+## Desktop Wrapper (Phase 16)
+
+A native Tauri wrapper now lives under `desktop/`.
+
+Runtime model:
+
+1. Tauri launches a frozen Python sidecar.
+2. Sidecar serves Workbench at `http://127.0.0.1:3010`.
+3. WebView consumes the same localhost HTTP/SSE surface as browser mode.
+
+Important system requirement:
+
+- Port `3010` is reserved by the desktop wrapper. If another process is bound to
+  that port, desktop startup fails with a native error dialog.
+
+Desktop workflows/docs:
+
+1. Desktop release workflow: `.github/workflows/desktop-release.yml`
+2. Desktop wrapper source: `desktop/src-tauri/`
+3. Desktop handoff guide: `docs/release-desktop-handoff.md`
+
 ## Repository Contracts
 
 1. Runtime HTTP snapshot: `contracts/runtime-http.openapi.v0.yaml`
@@ -56,9 +77,9 @@ python contracts/validate-handoff-packages.py <package.anpkg>
 4. Runtime config schema: `anolis_workbench/schemas/runtime-config.schema.json`
 5. Machine profile schema: `anolis_workbench/schemas/machine-profile.schema.json`
 
-
 ## Handoff Docs
 
 1. Commissioning handoff runbook: `docs/commissioning-handoff-runbook.md`
 2. Handoff package v1 format: `docs/contracts/handoff-package-v1.md`
 3. PyPI/OIDC release handoff: `docs/release-pypi-handoff.md`
+4. Desktop release handoff: `docs/release-desktop-handoff.md`

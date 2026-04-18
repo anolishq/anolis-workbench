@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Anolis Workbench",
+  "version": "0.1.3",
+  "identifier": "org.feastorg.anolis-workbench",
+  "build": {
+    "beforeBuildCommand": "",
+    "beforeDevCommand": "",
+    "frontendDist": "../../anolis_workbench/frontend/dist",
+    "devUrl": "http://127.0.0.1:3010"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Anolis Workbench",
+        "url": "http://127.0.0.1:3010",
+        "width": 1440,
+        "height": 920,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "appimage", "deb"],
+    "externalBin": ["binaries/anolis-workbench-sidecar"]
+  },
+  "plugins": {
+    "shell": {
+      "scope": [
+        {
+          "name": "anolis-workbench-sidecar",
+          "sidecar": true
+        }
+      ]
+    }
+  }
+}
