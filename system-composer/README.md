@@ -26,7 +26,7 @@ Optional environment overrides:
 2. `ANOLIS_COMPOSER_PORT` (default: `3002`)
 3. `ANOLIS_OPERATOR_UI_BASE` (default: `http://localhost:3000`)
 4. `ANOLIS_COMPOSER_OPEN_BROWSER` (`1` or `0`, default: `1`)
-5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`; legacy fallback: repo `systems/` when present)
+5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`)
 
 ## Save and Validation Semantics
 
@@ -42,5 +42,6 @@ Save is backend-authoritative.
 
 1. Runtime config schema: `schemas/runtime-config.schema.json`
 2. Runtime HTTP OpenAPI snapshot: `contracts/runtime-http.openapi.v0.yaml`
-3. System schema: `system-composer/schema/system.schema.json`
-4. Provider catalog: `system-composer/catalog/providers.json`
+3. Composer control OpenAPI: `contracts/composer-control.openapi.v1.yaml`
+4. System schema: `system-composer/schema/system.schema.json`
+5. Provider catalog: `system-composer/catalog/providers.json`

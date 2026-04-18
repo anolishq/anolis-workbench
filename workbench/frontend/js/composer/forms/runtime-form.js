@@ -159,7 +159,7 @@ export function renderRuntimeForm(container, system, onChanged) {
   _text('Behavior tree path',
     () => rt.behavior_tree_path ?? '',
     v  => { rt.behavior_tree_path = v.trim() || null; },
-    { mono: true, placeholder: 'systems/<name>/behaviors/main.xml', note: 'Optional. Composer stores behavior_tree_path here and renders runtime YAML with automation.behavior_tree.' }
+    { mono: true, placeholder: 'behaviors/main.xml', note: 'Optional. Relative paths resolve from the project directory.' }
   );
   _text('Runtime executable path',
     () => paths.runtime_executable,

@@ -177,10 +177,10 @@ def test_renderer_tolerates_missing_provider_path_entries():
 def test_behavior_tree_path_renders_canonical_runtime_key():
     """When behavior_tree_path is set, runtime YAML uses automation.behavior_tree."""
     system = load_template("bioreactor-manual")
-    system["topology"]["runtime"]["behavior_tree_path"] = "systems/my-bioreactor/behaviors/main.xml"
+    system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/main.xml"
     rt_doc = yaml.safe_load(renderer.render(system, "my-bioreactor")["anolis-runtime.yaml"])
     assert rt_doc["automation"]["enabled"] is True
-    assert rt_doc["automation"]["behavior_tree"] == "systems/my-bioreactor/behaviors/main.xml"
+    assert rt_doc["automation"]["behavior_tree"] == "behaviors/main.xml"
     assert "behavior_tree_path" not in rt_doc["automation"]
 
 

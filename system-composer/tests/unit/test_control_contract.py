@@ -19,8 +19,6 @@ import pytest
 
 _SC_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 _SERVER_SCRIPT = _SC_DIR / "backend" / "server.py"
-_REPO_ROOT = _SC_DIR.parent.parent
-_SYSTEMS_ROOT = _REPO_ROOT / "systems"
 
 
 def _pick_free_port() -> int:

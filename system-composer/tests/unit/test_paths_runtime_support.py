@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import pathlib
-import warnings
 
 
 def _reload_paths_module():
@@ -23,44 +22,43 @@ def test_systems_root_uses_anolis_data_dir_override(monkeypatch, tmp_path: pathl
     assert paths_module.DATA_ROOT == override.resolve().parent
 
 
-def test_resolve_repo_path_prefers_data_root(monkeypatch, tmp_path: pathlib.Path) -> None:
+def test_resolve_data_path_prefers_data_root(monkeypatch, tmp_path: pathlib.Path) -> None:
     systems_root = tmp_path / "systems"
     data_root = systems_root.parent
     runtime_rel = pathlib.Path("bin") / "anolis-runtime"
     preferred_runtime = data_root / runtime_rel
-    legacy_runtime = tmp_path / "legacy-repo" / runtime_rel
 
     preferred_runtime.parent.mkdir(parents=True, exist_ok=True)
     preferred_runtime.write_text("runtime", encoding="utf-8")
-    legacy_runtime.parent.mkdir(parents=True, exist_ok=True)
-    legacy_runtime.write_text("legacy-runtime", encoding="utf-8")
 
     monkeypatch.setenv("ANOLIS_DATA_DIR", str(systems_root))
     paths_module = _reload_paths_module()
-    monkeypatch.setattr(paths_module, "REPO_ROOT", (tmp_path / "legacy-repo").resolve())
-    monkeypatch.setattr(paths_module, "_LEGACY_PATH_WARNING_EMITTED", False)
 
-    resolved = paths_module.resolve_repo_path(str(runtime_rel))
+    resolved = paths_module.resolve_data_path(str(runtime_rel))
     assert resolved == preferred_runtime.resolve()
 
 
-def test_resolve_repo_path_falls_back_to_legacy_with_warning(monkeypatch, tmp_path: pathlib.Path) -> None:
+def test_resolve_data_path_uses_systems_root_when_present(monkeypatch, tmp_path: pathlib.Path) -> None:
     systems_root = tmp_path / "systems"
-    runtime_rel = pathlib.Path("build") / "dev-release" / "core" / "anolis-runtime"
-    legacy_repo = tmp_path / "legacy-repo"
-    legacy_runtime = legacy_repo / runtime_rel
+    runtime_rel = pathlib.Path("providers") / "anolis-provider-sim"
+    systems_runtime = systems_root / runtime_rel
 
-    legacy_runtime.parent.mkdir(parents=True, exist_ok=True)
-    legacy_runtime.write_text("legacy-runtime", encoding="utf-8")
+    systems_runtime.parent.mkdir(parents=True, exist_ok=True)
+    systems_runtime.write_text("runtime", encoding="utf-8")
 
     monkeypatch.setenv("ANOLIS_DATA_DIR", str(systems_root))
     paths_module = _reload_paths_module()
-    monkeypatch.setattr(paths_module, "REPO_ROOT", legacy_repo.resolve())
-    monkeypatch.setattr(paths_module, "_LEGACY_PATH_WARNING_EMITTED", False)
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        resolved = paths_module.resolve_repo_path(str(runtime_rel))
+    resolved = paths_module.resolve_data_path(str(runtime_rel))
+    assert resolved == systems_runtime.resolve()
 
-    assert resolved == legacy_runtime.resolve()
-    assert any("legacy repo root" in str(item.message).lower() for item in caught)
+
+def test_resolve_data_path_returns_data_root_candidate_when_missing(monkeypatch, tmp_path: pathlib.Path) -> None:
+    systems_root = tmp_path / "systems"
+    runtime_rel = pathlib.Path("build") / "dev-release" / "core" / "anolis-runtime"
+
+    monkeypatch.setenv("ANOLIS_DATA_DIR", str(systems_root))
+    paths_module = _reload_paths_module()
+
+    resolved = paths_module.resolve_data_path(str(runtime_rel))
+    assert resolved == (systems_root.parent / runtime_rel).resolve()

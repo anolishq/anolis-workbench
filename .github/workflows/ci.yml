@@ -87,6 +87,9 @@ jobs:
         run: |
           pytest workbench/tests/unit/ system-composer/tests/unit/ -v --tb=short
 
+      - name: Validate composer-control OpenAPI
+        run: python contracts/validate-composer-control-openapi.py
+
   contract-drift:
     name: Contract drift check
     runs-on: ubuntu-24.04

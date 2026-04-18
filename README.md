@@ -47,5 +47,13 @@ python contracts/validate-handoff-packages.py <package.anpkg>
 ## Repository Contracts
 
 1. Runtime HTTP snapshot: `contracts/runtime-http.openapi.v0.yaml`
-2. Runtime config schema: `schemas/runtime-config.schema.json`
-3. Machine profile schema: `schemas/machine-profile.schema.json`
+2. Composer control OpenAPI: `contracts/composer-control.openapi.v1.yaml`
+3. Handoff/composer baselines: `docs/contracts/*.md`
+4. Runtime config schema: `schemas/runtime-config.schema.json`
+5. Machine profile schema: `schemas/machine-profile.schema.json`
+
+
+## Handoff Docs
+
+1. Commissioning handoff runbook: `docs/commissioning-handoff-runbook.md`
+2. Handoff package v1 format: `docs/contracts/handoff-package-v1.md`

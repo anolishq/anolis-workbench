@@ -50,7 +50,7 @@ def running_json_path(name: str) -> pathlib.Path:
 def _resolve_executable_path(path_value: str | None) -> pathlib.Path | None:
     if not path_value:
         return None
-    return paths_module.resolve_repo_path(path_value)
+    return paths_module.resolve_data_path(path_value)
 
 
 # ---------------------------------------------------------------------------

@@ -195,18 +195,15 @@ def _resolve_behavior_path(raw: str, project_dir: pathlib.Path) -> pathlib.Path:
     if raw_path.is_absolute():
         raise ExportError("automation.behavior_tree must be a relative path")
 
-    repo_root = paths_module.REPO_ROOT.resolve()
     data_root = paths_module.DATA_ROOT.resolve()
     candidates = [
         (project_dir / raw_path).resolve(),
         (data_root / raw_path).resolve(),
-        (repo_root / raw_path).resolve(),
     ]
     for candidate in candidates:
         if candidate.is_file() and (
             _is_within(candidate, project_dir)
             or _is_within(candidate, data_root)
-            or _is_within(candidate, repo_root)
         ):
             return candidate
     raise ExportError(f"Behavior tree file not found for automation.behavior_tree='{raw}'")

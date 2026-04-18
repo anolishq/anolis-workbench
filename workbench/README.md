@@ -22,7 +22,7 @@ Double-click `workbench/start.cmd`.
 2. `ANOLIS_WORKBENCH_PORT` (default: `3010`)
 3. `ANOLIS_WORKBENCH_OPEN_BROWSER` (`1` or `0`, default: `1`)
 4. `ANOLIS_OPERATOR_UI_BASE` (default: `http://localhost:3000`)
-5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`; legacy fallback: repo `systems/` when present)
+5. `ANOLIS_DATA_DIR` (project storage root, default: `~/.anolis/systems`)
 
 ## Route Model
 
