@@ -7,7 +7,12 @@ import argparse
 import pathlib
 import sys
 
-from anolis_workbench_backend import package_validator
+# Allow running this script directly from contracts/ without requiring installation.
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from anolis_workbench.core import package_validator
 
 
 def _parse_args() -> argparse.Namespace:

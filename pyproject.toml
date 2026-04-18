@@ -16,34 +16,25 @@ dependencies = [
 ]
 
 [project.scripts]
-anolis-workbench = "anolis_workbench_backend.server:main"
-anolis-package = "anolis_workbench_backend.package_cli:main"
+anolis-workbench = "anolis_workbench.cli.main:main"
+anolis-package = "anolis_workbench.cli.package_cli:main"
 
-[tool.setuptools]
-packages = ["anolis_workbench_backend", "anolis_composer_backend"]
-
-[tool.setuptools.package-dir]
-anolis_workbench_backend = "workbench/backend"
-anolis_composer_backend = "system-composer/backend"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["anolis_workbench*"]
 
 [tool.setuptools.package-data]
-anolis_workbench_backend = [
+anolis_workbench = [
+    "catalog/*.json",
+    "schema/*.json",
     "schemas/*.json",
+    "templates/*/system.json",
     "frontend/*.html",
     "frontend/css/*.css",
     "frontend/js/*.js",
     "frontend/js/composer/*.js",
     "frontend/js/composer/forms/*.js",
     "frontend/js/operate/*.js",
-]
-anolis_composer_backend = [
-    "frontend/*.html",
-    "frontend/css/*.css",
-    "frontend/js/*.js",
-    "frontend/js/forms/*.js",
-    "catalog/*.json",
-    "schema/*.json",
-    "templates/*/system.json",
 ]
 
 # ---------------------------------------------------------------------------
@@ -68,8 +59,7 @@ line-ending = "auto"
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = [
-    "workbench/tests",
-    "system-composer/tests",
+    "tests",
 ]
 addopts = "--strict-markers -ra"
 markers = [

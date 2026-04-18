@@ -1,11 +1,12 @@
 # anolis-workbench
 
-Extracted commissioning shell repository for Anolis.
+Commissioning shell repository for Anolis.
 
-This repo ships both backends as one distribution:
+Phase 13 structure:
 
-1. `anolis_workbench_backend` (Compose/Commission/Operate shell + handoff export)
-2. `anolis_composer_backend` (project CRUD, render, preflight, launch)
+1. `anolis_workbench/core` — pure domain library (projects, renderer, launcher, exporter, validators, paths)
+2. `anolis_workbench/server` — unified HTTP server (Compose + Commission + Operate `/v0/*` proxy)
+3. `anolis_workbench/cli` — CLI entry points (`anolis-workbench`, `anolis-package`)
 
 ## Install
 
@@ -16,19 +17,19 @@ python -m pip install -e .
 
 ## Run
 
-Workbench:
-
 ```sh
-./workbench/start.sh
+./start.sh
 ```
 
-System Composer:
+Or run via module/entry point:
 
 ```sh
-./system-composer/start.sh
+python -m anolis_workbench.server.app
+# or
+anolis-workbench
 ```
 
-Windows launchers are `workbench/start.cmd` and `system-composer/start.cmd`.
+Windows launcher: `start.cmd`.
 
 ## CLI
 
@@ -47,10 +48,10 @@ python contracts/validate-handoff-packages.py <package.anpkg>
 ## Repository Contracts
 
 1. Runtime HTTP snapshot: `contracts/runtime-http.openapi.v0.yaml`
-2. Composer control OpenAPI: `contracts/composer-control.openapi.v1.yaml`
+2. Workbench API OpenAPI: `contracts/workbench-api.openapi.v1.yaml`
 3. Handoff/composer baselines: `docs/contracts/*.md`
-4. Runtime config schema: `schemas/runtime-config.schema.json`
-5. Machine profile schema: `schemas/machine-profile.schema.json`
+4. Runtime config schema: `anolis_workbench/schemas/runtime-config.schema.json`
+5. Machine profile schema: `anolis_workbench/schemas/machine-profile.schema.json`
 
 
 ## Handoff Docs

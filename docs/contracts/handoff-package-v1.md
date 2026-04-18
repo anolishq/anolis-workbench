@@ -34,7 +34,7 @@ Path rewrite contract at export:
 ## Determinism Lock
 
 For identical project input state, exported bytes are identical across wrappers
-(Workbench HTTP export and `workbench/backend/package_cli.py` CLI):
+(Workbench HTTP export and `anolis_workbench/cli/package_cli.py` CLI):
 
 1. Stable file ordering in archive.
 2. Stable zip metadata.
@@ -78,7 +78,7 @@ Validation includes:
 
 ## Related Artifacts
 
-1. `workbench/backend/exporter.py`
-2. `workbench/backend/package_validator.py`
-3. `workbench/backend/package_cli.py`
+1. `anolis_workbench/core/exporter.py`
+2. `anolis_workbench/core/package_validator.py`
+3. `anolis_workbench/cli/package_cli.py`
 4. `docs/contracts/handoff-package-baseline.md`

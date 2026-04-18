@@ -4,16 +4,16 @@ Status: Locked.
 
 ## Purpose
 
-Freeze System Composer control API behavior used by commissioning flows so UI and tooling integrations remain stable.
+Freeze Workbench control API behavior used by commissioning flows so UI and tooling integrations remain stable.
 
 ## Canonical Artifacts
 
-1. Backend implementation: `system-composer/backend/server.py`
+1. Backend implementation: `anolis_workbench/server/app.py`
 2. OpenAPI contract: `contracts/composer-control.openapi.v1.yaml`
 3. OpenAPI validator: `contracts/validate-composer-control-openapi.py`
-4. Contract tests: `system-composer/tests/unit/test_control_contract.py`
+4. Contract tests: `tests/unit/test_control_contract.py`
 5. Tooling docs:
-   - `system-composer/README.md`
+   - `README.md`
    - `contracts/runtime-http.openapi.v0.yaml` (contract workflow context)
 
 ## Locked Behavior Summary
@@ -40,17 +40,17 @@ Freeze System Composer control API behavior used by commissioning flows so UI an
 
 ### Runtime/Path Decoupling
 
-1. Composer path resolution is repo-anchored (`system-composer/backend/paths.py`), not caller-CWD dependent.
+1. Composer path resolution is repo-anchored (`anolis_workbench/core/paths.py`), not caller-CWD dependent.
 2. Control-plane environment knobs remain:
-   - `ANOLIS_COMPOSER_HOST`
-   - `ANOLIS_COMPOSER_PORT`
+   - `ANOLIS_WORKBENCH_HOST`
+   - `ANOLIS_WORKBENCH_PORT`
    - `ANOLIS_OPERATOR_UI_BASE`
-   - `ANOLIS_COMPOSER_OPEN_BROWSER`
+   - `ANOLIS_WORKBENCH_OPEN_BROWSER`
 
 ## Validation Gates
 
 1. `python3 contracts/validate-composer-control-openapi.py`
-2. `python3 -m pytest system-composer/tests -q`
+2. `python3 -m pytest tests -q`
 
 ## Drift Notes and Change Rule
 

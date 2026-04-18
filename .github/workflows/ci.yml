@@ -62,7 +62,7 @@ jobs:
           pip install -e .
 
       - name: Run mypy
-        run: mypy workbench/backend system-composer/backend
+        run: mypy anolis_workbench tests
 
   test:
     name: Unit tests
@@ -85,7 +85,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest workbench/tests/unit/ system-composer/tests/unit/ -v --tb=short
+          pytest tests/ -v --tb=short
 
       - name: Validate composer-control OpenAPI
         run: python contracts/validate-composer-control-openapi.py
@@ -113,11 +113,11 @@ jobs:
 
       - name: Compare bundled schemas
         run: |
-          diff workbench/backend/schemas/machine-profile.schema.json \
+          diff anolis_workbench/schemas/machine-profile.schema.json \
                anolis-upstream/schemas/machine-profile.schema.json || \
             (echo "machine-profile schema drift detected" && exit 1)
 
-          diff workbench/backend/schemas/runtime-config.schema.json \
+          diff anolis_workbench/schemas/runtime-config.schema.json \
                anolis-upstream/schemas/runtime-config.schema.json || \
             (echo "runtime-config schema drift detected" && exit 1)
 

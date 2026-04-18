@@ -9,15 +9,15 @@ validation remain explicit and test-backed.
 
 ## Canonical Artifacts
 
-1. Export core: `workbench/backend/exporter.py`
-2. Package validator: `workbench/backend/package_validator.py`
+1. Export core: `anolis_workbench/core/exporter.py`
+2. Package validator: `anolis_workbench/core/package_validator.py`
 3. Validation command: `contracts/validate-handoff-packages.py`
-4. CLI wrapper: `workbench/backend/package_cli.py`
+4. CLI wrapper: `anolis_workbench/cli/package_cli.py`
 5. Workbench HTTP export route: `POST /api/projects/{name}/export`
 6. Unit/route tests:
-   - `workbench/tests/unit/test_exporter.py`
-   - `workbench/tests/unit/test_package_validator.py`
-   - `workbench/tests/unit/test_shell_route_support.py`
+   - `tests/unit/test_exporter.py`
+   - `tests/unit/test_package_validator.py`
+   - `tests/unit/test_shell_route_support.py`
 
 ## Locked Behavior Summary
 
@@ -46,7 +46,7 @@ validation remain explicit and test-backed.
 
 1. `python3 contracts/validate-handoff-packages.py`
 2. `python3 contracts/validate-handoff-packages.py --runtime-bin <runtime-binary>` (optional replay hardening)
-3. `python3 -m pytest workbench/tests -q`
+3. `python3 -m pytest tests -q`
 
 ## Drift Notes and Change Rule
 

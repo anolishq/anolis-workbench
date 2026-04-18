@@ -29,14 +29,14 @@ anolis-package <project-name> [output.anpkg]
 Static package validation:
 
 ```bash
-python3 contracts/validate-handoff-packages.py --package <path-to-package.anpkg>
+python3 contracts/validate-handoff-packages.py <path-to-package.anpkg>
 ```
 
 Replay hardening with runtime binary:
 
 ```bash
 python3 contracts/validate-handoff-packages.py \
-  --package <path-to-package.anpkg> \
+  <path-to-package.anpkg> \
   --runtime-bin <path-to-anolis-runtime>
 ```
 
