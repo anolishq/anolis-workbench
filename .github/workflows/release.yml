@@ -41,12 +41,12 @@ jobs:
           fi
 
           PYPROJECT_VERSION=$(python - <<'PY'
-import pathlib, tomllib
-pyproject = pathlib.Path("pyproject.toml")
-data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-print(data["project"]["version"])
-PY
-)
+            import pathlib, tomllib
+            pyproject = pathlib.Path("pyproject.toml")
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            print(data["project"]["version"])
+            PY
+            )
 
           if [[ "$VERSION" != "$PYPROJECT_VERSION" ]]; then
             echo "Version mismatch: input=$VERSION pyproject=$PYPROJECT_VERSION"
