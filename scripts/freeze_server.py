@@ -95,8 +95,7 @@ def _require_frontend_bundle() -> None:
     if DEFAULT_FRONTEND_INDEX.is_file():
         return
     raise SystemExit(
-        "Missing frontend bundle at "
-        f"{DEFAULT_FRONTEND_INDEX}. Run `npm run build` in frontend/ before freezing."
+        f"Missing frontend bundle at {DEFAULT_FRONTEND_INDEX}. Run `npm run build` in frontend/ before freezing."
     )
 
 
@@ -168,9 +167,7 @@ def main() -> int:
 
     size_bytes = executable.stat().st_size
     if size_bytes < args.min_size_bytes:
-        raise SystemExit(
-            f"Frozen executable is too small ({size_bytes} bytes < {args.min_size_bytes} bytes)."
-        )
+        raise SystemExit(f"Frozen executable is too small ({size_bytes} bytes < {args.min_size_bytes} bytes).")
 
     if not args.skip_smoke:
         _run_smoke_checks(executable, timeout_seconds=args.smoke_timeout_seconds)
