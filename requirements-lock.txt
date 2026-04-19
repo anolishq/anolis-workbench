@@ -1,4 +1,4 @@
-﻿attrs==25.3.0
+attrs==25.3.0
 certifi==2026.1.4
 charset-normalizer==3.4.4
 colorama==0.4.6
@@ -15,7 +15,7 @@ pluggy==1.6.0
 protobuf==5.29.6
 psutil==6.1.1
 Pygments==2.19.2
-pytest==8.4.2
+pytest==9.0.3
 pytest-timeout==2.4.0
 PyYAML==6.0.3
 requests==2.32.5
