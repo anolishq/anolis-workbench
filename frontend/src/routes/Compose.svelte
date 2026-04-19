@@ -1,9 +1,24 @@
-<script>
-  import RuntimeForm from '../lib/RuntimeForm.svelte';
-  import ProviderList from '../lib/ProviderList.svelte';
+<script lang="ts">
+  import RuntimeForm from "../lib/RuntimeForm.svelte";
+  import ProviderList from "../lib/ProviderList.svelte";
 
-  let { projectName, system, catalog, runtimeStatus, onDirty, onSaved, onSystemChanged } =
-    $props();
+  let {
+    projectName,
+    system,
+    catalog,
+    runtimeStatus,
+    onDirty,
+    onSaved,
+    onSystemChanged,
+  }: {
+    projectName: string | null;
+    system: Record<string, any> | null;
+    catalog: Record<string, any> | null;
+    runtimeStatus: Record<string, any>;
+    onDirty: () => void;
+    onSaved: () => void;
+    onSystemChanged: (next: Record<string, any> | null) => void;
+  } = $props();
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -11,9 +26,9 @@
   );
   const showAdvisory = $derived(running && runningProject === projectName);
 
-  let saving = $state(false);
-  let saveError = $state('');
-  let saveErrors = $state([]);
+  let saving = $state<boolean>(false);
+  let saveError = $state<string>("");
+  let saveErrors = $state<Array<{ path?: string; message?: string }>>([]);
 
   function markDirty() { onDirty(); }
 

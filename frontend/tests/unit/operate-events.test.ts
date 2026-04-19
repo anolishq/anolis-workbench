@@ -6,7 +6,7 @@ import {
   buildTraceEvent,
   createOperateEventStreamManager,
   describeEvent,
-} from "../../src/lib/operate-events.js";
+} from "../../src/lib/operate-events";
 
 type Listener = (event: { data: string }) => void;
 
@@ -234,4 +234,3 @@ describe("createOperateEventStreamManager", () => {
     manager.disconnect();
   });
 });
-

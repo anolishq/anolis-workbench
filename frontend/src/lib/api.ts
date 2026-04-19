@@ -2,14 +2,13 @@
  * Shared JSON fetch helper. Throws on non-2xx responses with the error message
  * from the response body when available.
  *
- * @param {string} path
- * @param {RequestInit} [options]
- * @returns {Promise<any>}
+ * @param path Request path
+ * @param options Fetch options
  */
-export async function fetchJson(path, options = {}) {
+export async function fetchJson<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, options);
   const text = await response.text();
-  let data = {};
+  let data: any = {};
   if (text) {
     try {
       data = JSON.parse(text);
@@ -22,16 +21,16 @@ export async function fetchJson(path, options = {}) {
     const message = data?.error ?? `HTTP ${response.status}`;
     throw new Error(message);
   }
-  return data;
+  return data as T;
 }
 
 /**
  * Download a Blob as a file attachment.
  *
- * @param {Blob} blob
- * @param {string} filename
+ * @param blob Blob payload
+ * @param filename Download name
  */
-export function downloadBlob(blob, filename) {
+export function downloadBlob(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
@@ -45,11 +44,10 @@ export function downloadBlob(blob, filename) {
 /**
  * Parse a Content-Disposition header value to extract a filename.
  *
- * @param {string | null} headerValue
- * @param {string} fallback
- * @returns {string}
+ * @param headerValue Content-Disposition header value
+ * @param fallback Fallback filename
  */
-export function filenameFromContentDisposition(headerValue, fallback) {
+export function filenameFromContentDisposition(headerValue: string | null, fallback: string): string {
   if (typeof headerValue !== 'string' || headerValue.trim() === '') return fallback;
 
   const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);

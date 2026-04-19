@@ -1,18 +1,21 @@
 /**
  * Evaluate which navigation confirmation prompts to show before a route transition.
- * Ported from the vanilla shell-guards.js module.
+ * Ported from the legacy shell guards module.
  *
- * @param {{
- *   dirty: boolean,
- *   currentProject: string | null,
- *   currentWorkspace: string | null,
- *   nextProject: string | null,
- *   nextWorkspace: string,
- *   runtimeRunning: boolean,
- *   runningProject: string,
- * }} opts
- * @returns {{ id: string, message: string }[]}
+ * @param opts Navigation context
  */
+type NavigationPrompt = { id: string; message: string };
+
+type EvaluateNavigationPromptsOptions = {
+  dirty: boolean;
+  currentProject: string | null;
+  currentWorkspace: string | null;
+  nextProject: string | null;
+  nextWorkspace: string;
+  runtimeRunning: boolean;
+  runningProject: string;
+};
+
 export function evaluateNavigationPrompts({
   dirty,
   currentProject,
@@ -21,8 +24,8 @@ export function evaluateNavigationPrompts({
   nextWorkspace,
   runtimeRunning,
   runningProject,
-}) {
-  const prompts = [];
+}: EvaluateNavigationPromptsOptions): NavigationPrompt[] {
+  const prompts: NavigationPrompt[] = [];
 
   const hasCurrentProject = typeof currentProject === 'string' && currentProject !== '';
   const hasNextProject = typeof nextProject === 'string' && nextProject !== '';
@@ -68,14 +71,19 @@ export function evaluateNavigationPrompts({
  * Returns a banner message when the active project differs from the running project,
  * or an empty string when no banner is needed.
  *
- * @param {{
- *   activeProject: string | null,
- *   runtimeRunning: boolean,
- *   runningProject: string | null,
- * }} opts
- * @returns {string}
+ * @param opts Banner context
  */
-export function describeCrossProjectRunningBanner({ activeProject, runtimeRunning, runningProject }) {
+type DescribeCrossProjectRunningBannerOptions = {
+  activeProject: string | null;
+  runtimeRunning: boolean;
+  runningProject: string | null;
+};
+
+export function describeCrossProjectRunningBanner({
+  activeProject,
+  runtimeRunning,
+  runningProject,
+}: DescribeCrossProjectRunningBannerOptions): string {
   if (
     typeof activeProject === 'string' &&
     activeProject !== '' &&

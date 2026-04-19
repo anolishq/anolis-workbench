@@ -5,14 +5,16 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals", "svelte"]
   },
   "include": [
-    "src/**/*.js",
+    "src/**/*.d.ts",
     "src/**/*.ts",
     "src/**/*.svelte",
     "tests/**/*.ts",
@@ -20,4 +22,3 @@
     "vitest.config.ts"
   ]
 }
-

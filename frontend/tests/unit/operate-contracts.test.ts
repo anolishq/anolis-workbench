@@ -18,7 +18,7 @@ import {
   normalizeParameterType,
   normalizeProviderHealthQuality,
   renderBtOutline,
-} from "../../src/lib/operate-contracts.js";
+} from "../../src/lib/operate-contracts";
 
 type FakeTreeNode = {
   tagName: string;

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * ProviderList.svelte — provider list with add/remove/kind-switch.
    * Mutates system.topology.runtime.providers, system.topology.providers, system.paths.providers.
@@ -139,7 +139,7 @@
         <div class="provider-row-header">
           <input type="text" class="provider-id-input" spellcheck="false"
             title="Provider ID" value={id}
-            onblur={(e) => {
+            onblur={(e: any) => {
               const newId = e.target.value.trim();
               if (!newId || newId === id) { e.target.value = id; return; }
               if (providers.some(p => p.id === newId)) {
@@ -155,7 +155,7 @@
           <select class="provider-kind-select"
             value={prov.kind}
             disabled={!isSupported}
-            onchange={(e) => changeKind(prov, e.target.value)}>
+            onchange={(e: any) => changeKind(prov, e.target.value)}>
             {#if !isSupported}
               <option value={prov.kind}>Unsupported ({prov.kind})</option>
             {/if}
@@ -180,7 +180,7 @@
           {#each [['timeout_ms','timeout'],['hello_timeout_ms','hello'],['ready_timeout_ms','ready']] as [key, display]}
             <label class="inline-label">
               <input type="number" min="100" max="120000" value={prov[key] ?? ''}
-                onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { prov[key] = n; onChanged(); } }} />
+                onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { prov[key] = n; onChanged(); } }} />
               {' '}ms ({display})
             </label>
           {/each}
@@ -190,7 +190,7 @@
         <div class="provider-restart">
           <label>
             <input type="checkbox" checked={prov.restart_policy?.enabled ?? false}
-              onchange={(e) => {
+              onchange={(e: any) => {
                 prov.restart_policy = prov.restart_policy ?? {};
                 prov.restart_policy.enabled = e.target.checked;
                 if (e.target.checked) {
@@ -207,23 +207,23 @@
             <div class="restart-fields">
               <label class="inline-label">
                 <input type="number" min="0" value={prov.restart_policy.max_attempts ?? 3}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { prov.restart_policy.max_attempts = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { prov.restart_policy.max_attempts = n; onChanged(); } }} />
                 {' '}max attempts
               </label>
               <label class="inline-label">
                 <input type="text" spellcheck="false" style="font-family:monospace"
                   placeholder="200, 500, 1000" value={formatBackoff(prov.restart_policy.backoff_ms)}
-                  onchange={(e) => { prov.restart_policy.backoff_ms = parseBackoff(e.target.value); onChanged(); }} />
+                  onchange={(e: any) => { prov.restart_policy.backoff_ms = parseBackoff(e.target.value); onChanged(); }} />
                 {' '}backoff ms
               </label>
               <label class="inline-label">
                 <input type="number" min="0" value={prov.restart_policy.timeout_ms ?? 30000}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { prov.restart_policy.timeout_ms = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { prov.restart_policy.timeout_ms = n; onChanged(); } }} />
                 {' '}timeout (ms)
               </label>
               <label class="inline-label">
                 <input type="number" min="0" value={prov.restart_policy.success_reset_ms ?? ''}
-                  onchange={(e) => {
+                  onchange={(e: any) => {
                     const v = e.target.value.trim();
                     if (v === '') { delete prov.restart_policy.success_reset_ms; }
                     else { const n = Number(v); if (!isNaN(n)) prov.restart_policy.success_reset_ms = n; }
@@ -240,7 +240,7 @@
           <label>Executable path</label>
           <input type="text" spellcheck="false" style="font-family:monospace"
             value={provPaths.executable ?? ''}
-            oninput={(e) => {
+            oninput={(e: any) => {
               system.paths.providers = system.paths.providers ?? {};
               system.paths.providers[id] = system.paths.providers[id] ?? {};
               system.paths.providers[id].executable = e.target.value;
@@ -255,7 +255,7 @@
             <input type="text" spellcheck="false" style="font-family:monospace"
               placeholder="/dev/i2c-1 or mock://name"
               value={provPaths.bus_path ?? ''}
-              oninput={(e) => {
+              oninput={(e: any) => {
                 system.paths.providers = system.paths.providers ?? {};
                 system.paths.providers[id] = system.paths.providers[id] ?? {};
                 system.paths.providers[id].bus_path = e.target.value;
@@ -277,7 +277,7 @@
               <div class="form-group">
                 <label>Startup policy</label>
                 <select value={cfg.startup_policy ?? 'degraded'}
-                  onchange={(e) => { cfg.startup_policy = e.target.value; onChanged(); }}>
+                  onchange={(e: any) => { cfg.startup_policy = e.target.value; onChanged(); }}>
                   <option value="strict">strict</option>
                   <option value="degraded">degraded</option>
                 </select>
@@ -290,7 +290,7 @@
                 <div class="form-group">
                   <label>Simulation mode</label>
                   <select value={cfg.simulation_mode ?? 'non_interacting'}
-                    onchange={(e) => { cfg.simulation_mode = e.target.value; onChanged(); }}>
+                    onchange={(e: any) => { cfg.simulation_mode = e.target.value; onChanged(); }}>
                     <option value="inert">inert</option>
                     <option value="non_interacting">non_interacting</option>
                   </select>
@@ -299,7 +299,7 @@
                   <div class="form-group">
                     <label>Tick rate (Hz)</label>
                     <input type="number" min="1" max="100" value={cfg.tick_rate_hz ?? 10.0}
-                      onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.tick_rate_hz = n; onChanged(); } }} />
+                      onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.tick_rate_hz = n; onChanged(); } }} />
                   </div>
                 {/if}
               {/if}
@@ -311,7 +311,7 @@
                   {#each (cfg.devices ?? []) as dev, di}
                     <div class="device-row">
                       <input type="text" class="device-id-input" spellcheck="false" value={dev.id}
-                        onblur={(e) => {
+                        onblur={(e: any) => {
                           const v = e.target.value.trim();
                           if (!v) { e.target.value = dev.id; return; }
                           if ((cfg.devices ?? []).some((d, i) => d.id === v && i !== di)) {
@@ -320,7 +320,7 @@
                           dev.id = v; onChanged();
                         }} />
                       <select class="device-type-select" value={dev.type}
-                        onchange={(e) => {
+                        onchange={(e: any) => {
                           const old = SIM_DEVICE_TYPES.find(d => d.type === dev.type);
                           if (old) old.fields.forEach(f => delete dev[f.key]);
                           dev.type = e.target.value;
@@ -338,7 +338,7 @@
                         <label class="inline-label">
                           {f.label}:
                           <input type="number" value={dev[f.key] ?? f.default}
-                            onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { dev[f.key] = n; onChanged(); } }} />
+                            onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { dev[f.key] = n; onChanged(); } }} />
                         </label>
                       {/each}
                     </div>
@@ -358,26 +358,26 @@
               <div class="form-group">
                 <label>Provider name (optional)</label>
                 <input type="text" spellcheck="false" value={cfg.provider_name ?? ''}
-                  oninput={(e) => { cfg.provider_name = e.target.value; onChanged(); }} />
+                  oninput={(e: any) => { cfg.provider_name = e.target.value; onChanged(); }} />
               </div>
               <div class="form-group form-group-inline">
                 <label>
                   <input type="checkbox" checked={cfg.require_live_session ?? false}
-                    onchange={(e) => { cfg.require_live_session = e.target.checked; onChanged(); }} />
+                    onchange={(e: any) => { cfg.require_live_session = e.target.checked; onChanged(); }} />
                   {' '}Require live session
                 </label>
               </div>
               <div class="form-group"><label>Query delay (µs)</label>
                 <input type="number" min="0" max="1000000" value={cfg.query_delay_us ?? 10000}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.query_delay_us = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.query_delay_us = n; onChanged(); } }} />
               </div>
               <div class="form-group"><label>Timeout (ms)</label>
                 <input type="number" min="1" max="60000" value={cfg.timeout_ms ?? 100}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.timeout_ms = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.timeout_ms = n; onChanged(); } }} />
               </div>
               <div class="form-group"><label>Retry count</label>
                 <input type="number" min="0" max="20" value={cfg.retry_count ?? 2}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.retry_count = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.retry_count = n; onChanged(); } }} />
               </div>
               <div class="device-list-section">
                 <h4>Devices</h4>
@@ -386,7 +386,7 @@
                     {@const addrId = `bread-addr-${id}-${di}`}
                     <div class="device-row">
                       <input type="text" class="device-id-input" spellcheck="false" value={dev.id}
-                        onblur={(e) => {
+                        onblur={(e: any) => {
                           const v = e.target.value.trim();
                           if (!v) { e.target.value = dev.id; return; }
                           if ((cfg.devices ?? []).some((d, i) => d.id === v && i !== di)) {
@@ -395,14 +395,14 @@
                           dev.id = v; onChanged();
                         }} />
                       <select class="device-type-select" value={dev.type}
-                        onchange={(e) => { dev.type = e.target.value; onChanged(); }}>
+                        onchange={(e: any) => { dev.type = e.target.value; onChanged(); }}>
                         {#each BREAD_DEVICE_TYPES as dt}
                           <option value={dt.type}>{dt.display}</option>
                         {/each}
                       </select>
                       <input id={addrId} type="text" class="device-addr-input" spellcheck="false"
                         placeholder="0x0A" value={dev.address ?? ''}
-                        onblur={(e) => {
+                        onblur={(e: any) => {
                           const v = e.target.value.trim();
                           if (!HEX_RE.test(v)) {
                             e.target.classList.add('input-error');
@@ -433,19 +433,19 @@
               <div class="form-group">
                 <label>Provider name (optional)</label>
                 <input type="text" spellcheck="false" value={cfg.provider_name ?? ''}
-                  oninput={(e) => { cfg.provider_name = e.target.value; onChanged(); }} />
+                  oninput={(e: any) => { cfg.provider_name = e.target.value; onChanged(); }} />
               </div>
               <div class="form-group"><label>Query delay (µs)</label>
                 <input type="number" min="0" max="2000000" value={cfg.query_delay_us ?? 300000}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.query_delay_us = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.query_delay_us = n; onChanged(); } }} />
               </div>
               <div class="form-group"><label>Timeout (ms)</label>
                 <input type="number" min="1" max="60000" value={cfg.timeout_ms ?? 300}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.timeout_ms = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.timeout_ms = n; onChanged(); } }} />
               </div>
               <div class="form-group"><label>Retry count</label>
                 <input type="number" min="0" max="20" value={cfg.retry_count ?? 2}
-                  onchange={(e) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.retry_count = n; onChanged(); } }} />
+                  onchange={(e: any) => { const n = Number(e.target.value); if (!isNaN(n)) { cfg.retry_count = n; onChanged(); } }} />
               </div>
               <div class="device-list-section">
                 <h4>Devices</h4>
@@ -453,7 +453,7 @@
                   {#each (cfg.devices ?? []) as dev, di}
                     <div class="device-row">
                       <input type="text" class="device-id-input" spellcheck="false" value={dev.id}
-                        onblur={(e) => {
+                        onblur={(e: any) => {
                           const v = e.target.value.trim();
                           if (!v) { e.target.value = dev.id; return; }
                           if ((cfg.devices ?? []).some((d, i) => d.id === v && i !== di)) {
@@ -462,14 +462,14 @@
                           dev.id = v; onChanged();
                         }} />
                       <select class="device-type-select" value={dev.type}
-                        onchange={(e) => { dev.type = e.target.value; onChanged(); }}>
+                        onchange={(e: any) => { dev.type = e.target.value; onChanged(); }}>
                         {#each EZO_DEVICE_TYPES as dt}
                           <option value={dt.type}>{dt.display}</option>
                         {/each}
                       </select>
                       <input type="text" class="device-addr-input" spellcheck="false"
                         placeholder="0x63" value={dev.address ?? ''}
-                        onblur={(e) => {
+                        onblur={(e: any) => {
                           const v = e.target.value.trim();
                           if (!HEX_RE.test(v)) {
                             e.target.classList.add('input-error');

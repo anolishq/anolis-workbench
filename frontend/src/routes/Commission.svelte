@@ -1,8 +1,18 @@
-<script>
-  import { onDestroy } from 'svelte';
-  import { fetchJson, downloadBlob, filenameFromContentDisposition } from '../lib/api.js';
+<script lang="ts">
+  import { onDestroy } from "svelte";
+  import { fetchJson, downloadBlob, filenameFromContentDisposition } from "../lib/api";
 
-  let { projectName, system, runtimeStatus, commissionRunningForCurrent } = $props();
+  let {
+    projectName,
+    system,
+    runtimeStatus,
+    commissionRunningForCurrent,
+  }: {
+    projectName: string | null;
+    system: Record<string, any> | null;
+    runtimeStatus: Record<string, any>;
+    commissionRunningForCurrent: boolean;
+  } = $props();
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -13,35 +23,35 @@
   );
 
   // ── Launch state ───────────────────────────────────────────────────────────
-  let preflightResults = $state(null);   // null | { ok, checks }
-  let preflightRunning = $state(false);
-  let launchRunning = $state(false);
-  let stopRunning = $state(false);
-  let restartRunning = $state(false);
-  let actionError = $state('');
+  let preflightResults = $state<any | null>(null); // null | { ok, checks }
+  let preflightRunning = $state<boolean>(false);
+  let launchRunning = $state<boolean>(false);
+  let stopRunning = $state<boolean>(false);
+  let restartRunning = $state<boolean>(false);
+  let actionError = $state<string>("");
 
   // ── Health badge ──────────────────────────────────────────────────────────
-  let healthStatus = $state('starting'); // starting | healthy | unavailable
-  let healthTimer = $state(null);
-  let healthStartedAt = $state(0);
+  let healthStatus = $state<"starting" | "healthy" | "unavailable">("starting");
+  let healthTimer = $state<ReturnType<typeof setInterval> | null>(null);
+  let healthStartedAt = $state<number>(0);
 
   // ── Log pane ──────────────────────────────────────────────────────────────
-  let logLines = $state([]);
-  let logVisible = $state(false);
+  let logLines = $state<string[]>([]);
+  let logVisible = $state<boolean>(false);
   let logAutoScroll = true;
-  let logEventSource = null;
-  let logEl = $state(null);
+  let logEventSource: EventSource | null = null;
+  let logEl = $state<HTMLDivElement | null>(null);
 
   // ── Commission health panel ───────────────────────────────────────────────
-  let commissionRuntimeStatus = $state(null);
-  let commissionProviderHealth = $state([]);
-  let commissionHealthError = $state('');
-  let commissionHealthTimer = $state(null);
+  let commissionRuntimeStatus = $state<any | null>(null);
+  let commissionProviderHealth = $state<any[]>([]);
+  let commissionHealthError = $state<string>("");
+  let commissionHealthTimer = $state<ReturnType<typeof setInterval> | null>(null);
 
   // ── Export ────────────────────────────────────────────────────────────────
-  let exportRunning = $state(false);
-  let exportFeedback = $state('');
-  let exportIsError = $state(false);
+  let exportRunning = $state<boolean>(false);
+  let exportFeedback = $state<string>("");
+  let exportIsError = $state<boolean>(false);
 
   // ── Operator UI ──────────────────────────────────────────────────────────
   const operatorUiBase = $derived(() => {
@@ -52,7 +62,7 @@
       const o = origins.find(x => typeof x === 'string' && /^https?:\/\//i.test(x));
       if (o) return o.trim().replace(/\/$/, '');
     }
-    const fromGlobal = window.__ANOLIS_COMPOSER__?.operatorUiBase;
+    const fromGlobal = (window as any).__ANOLIS_COMPOSER__?.operatorUiBase;
     if (typeof fromGlobal === 'string' && fromGlobal.trim()) return fromGlobal.trim().replace(/\/$/, '');
     return 'http://localhost:3000';
   });
@@ -111,9 +121,10 @@
     logVisible = true;
     logAutoScroll = true;
     logEventSource = new EventSource(`/api/projects/${encodeURIComponent(projectName)}/logs`);
-    logEventSource.onmessage = (e) => {
+    logEventSource.onmessage = (e: any) => {
       logLines = logLines.length >= 1000 ? [...logLines.slice(-999), e.data] : [...logLines, e.data];
-      if (logAutoScroll && logEl) setTimeout(() => { logEl.scrollTop = logEl.scrollHeight; }, 0);
+      const el = logEl;
+      if (logAutoScroll && el) setTimeout(() => { el.scrollTop = el.scrollHeight; }, 0);
     };
     logEventSource.onerror = () => { /* browser retries */ };
   }
@@ -171,6 +182,7 @@
 
   // ── Preflight ──────────────────────────────────────────────────────────────
   async function runPreflight() {
+    if (!projectName) return;
     preflightRunning = true;
     preflightResults = null;
     actionError = '';
@@ -197,6 +209,7 @@
   }
 
   async function doLaunch() {
+    if (!projectName) return;
     launchRunning = true;
     actionError = '';
     try {
@@ -224,6 +237,7 @@
 
   // ── Stop ───────────────────────────────────────────────────────────────────
   async function doStop() {
+    if (!projectName) return;
     stopRunning = true;
     actionError = '';
     try {
@@ -241,6 +255,7 @@
 
   // ── Restart ────────────────────────────────────────────────────────────────
   async function doRestart() {
+    if (!projectName) return;
     restartRunning = true;
     actionError = '';
     try {
@@ -260,6 +275,7 @@
 
   // ── Export ────────────────────────────────────────────────────────────────
   async function doExport() {
+    if (!projectName) return;
     exportRunning = true;
     exportFeedback = '';
     exportIsError = false;

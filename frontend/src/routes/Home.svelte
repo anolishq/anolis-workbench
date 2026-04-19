@@ -1,12 +1,22 @@
-<script>
-  import { fetchJson } from '../lib/api.js';
+<script lang="ts">
+  import { fetchJson } from "../lib/api";
 
-  let { projects, templates, onNavigate, onProjectsRefreshed } = $props();
+  let {
+    projects,
+    templates,
+    onNavigate,
+    onProjectsRefreshed,
+  }: {
+    projects: Array<{ name: string }>;
+    templates: Array<{ id: string; meta?: { name?: string } }>;
+    onNavigate: (path: string) => void;
+    onProjectsRefreshed: () => Promise<void> | void;
+  } = $props();
 
-  let createName = $state('');
-  let createTemplate = $state('');
-  let createError = $state('');
-  let creating = $state(false);
+  let createName = $state<string>("");
+  let createTemplate = $state<string>("");
+  let createError = $state<string>("");
+  let creating = $state<boolean>(false);
 
   $effect(() => {
     if (templates.length > 0 && !createTemplate) {
@@ -14,7 +24,7 @@
     }
   });
 
-  function validProjectName(name) {
+  function validProjectName(name: string): boolean {
     return /^[a-zA-Z0-9_-]{1,64}$/.test(name);
   }
 

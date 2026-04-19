@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeCrossProjectRunningBanner, evaluateNavigationPrompts } from "../../src/lib/guards.js";
+import { describeCrossProjectRunningBanner, evaluateNavigationPrompts } from "../../src/lib/guards";
 
 describe("evaluateNavigationPrompts", () => {
   it("returns no prompts when no risky transition conditions are met", () => {
@@ -101,4 +101,3 @@ describe("describeCrossProjectRunningBanner", () => {
     ).toBe("");
   });
 });
-

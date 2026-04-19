@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { downloadBlob, fetchJson, filenameFromContentDisposition } from "../../src/lib/api.js";
+import { downloadBlob, fetchJson, filenameFromContentDisposition } from "../../src/lib/api";
 
 function mockFetch(response: { ok: boolean; status: number; body: string }) {
   const fetchMock = vi.fn(async () => ({
@@ -122,4 +122,3 @@ describe("downloadBlob", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:unit-test");
   });
 });
-
