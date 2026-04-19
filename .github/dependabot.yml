@@ -6,6 +6,7 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    rebase-strategy: "auto"
     groups:
       dev-dependencies:
         dependency-type: "development"
@@ -16,3 +17,4 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    rebase-strategy: "auto"
