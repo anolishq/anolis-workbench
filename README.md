@@ -8,12 +8,15 @@ Repository structure:
 2. `anolis_workbench/server` — unified HTTP server (Compose + Commission + Operate `/v0/*` proxy)
 3. `anolis_workbench/cli` — CLI entry points (`anolis-workbench`, `anolis-package`, `anolis-validate`)
 
+Developer references:
+
+1. Contributing guide: `CONTRIBUTING.md`
+2. Changelog: `CHANGELOG.md`
+
 ## Install
 
 ```sh
-python -m pip install -e .[dev]
-# Recommended (when uv is installed):
-# uv pip install -e .[dev]
+uv sync --locked --extra dev
 ```
 
 ## Run
@@ -48,14 +51,15 @@ anolis-validate <package.anpkg>
 python contracts/validate-handoff-packages.py <package.anpkg>
 ```
 
-## Frontend Unit Tests
+## Frontend Tests
 
 ```sh
 cd frontend
 npm run test:unit:coverage
+npm run test:components:coverage
 ```
 
-The Vitest lane enforces coverage thresholds for `frontend/src/lib/*`.
+The Vitest lanes enforce coverage thresholds for `frontend/src/lib/*`.
 
 ## Desktop Wrapper
 
