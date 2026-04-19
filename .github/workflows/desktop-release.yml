@@ -293,7 +293,7 @@ jobs:
           ls -lh release-assets
 
       - name: Create or update GitHub Release with desktop artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
           name: Release ${{ inputs.version }}
