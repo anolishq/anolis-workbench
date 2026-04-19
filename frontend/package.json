@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check",
+    "format": "prettier --write \"src/**\"",
+    "format:check": "prettier --check \"src/**\"",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:unit:watch": "vitest --config vitest.config.ts",
     "test:unit:coverage": "vitest run --config vitest.config.ts --coverage",
@@ -16,10 +18,12 @@
     "smoke:install": "playwright install --with-deps chromium"
   },
   "devDependencies": {
-    "@types/node": "^22.13.8",
     "@playwright/test": "^1.59.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/node": "^22.13.8",
     "@vitest/coverage-v8": "^2.1.8",
+    "prettier": "^3.8.3",
+    "prettier-plugin-svelte": "^3.5.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.8.2",
