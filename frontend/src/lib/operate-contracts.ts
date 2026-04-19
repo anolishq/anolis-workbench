@@ -172,7 +172,9 @@ export function extractParameters(payload: unknown): AnyRecord[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function normalizeProviderHealthQuality(quality: unknown): "OK" | "FAULT" | "UNAVAILABLE" | "UNKNOWN" {
+export function normalizeProviderHealthQuality(
+  quality: unknown,
+): "OK" | "FAULT" | "UNAVAILABLE" | "UNKNOWN" {
   const v = String(quality || "UNKNOWN").toUpperCase();
   if (v === "OK" || v === "READY" || v === "AVAILABLE") return "OK";
   if (v === "FAULT") return "FAULT";

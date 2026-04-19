@@ -32,7 +32,7 @@ export async function fetchJson<T = any>(path: string, options: RequestInit = {}
  */
 export function downloadBlob(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
+  const anchor = document.createElement("a");
   anchor.href = objectUrl;
   anchor.download = filename;
   document.body.appendChild(anchor);
@@ -47,8 +47,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
  * @param headerValue Content-Disposition header value
  * @param fallback Fallback filename
  */
-export function filenameFromContentDisposition(headerValue: string | null, fallback: string): string {
-  if (typeof headerValue !== 'string' || headerValue.trim() === '') return fallback;
+export function filenameFromContentDisposition(
+  headerValue: string | null,
+  fallback: string,
+): string {
+  if (typeof headerValue !== "string" || headerValue.trim() === "") return fallback;
 
   const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {

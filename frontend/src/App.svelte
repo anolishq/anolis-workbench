@@ -70,11 +70,14 @@
     return true;
   }
 
-  async function navigateTo(path: string, {
-    replaceHistory = false,
-    historyAlreadySet = false,
-    bypassGuards = false,
-  }: NavigateOptions = {}): Promise<boolean> {
+  async function navigateTo(
+    path: string,
+    {
+      replaceHistory = false,
+      historyAlreadySet = false,
+      bypassGuards = false,
+    }: NavigateOptions = {},
+  ): Promise<boolean> {
     const route = parseRoute(path);
     if (!route) {
       if (!historyAlreadySet) history.replaceState({}, "", "/");
@@ -86,7 +89,7 @@
     const navId = ++lastNavigationId;
     if (!historyAlreadySet) {
       if (replaceHistory) history.replaceState({}, "", route.path);
-      else history.pushState({}, '', route.path);
+      else history.pushState({}, "", route.path);
     }
 
     const projectChanged = route.project !== projectName;
@@ -97,7 +100,11 @@
       if (!loaded) {
         if (navId !== lastNavigationId) return false;
         history.replaceState({}, "", "/");
-        await navigateTo("/", { replaceHistory: true, historyAlreadySet: true, bypassGuards: true });
+        await navigateTo("/", {
+          replaceHistory: true,
+          historyAlreadySet: true,
+          bypassGuards: true,
+        });
         return false;
       }
     }
@@ -172,9 +179,21 @@
 
     const init = async (): Promise<void> => {
       await Promise.all([
-        fetchJson<Record<string, any>>("/api/catalog").then((c) => { catalog = c; }).catch(() => {}),
-        fetchJson<TemplateEntry[]>("/api/templates").then((t) => { templates = t; }).catch(() => {}),
-        fetchJson<ProjectEntry[]>("/api/projects").then((p) => { projects = p; }).catch(() => {}),
+        fetchJson<Record<string, any>>("/api/catalog")
+          .then((c) => {
+            catalog = c;
+          })
+          .catch(() => {}),
+        fetchJson<TemplateEntry[]>("/api/templates")
+          .then((t) => {
+            templates = t;
+          })
+          .catch(() => {}),
+        fetchJson<ProjectEntry[]>("/api/projects")
+          .then((p) => {
+            projects = p;
+          })
+          .catch(() => {}),
         refreshStatus(),
       ]);
 
@@ -211,20 +230,20 @@
   }
 
   async function onProjectsRefreshed(): Promise<void> {
-    projects = await fetchJson('/api/projects').catch(() => projects);
+    projects = await fetchJson("/api/projects").catch(() => projects);
   }
 </script>
 
 <header id="shell-topbar">
   <div class="brand-wrap">
-    <button id="btn-home" class="ghost-btn" type="button" onclick={() => void navigateTo('/')}>
+    <button id="btn-home" class="ghost-btn" type="button" onclick={() => void navigateTo("/")}>
       Anolis Workbench
     </button>
   </div>
 
   <div class="project-wrap">
     <label for="project-selector" class="topbar-label">Project</label>
-    <select id="project-selector" value={projectName ?? ''} onchange={onProjectSelect}>
+    <select id="project-selector" value={projectName ?? ""} onchange={onProjectSelect}>
       <option value="">No project selected</option>
       {#each projects as project (project.name)}
         <option value={project.name}>{project.name}</option>
@@ -242,8 +261,8 @@
         class="tab-btn"
         class:active={workspace === ws && Boolean(projectName)}
         disabled={!projectName}
-        onclick={() => onTabClick(ws)}
-      >{ws.charAt(0).toUpperCase() + ws.slice(1)}</button>
+        onclick={() => onTabClick(ws)}>{ws.charAt(0).toUpperCase() + ws.slice(1)}</button
+      >
     {/each}
   </nav>
 
@@ -253,7 +272,7 @@
     class:running={running && Boolean(runningProject)}
     class:stopped={!(running && Boolean(runningProject))}
   >
-    {running && runningProject ? `Running: ${runningProject}` : 'Stopped'}
+    {running && runningProject ? `Running: ${runningProject}` : "Stopped"}
   </div>
 </header>
 
@@ -269,28 +288,25 @@
       onNavigate={(path) => void navigateTo(path, { bypassGuards: true })}
       {onProjectsRefreshed}
     />
-  {:else if workspace === 'compose'}
+  {:else if workspace === "compose"}
     <Compose
       {projectName}
       {system}
       {catalog}
       {runtimeStatus}
-      onDirty={() => { dirty = true; }}
-      onSaved={() => { dirty = false; }}
-      onSystemChanged={(s) => { system = s; }}
+      onDirty={() => {
+        dirty = true;
+      }}
+      onSaved={() => {
+        dirty = false;
+      }}
+      onSystemChanged={(s) => {
+        system = s;
+      }}
     />
-  {:else if workspace === 'commission'}
-    <Commission
-      {projectName}
-      {system}
-      {runtimeStatus}
-      {commissionRunningForCurrent}
-    />
-  {:else if workspace === 'operate'}
-    <Operate
-      {projectName}
-      {system}
-      {runtimeStatus}
-    />
+  {:else if workspace === "commission"}
+    <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
+  {:else if workspace === "operate"}
+    <Operate {projectName} {system} {runtimeStatus} />
   {/if}
 </main>

@@ -29,28 +29,28 @@
   }
 
   async function handleCreate() {
-    createError = '';
+    createError = "";
     if (!validProjectName(createName)) {
-      createError = 'Project name must be 1-64 chars: letters, digits, hyphens, underscores.';
+      createError = "Project name must be 1-64 chars: letters, digits, hyphens, underscores.";
       return;
     }
     if (!createTemplate) {
-      createError = 'Template is required.';
+      createError = "Template is required.";
       return;
     }
     creating = true;
     try {
-      await fetchJson('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await fetchJson("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: createName, template: createTemplate }),
       });
       const name = createName;
-      createName = '';
+      createName = "";
       await onProjectsRefreshed();
       onNavigate(`/projects/${encodeURIComponent(name)}/compose`);
     } catch (err) {
-      createError = err instanceof Error ? err.message : 'Failed to create project';
+      createError = err instanceof Error ? err.message : "Failed to create project";
     } finally {
       creating = false;
     }
@@ -78,9 +78,9 @@
               <button
                 type="button"
                 class="btn-secondary btn-sm"
-                onclick={() =>
-                  onNavigate(`/projects/${encodeURIComponent(project.name)}/compose`)}
-              >Open</button>
+                onclick={() => onNavigate(`/projects/${encodeURIComponent(project.name)}/compose`)}
+                >Open</button
+              >
             </li>
           {/each}
         </ul>
@@ -122,8 +122,8 @@
         type="button"
         class="btn-primary"
         disabled={creating}
-        onclick={handleCreate}
-      >{creating ? 'Creating…' : 'Create Project'}</button>
+        onclick={handleCreate}>{creating ? "Creating…" : "Create Project"}</button
+      >
       {#if createError}
         <p class="field-error">{createError}</p>
       {/if}

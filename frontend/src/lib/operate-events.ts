@@ -51,7 +51,8 @@ export function appendEventTrace<T>(buffer: T[], event: T, maxEntries = 100): T[
 
 export function describeEvent(eventType: string, payload: Record<string, any> | null): string {
   if (!payload || typeof payload !== "object") return eventType;
-  if (eventType === "mode_change") return `${payload.previous_mode ?? "?"} -> ${payload.new_mode ?? "?"}`;
+  if (eventType === "mode_change")
+    return `${payload.previous_mode ?? "?"} -> ${payload.new_mode ?? "?"}`;
   if (eventType === "parameter_change") {
     const name = payload.parameter_name ?? payload.name ?? "parameter";
     return `${name}: ${payload.old_value ?? "?"} -> ${payload.new_value ?? "?"}`;
@@ -149,9 +150,11 @@ export function createOperateEventStreamManager(
   function startStaleTimer(): void {
     clearStale();
     staleTimer = setInterval(() => {
-      if (!active || !source || currentState === "disconnected" || currentState === "reconnecting") return;
+      if (!active || !source || currentState === "disconnected" || currentState === "reconnecting")
+        return;
       const idleMs = Date.now() - lastEventAt;
-      if (idleMs > staleAfterMs) emit({ state: "stale", attempts: reconnectAttempts, idle_ms: idleMs });
+      if (idleMs > staleAfterMs)
+        emit({ state: "stale", attempts: reconnectAttempts, idle_ms: idleMs });
     }, staleCheckIntervalMs);
   }
 

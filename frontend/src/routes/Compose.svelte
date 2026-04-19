@@ -22,7 +22,7 @@
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
-    typeof runtimeStatus?.active_project === 'string' ? runtimeStatus.active_project : null,
+    typeof runtimeStatus?.active_project === "string" ? runtimeStatus.active_project : null,
   );
   const showAdvisory = $derived(running && runningProject === projectName);
 
@@ -30,17 +30,19 @@
   let saveError = $state<string>("");
   let saveErrors = $state<Array<{ path?: string; message?: string }>>([]);
 
-  function markDirty() { onDirty(); }
+  function markDirty() {
+    onDirty();
+  }
 
   async function handleSave() {
     if (!projectName || !system) return;
     saving = true;
-    saveError = '';
+    saveError = "";
     saveErrors = [];
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(system),
       });
       const payload = await res.json().catch(() => ({}));
@@ -49,9 +51,9 @@
         return;
       }
       saveErrors = Array.isArray(payload?.errors) ? payload.errors : [];
-      saveError = payload?.error || 'Save failed';
+      saveError = payload?.error || "Save failed";
     } catch (err) {
-      saveError = err instanceof Error ? err.message : 'Save failed';
+      saveError = err instanceof Error ? err.message : "Save failed";
     } finally {
       saving = false;
     }
@@ -66,8 +68,8 @@
 
   {#if showAdvisory}
     <div class="workspace-advisory">
-      Runtime is currently running from this project. Save edits now; changes take effect
-      only after relaunch from Commission.
+      Runtime is currently running from this project. Save edits now; changes take effect only after
+      relaunch from Commission.
     </div>
   {/if}
 
@@ -77,7 +79,7 @@
       {#if saveErrors.length > 0}
         <ul>
           {#each saveErrors as e}
-            <li><code>{e.path ?? '$'}</code>: {e.message ?? 'Validation error'}</li>
+            <li><code>{e.path ?? "$"}</code>: {e.message ?? "Validation error"}</li>
           {/each}
         </ul>
       {/if}
@@ -94,12 +96,8 @@
   </div>
 
   <div class="compose-actions">
-    <button
-      id="btn-save"
-      type="button"
-      class="btn-primary"
-      disabled={saving}
-      onclick={handleSave}
-    >{saving ? 'Saving…' : 'Save'}</button>
+    <button id="btn-save" type="button" class="btn-primary" disabled={saving} onclick={handleSave}
+      >{saving ? "Saving…" : "Save"}</button
+    >
   </div>
 </section>
