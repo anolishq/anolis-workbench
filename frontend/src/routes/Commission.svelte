@@ -88,23 +88,30 @@
     return `${operatorUiBase()}?api=${encodeURIComponent(runtimeApiBase())}`;
   });
 
+  let commissionLiveDataActive = false;
+
   // ── Reactive: sync running state when commissionRunningForCurrent changes ─
   $effect(() => {
-    if (commissionRunningForCurrent) {
+    if (commissionRunningForCurrent && !commissionLiveDataActive) {
       startHealthPolling();
       connectLogs();
       startCommissionHealthPolling();
-    } else {
+      commissionLiveDataActive = true;
+    } else if (!commissionRunningForCurrent && commissionLiveDataActive) {
       stopHealthPolling();
       disconnectLogs();
       stopCommissionHealthPolling();
+      commissionLiveDataActive = false;
     }
   });
 
   onDestroy(() => {
-    stopHealthPolling();
-    disconnectLogs();
-    stopCommissionHealthPolling();
+    if (commissionLiveDataActive) {
+      stopHealthPolling();
+      disconnectLogs();
+      stopCommissionHealthPolling();
+      commissionLiveDataActive = false;
+    }
   });
 
   // ── Health polling ────────────────────────────────────────────────────────

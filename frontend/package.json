@@ -17,9 +17,12 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "test:unit:watch": "vitest --config vitest.config.ts",
     "test:unit:coverage": "vitest run --config vitest.config.ts --coverage",
+    "test:components": "vitest run --config vitest.components.config.ts",
+    "test:components:watch": "vitest --config vitest.components.config.ts",
+    "test:components:coverage": "vitest run --config vitest.components.config.ts --coverage",
     "bundle:size": "node scripts/report-bundle-size.mjs",
     "smoke": "playwright test --config=playwright.config.ts --reporter=line",
-    "smoke:install": "playwright install --with-deps chromium"
+    "smoke:install": "playwright install --with-deps chromium firefox"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
