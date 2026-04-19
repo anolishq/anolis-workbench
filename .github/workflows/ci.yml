@@ -96,7 +96,7 @@ jobs:
             uv.lock
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Check
         run: |
@@ -123,7 +123,7 @@ jobs:
             uv.lock
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Run mypy
         run: uv run mypy anolis_workbench tests
@@ -162,7 +162,7 @@ jobs:
             uv.lock
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra dev
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
