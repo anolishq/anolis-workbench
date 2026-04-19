@@ -21,11 +21,12 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 ### Endpoint Inventory
 
 1. `GET /api/status`
-2. `POST /api/projects/{name}/preflight`
-3. `POST /api/projects/{name}/launch`
-4. `POST /api/projects/{name}/stop`
-5. `POST /api/projects/{name}/restart`
-6. `GET /api/projects/{name}/logs` (SSE)
+2. `GET /api/config`
+3. `POST /api/projects/{name}/preflight`
+4. `POST /api/projects/{name}/launch`
+5. `POST /api/projects/{name}/stop`
+6. `POST /api/projects/{name}/restart`
+7. `GET /api/projects/{name}/logs` (SSE)
 
 ### Response and Error Shape
 
@@ -42,10 +43,11 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 1. Composer path resolution is repo-anchored (`anolis_workbench/core/paths.py`), not caller-CWD dependent.
 2. Control-plane environment knobs remain:
-   - `ANOLIS_WORKBENCH_HOST`
-   - `ANOLIS_WORKBENCH_PORT`
-   - `ANOLIS_OPERATOR_UI_BASE`
-   - `ANOLIS_WORKBENCH_OPEN_BROWSER`
+  - `ANOLIS_WORKBENCH_HOST`
+  - `ANOLIS_WORKBENCH_PORT`
+  - `ANOLIS_OPERATOR_UI_BASE`
+  - `ANOLIS_TELEMETRY_URL`
+  - `ANOLIS_WORKBENCH_OPEN_BROWSER`
 
 ## Validation Gates
 

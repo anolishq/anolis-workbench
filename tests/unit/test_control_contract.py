@@ -87,6 +87,7 @@ def composer_server(tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, N
     env["ANOLIS_WORKBENCH_HOST"] = "127.0.0.1"
     env["ANOLIS_WORKBENCH_PORT"] = str(port)
     env["ANOLIS_OPERATOR_UI_BASE"] = "http://localhost:3900"
+    env["ANOLIS_TELEMETRY_URL"] = "http://localhost:3901"
     env["ANOLIS_WORKBENCH_OPEN_BROWSER"] = "0"
     env["ANOLIS_DATA_DIR"] = str(systems_root)
     env["PYTHONPATH"] = f"{_REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
@@ -126,6 +127,13 @@ def test_status_contract_exposes_composer_metadata(composer_server: dict[str, An
     assert composer.get("host") == "127.0.0.1"
     assert composer.get("port") == composer_server["port"]
     assert composer.get("operator_ui_base") == "http://localhost:3900"
+
+
+def test_config_contract_exposes_ui_defaults(composer_server: dict[str, Any]) -> None:
+    status, payload = _http_json(composer_server["base_url"], "/api/config")
+    assert status == 200
+    assert payload.get("operator_ui_base") == "http://localhost:3900"
+    assert payload.get("telemetry_url") == "http://localhost:3901"
 
 
 def test_control_contract_save_validation_failure_shape(composer_server: dict[str, Any]) -> None:

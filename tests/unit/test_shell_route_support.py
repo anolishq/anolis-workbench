@@ -185,6 +185,11 @@ def test_status_and_static_assets_are_served(workbench_server: dict[str, Any]) -
     assert isinstance(status_payload.get("composer"), dict)
     assert status_payload["composer"].get("port") == workbench_server["port"]
 
+    config_code, config_payload = _http_json(base_url, "/api/config")
+    assert config_code == 200
+    assert config_payload.get("operator_ui_base")
+    assert config_payload.get("telemetry_url")
+
     asset_code, asset_body, content_type = _http_text(base_url, "/index.html")
     assert asset_code == 200
     assert "text/html" in content_type

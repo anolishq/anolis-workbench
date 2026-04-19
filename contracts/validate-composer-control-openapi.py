@@ -32,6 +32,7 @@ class Failure:
 
 REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("get", "/api/status"),
+    ("get", "/api/config"),
     ("post", "/api/projects/{name}/preflight"),
     ("post", "/api/projects/{name}/launch"),
     ("post", "/api/projects/{name}/stop"),

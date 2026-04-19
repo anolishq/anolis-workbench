@@ -16,6 +16,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
+  /api/config:
+    get:
+      summary: Get composer UI defaults
+      responses:
+        "200":
+          description: UI defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkbenchConfigResponse"
   /api/projects/{name}/preflight:
     post:
       summary: Run preflight checks for a project
@@ -213,6 +223,15 @@ components:
             operator_ui_base:
               type: string
           additionalProperties: true
+      additionalProperties: true
+    WorkbenchConfigResponse:
+      type: object
+      required: [operator_ui_base, telemetry_url]
+      properties:
+        operator_ui_base:
+          type: string
+        telemetry_url:
+          type: string
       additionalProperties: true
     PreflightResponse:
       type: object

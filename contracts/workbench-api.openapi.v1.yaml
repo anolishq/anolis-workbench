@@ -243,6 +243,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
 
+  /api/config:
+    get:
+      summary: Get workbench UI config
+      description: >-
+        Returns server-driven UI defaults used by Commission/Operate views.
+        Values are environment-controlled and normalized as absolute URLs.
+      responses:
+        "200":
+          description: Workbench UI config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkbenchConfigResponse"
+
   /api/projects/{name}/preflight:
     post:
       summary: Run preflight checks
@@ -704,6 +718,20 @@ components:
             version:
               type: integer
           additionalProperties: true
+      additionalProperties: true
+
+    WorkbenchConfigResponse:
+      type: object
+      required: [operator_ui_base, telemetry_url]
+      description: >-
+        UI defaults used by Workbench client views.
+      properties:
+        operator_ui_base:
+          type: string
+          description: Operator UI base URL (e.g. Grafana/operator shell origin)
+        telemetry_url:
+          type: string
+          description: Telemetry dashboard URL for Operate iframe and external link
       additionalProperties: true
 
     PreflightCheckItem:
