@@ -239,10 +239,11 @@
       const data = await fetchJson<PreflightResult>(
         `/api/projects/${encodeURIComponent(projectName)}/preflight`,
         {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
       preflightResults = data;
     } catch (err) {
       actionError = `Preflight error: ${err instanceof Error ? err.message : String(err)}`;

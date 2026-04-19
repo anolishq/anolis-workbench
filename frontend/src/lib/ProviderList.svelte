@@ -83,7 +83,9 @@
       ProviderCatalogEntry
     >,
   );
-  const providers = $derived((system?.topology?.runtime?.providers ?? []) as ProviderRuntimeEntry[]);
+  const providers = $derived(
+    (system?.topology?.runtime?.providers ?? []) as ProviderRuntimeEntry[],
+  );
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
