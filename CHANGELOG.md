@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Added
 
 - Component tests for `Home`, `Compose`, and `Commission`.
@@ -55,4 +57,3 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Initial `anolis-workbench` commissioning shell repository.
 - Core domain library + HTTP server + CLI entry point foundation.
-
