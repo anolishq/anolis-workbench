@@ -78,9 +78,7 @@ def validate_system(system: dict) -> list[str]:
 
     reserved_workbench_port = _resolve_workbench_port()
     if runtime_http_port == reserved_workbench_port:
-        errors.append(
-            f"Runtime HTTP port {reserved_workbench_port} conflicts with the workbench control server port."
-        )
+        errors.append(f"Runtime HTTP port {reserved_workbench_port} conflicts with the workbench control server port.")
 
     owned: dict = {}
     for pid, pcfg in providers.items():
