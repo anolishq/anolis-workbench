@@ -2,7 +2,7 @@
 name = "anolis-workbench-desktop"
 version = "0.2.0"
 description = "Native desktop wrapper for Anolis Workbench"
-authors = ["FEASTorg"]
+authors = ["anolishq"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.77"

@@ -21,7 +21,7 @@ automation (`.github/workflows/release.yml`).
 
 In PyPI project settings, add a trusted publisher with:
 
-1. Owner: `FEASTorg`
+1. Owner: `anolishq`
 2. Repository: `anolis-workbench`
 3. Workflow name: `release.yml`
 4. Environment name: `pypi`
