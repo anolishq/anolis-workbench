@@ -42,12 +42,14 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 ### Runtime/Path Decoupling
 
 1. Composer path resolution is repo-anchored (`anolis_workbench/core/paths.py`), not caller-CWD dependent.
+
 2. Control-plane environment knobs remain:
-  - `ANOLIS_WORKBENCH_HOST`
-  - `ANOLIS_WORKBENCH_PORT`
-  - `ANOLIS_OPERATOR_UI_BASE`
-  - `ANOLIS_TELEMETRY_URL`
-  - `ANOLIS_WORKBENCH_OPEN_BROWSER`
+
+   - `ANOLIS_WORKBENCH_HOST`
+   - `ANOLIS_WORKBENCH_PORT`
+   - `ANOLIS_OPERATOR_UI_BASE`
+   - `ANOLIS_TELEMETRY_URL`
+   - `ANOLIS_WORKBENCH_OPEN_BROWSER`
 
 ## Validation Gates
 
