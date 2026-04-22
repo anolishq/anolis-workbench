@@ -50,8 +50,8 @@ CATALOG_PATH = _select_asset_path(
     _PACKAGED_ASSET_ROOT / "catalog" / "providers.json",
 )
 SYSTEM_SCHEMA_PATH = _select_asset_path(
-    _SOURCE_ASSET_ROOT / "schema" / "system.schema.json",
-    _PACKAGED_ASSET_ROOT / "schema" / "system.schema.json",
+    _SOURCE_ASSET_ROOT / "schemas" / "system.schema.json",
+    _PACKAGED_ASSET_ROOT / "schemas" / "system.schema.json",
 )
 
 
