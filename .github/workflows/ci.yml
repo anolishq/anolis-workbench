@@ -203,7 +203,7 @@ jobs:
         run: python3 scripts/verify-upstream-schema.py --schema runtime-http --require-release-artifact
 
   version-sync:
-    uses: anolishq/.github-anolishq/.github/workflows/version-sync.yml@main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@main
     with:
       python-version: '3.12'
       working-directory: '.'
