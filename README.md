@@ -13,24 +13,38 @@ Developer references:
 1. Contributing guide: `CONTRIBUTING.md`
 2. Changelog: `CHANGELOG.md`
 
-## Install
+## Quick Start
+
+### Download and run (recommended)
+
+**Desktop app (recommended for commissioning):**
+
+Download the latest Tauri desktop installer from
+[Releases](https://github.com/anolishq/anolis-workbench/releases/latest).
+Run the installer — the desktop wrapper bundles the Python runtime and starts automatically.
+
+**CLI / server via PyPI:**
+
+```sh
+pip install anolis-workbench
+anolis-workbench          # starts the commissioning server
+anolis-package <project>  # build a handoff package
+anolis-validate <pkg>     # validate a handoff package
+```
+
+Requires Python 3.11+. Open `http://127.0.0.1:3010` in a browser after starting.
+
+### Build from source (contributors)
 
 ```sh
 uv sync --locked --extra dev
-```
-
-## Run
-
-```sh
 ./start.sh
 ```
 
-Or run via module/entry point:
+Or via module entry point:
 
 ```sh
 python -m anolis_workbench.server.app
-# or
-anolis-workbench
 ```
 
 Windows launcher: `start.cmd`.
