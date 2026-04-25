@@ -32,11 +32,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'EOF'
-          import os, pathlib, subprocess
+          import os, pathlib, re, subprocess
           import yaml
 
           matrix_path = pathlib.Path("anolis_workbench/schemas/compatibility-matrix.yaml")
-          matrix = yaml.safe_load(matrix_path.read_text())
+          content = matrix_path.read_text()
+          matrix = yaml.safe_load(content)
 
           def latest_release(repo: str) -> str:
               result = subprocess.run(
@@ -45,25 +46,35 @@ jobs:
               )
               return result.stdout.strip().lstrip("v")
 
+          def update_version_for_repo(text: str, repo: str, new_version: str) -> str:
+              # Anchor on the unique repo: line then replace the very next version: line.
+              # Preserves surrounding quotes (or lack thereof) and all indentation.
+              pattern = (
+                  r'(repo:\s*' + re.escape(repo) + r'\s*\n\s*version:\s*["\']?)[\d.]+(["\']?)'
+              )
+              return re.sub(pattern, r'\g<1>' + new_version + r'\g<2>', text)
+
           updated = False
 
           # Check runtime
           latest = latest_release(matrix["runtime"]["repo"])
-          if latest != matrix["runtime"]["version"]:
-              print(f"runtime: {matrix['runtime']['version']} -> {latest}")
-              matrix["runtime"]["version"] = latest
+          current = str(matrix["runtime"]["version"])
+          if latest != current:
+              print(f"runtime: {current} -> {latest}")
+              content = update_version_for_repo(content, matrix["runtime"]["repo"], latest)
               updated = True
 
           # Check providers
           for provider_id, entry in matrix.get("providers", {}).items():
               latest = latest_release(entry["repo"])
-              if latest != entry["version"]:
-                  print(f"{provider_id}: {entry['version']} -> {latest}")
-                  entry["version"] = latest
+              current = str(entry["version"])
+              if latest != current:
+                  print(f"{provider_id}: {current} -> {latest}")
+                  content = update_version_for_repo(content, entry["repo"], latest)
                   updated = True
 
           if updated:
-              matrix_path.write_text(yaml.dump(matrix, default_flow_style=False, sort_keys=False))
+              matrix_path.write_text(content)
               print("Matrix updated.")
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write("updated=true\n")
