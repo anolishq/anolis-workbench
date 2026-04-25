@@ -9,7 +9,7 @@ workbench_version: "0.3.1"
 
 runtime:
   repo: anolishq/anolis
-  version: "0.1.19"
+  version: "0.1.20"
 
 providers:
   anolis-provider-sim:
