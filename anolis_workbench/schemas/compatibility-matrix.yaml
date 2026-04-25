@@ -9,15 +9,15 @@ workbench_version: "0.3.1"
 
 runtime:
   repo: anolishq/anolis
-  version: "0.1.13"
+  version: "0.1.14"
 
 providers:
   anolis-provider-sim:
     repo: anolishq/anolis-provider-sim
-    version: "0.2.2"
+    version: "0.2.3"
   anolis-provider-bread:
     repo: anolishq/anolis-provider-bread
-    version: "0.2.6"
+    version: "0.2.7"
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
-    version: "0.2.3"
+    version: "0.2.4"
