@@ -8,6 +8,7 @@ import sys
 
 from anolis_workbench.core import exporter
 from anolis_workbench.core import paths as paths_module
+from anolis_workbench.core import projects as projects_module
 
 
 def _parse_args() -> argparse.Namespace:
@@ -26,6 +27,11 @@ def main() -> int:
     project_name = str(args.project_name).strip()
     if project_name == "":
         print("ERROR: project_name is required", file=sys.stderr)
+        return 2
+
+    err = projects_module.validate_name(project_name)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
         return 2
 
     project_dir = paths_module.SYSTEMS_ROOT / project_name
