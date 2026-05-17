@@ -49,6 +49,7 @@ def _load_compat_matrix(matrix_path: "pathlib.Path | None" = None) -> "dict[str,
 
 def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     """Build a deterministic .anpkg zip archive from a commissioned project."""
+    out_path = out_path.resolve()  # canonicalize before any path operations
     project_root = project_dir.resolve()
     system_path = project_root / "system.json"
     if not system_path.is_file():
@@ -114,7 +115,7 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
 
     _assert_no_secret_leak(files)
     files["meta/checksums.sha256"] = _checksums_file_bytes(files)
-    _write_zip_deterministic(files=files, out_path=out_path.resolve())
+    _write_zip_deterministic(files=files, out_path=out_path)
 
 
 def _load_system_json(system_path: pathlib.Path) -> dict[str, Any]:
@@ -402,6 +403,7 @@ def _checksums_file_bytes(files: dict[str, bytes]) -> bytes:
 
 
 def _write_zip_deterministic(*, files: dict[str, bytes], out_path: pathlib.Path) -> None:
+    out_path = out_path.resolve()  # ensure canonical path at function entry
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
 
