@@ -25,23 +25,23 @@
     "smoke:install": "playwright install --with-deps chromium firefox"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.60.0",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",
-    "@types/node": "^25.6.2",
-    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@types/node": "^25.8.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
     "@typescript-eslint/parser": "^8.58.2",
-    "@vitest/coverage-v8": "^4.1.5",
-    "eslint": "^10.3.0",
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^10.4.0",
     "eslint-plugin-svelte": "^3.17.1",
     "happy-dom": "^20.9.0",
     "prettier": "^3.8.3",
-    "prettier-plugin-svelte": "^3.5.1",
+    "prettier-plugin-svelte": "^3.5.2",
     "svelte": "^5.55.7",
     "svelte-check": "^4.4.8",
     "typescript": "^6.0.3",
-    "vite": "^8.0.11",
+    "vite": "^8.0.13",
     "vitest": "^4.1.4"
   }
 }
