@@ -107,7 +107,11 @@ def export_project(handler, name: str) -> None:
     filename = f"{name}.anpkg"
     try:
         with tempfile.TemporaryDirectory(prefix="anolis-workbench-export-") as tmp_dir:
-            out_path = pathlib.Path(tmp_dir) / filename
+            tmp_resolved = pathlib.Path(tmp_dir).resolve()
+            out_path = (tmp_resolved / filename).resolve()
+            # Verify the resolved path stays inside the temp directory;
+            # raises ValueError (→ caught by the outer except) if it does not.
+            out_path.relative_to(tmp_resolved)
             exporter_module.build_package(project_dir=project_dir, out_path=out_path)
             payload = out_path.read_bytes()
 
