@@ -111,9 +111,14 @@ def export_project(handler, name: str) -> None:
             exporter_module.build_package(project_dir=project_dir, out_path=out_path)
             payload = out_path.read_bytes()
 
+        # Sanitize filename for embedding in a quoted Content-Disposition header
+        # value: strip CR, LF, double-quote and backslash to prevent header
+        # injection regardless of upstream validation.
+        safe_filename = filename.replace("\r", "").replace("\n", "").replace('"', "").replace("\\", "")
+
         handler.send_response(200)
         handler.send_header("Content-Type", "application/zip")
-        handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        handler.send_header("Content-Disposition", f'attachment; filename="{safe_filename}"')
         handler.send_header("Content-Length", str(len(payload)))
         handler.end_headers()
         handler.wfile.write(payload)
