@@ -15,6 +15,8 @@ on:
       - 'CONTRIBUTING.md'
   workflow_dispatch:
 
+permissions: read-all
+
 jobs:
   check:
     uses: anolishq/.github/.github/workflows/docs-check.yml@v1

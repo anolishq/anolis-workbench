@@ -7,6 +7,8 @@ on:
     - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
   workflow_dispatch:
 
+permissions: read-all
+
 jobs:
   collect:
     uses: anolishq/.github/.github/workflows/metrics.yml@v1
