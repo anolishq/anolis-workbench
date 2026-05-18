@@ -20,6 +20,17 @@ Historical note:
   and assembles a self-contained directory with `install.sh` for air-gapped
   deployment to Raspberry Pi targets.
 - `anolis_workbench.core.bundler` module with the bundle assembly logic.
+- `anolis-provision remote` CLI command for SSH-based remote provisioning:
+  downloads binaries locally, transfers and installs them on a remote target
+  via SSH, and writes project configs to the remote `~/.anolis/systems/` directory.
+- `anolis_workbench.core.executor` module: `Executor` ABC with `LocalExecutor`
+  and `SubprocessSSHExecutor` implementations for local/remote command dispatch.
+
+### Changed
+
+- Refactored `installer.py` to accept an optional `Executor` for all I/O
+  boundary operations (install, verify, project write). Pass 3 behavior
+  unchanged — defaults to `LocalExecutor`.
 
 ## [0.4.0] - 2026-05-18
 

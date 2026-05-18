@@ -94,6 +94,56 @@ def _parse_args() -> argparse.Namespace:
         help="Override path to compatibility-matrix.yaml (for testing).",
     )
 
+    # --- remote subcommand (pass 5) ---
+    remote_parser = subparsers.add_parser(
+        "remote",
+        help="Provision a remote machine via SSH (downloads locally, installs remotely).",
+    )
+    remote_parser.add_argument(
+        "--target",
+        required=True,
+        help="SSH target in user@host format.",
+    )
+    remote_parser.add_argument(
+        "--project",
+        default="bioreactor-v1",
+        help="Project name to create on the target (default: bioreactor-v1).",
+    )
+    remote_parser.add_argument(
+        "--template",
+        default="bioreactor-manual",
+        help="Template to use for project creation (default: bioreactor-manual).",
+    )
+    remote_parser.add_argument(
+        "--install-prefix",
+        type=Path,
+        default=Path("/usr/local"),
+        help="Binary install prefix on the target (default: /usr/local).",
+    )
+    remote_parser.add_argument(
+        "--compat-matrix",
+        type=Path,
+        default=None,
+        help="Override path to compatibility-matrix.yaml (for testing).",
+    )
+    remote_parser.add_argument(
+        "--key",
+        type=Path,
+        default=None,
+        help="Path to SSH private key file.",
+    )
+    remote_parser.add_argument(
+        "--port",
+        type=int,
+        default=22,
+        help="SSH port (default: 22).",
+    )
+    remote_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing binaries and project on target.",
+    )
+
     return parser.parse_args()
 
 
@@ -250,6 +300,102 @@ def _run_bundle(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_target(target: str) -> tuple[str, str]:
+    """Parse user@host target string. Returns (user, host)."""
+    if "@" not in target:
+        raise ValueError(f"Invalid target '{target}' — expected user@host format")
+    user, host = target.split("@", 1)
+    if not user or not host:
+        raise ValueError(f"Invalid target '{target}' — expected user@host format")
+    return user, host
+
+
+def _run_remote(args: argparse.Namespace) -> int:
+    """Execute the remote subcommand."""
+    import os
+    import uuid
+
+    from anolis_workbench.core.executor import SubprocessSSHExecutor
+
+    try:
+        user, host = _parse_target(args.target)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    token = os.environ.get("GITHUB_TOKEN")
+    session_id = uuid.uuid4().hex[:12]
+
+    print("Anolis Provision — Remote")
+    print(f"  Target:   {user}@{host}")
+    print(f"  Project:  {args.project}")
+    print(f"  Template: {args.template}")
+    print(f"  Prefix:   {args.install_prefix}")
+    print(f"  Session:  {session_id}")
+    print()
+
+    # Create SSH executor
+    executor = SubprocessSSHExecutor(
+        host=host,
+        user=user,
+        key_file=str(args.key) if args.key else None,
+        port=args.port,
+    )
+
+    # Verify SSH connectivity
+    _print_progress("platform", f"Connecting to {user}@{host}")
+    arch_result = executor.run(["uname", "-m"])
+    if arch_result.returncode != 0:
+        print(f"\nERROR: SSH connection failed: {arch_result.stderr.strip()}", file=sys.stderr)
+        return 1
+
+    remote_arch = arch_result.stdout.strip()
+    _print_progress("platform", f"Remote architecture: {remote_arch}")
+
+    if remote_arch not in ("aarch64", "arm64", "x86_64"):
+        print(f"\nERROR: Unsupported remote architecture: {remote_arch}", file=sys.stderr)
+        return 1
+
+    # Determine remote systems root
+    home_result = executor.run(["sh", "-c", "echo $HOME"])
+    remote_home = home_result.stdout.strip() or f"/home/{user}"
+    systems_root = Path(f"{remote_home}/.anolis/systems")
+
+    # Run the full install flow using the SSH executor
+    try:
+        result = installer.install(
+            project_name=args.project,
+            template_name=args.template,
+            install_prefix=args.install_prefix,
+            compat_matrix_path=args.compat_matrix,
+            github_token=token,
+            force=args.force,
+            progress_callback=_print_progress,
+            executor=executor,
+            systems_root=systems_root,
+        )
+    except installer.InstallerError as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        return 1
+
+    # Print summary
+    print()
+    print("─" * 60)
+    print(f"Remote provisioning complete! ({user}@{host})")
+    print()
+    for binary, version in result.verified_versions.items():
+        print(f"  ✓ {binary:<30} {version}")
+    print()
+    print(f"  ✓ Project: {result.project_path}")
+    print()
+    print("Next steps (on the RPi):")
+    print("  pip install anolis-workbench")
+    print("  anolis-workbench")
+    print("  → open http://<rpi-ip>:3010 → select project → Launch")
+    print("─" * 60)
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -259,7 +405,7 @@ def main() -> int:
         print("Commands:", file=sys.stderr)
         print("  install   Install binaries and create a project locally", file=sys.stderr)
         print("  bundle    Download binaries and create an offline install bundle", file=sys.stderr)
-        print("  remote    (pass 5 — not yet implemented)", file=sys.stderr)
+        print("  remote    Provision a remote machine via SSH", file=sys.stderr)
         return 2
 
     if args.command == "install":
@@ -267,6 +413,9 @@ def main() -> int:
 
     if args.command == "bundle":
         return _run_bundle(args)
+
+    if args.command == "remote":
+        return _run_remote(args)
 
     print(f"Command '{args.command}' is not yet implemented.", file=sys.stderr)
     return 2

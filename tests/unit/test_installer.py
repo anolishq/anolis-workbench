@@ -249,6 +249,7 @@ class TestVerifyInstallation:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = b"0.1.21"
+        mock_result.stderr = b""
 
         with patch("subprocess.run", return_value=mock_result) as mock_run:
             versions = installer.verify_installation(tmp_path, components)
@@ -261,7 +262,12 @@ class TestVerifyInstallation:
             installer.ComponentSpec("anolis", "anolishq/anolis", "0.1.21", "anolis-runtime"),
         ]
 
-        with patch("subprocess.run", side_effect=FileNotFoundError("not found")):
+        mock_result = MagicMock()
+        mock_result.returncode = 127
+        mock_result.stdout = b""
+        mock_result.stderr = b"No such file or directory"
+
+        with patch("subprocess.run", return_value=mock_result):
             with pytest.raises(installer.VerificationError, match="not found"):
                 installer.verify_installation(tmp_path, components)
 
@@ -343,6 +349,7 @@ class TestInstallTarball:
             ["sudo", "tar", "-xz", "-C", "/usr/local"],
             input=b"fake-tarball-data",
             capture_output=True,
+            timeout=30,
         )
 
     def test_failure_raises(self) -> None:
