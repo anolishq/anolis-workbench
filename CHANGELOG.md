@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-18
+
 ### Added
 
 - `anolis-provision install` CLI command for local provisioning: downloads
