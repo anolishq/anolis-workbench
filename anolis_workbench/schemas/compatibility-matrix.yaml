@@ -5,7 +5,7 @@
 # The scheduled check-compat-matrix workflow will open a PR when upstreams
 # publish newer releases.
 
-workbench_version: "0.3.1"
+workbench_version: "0.3.2"
 
 runtime:
   repo: anolishq/anolis

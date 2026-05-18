@@ -13,6 +13,31 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-18
+
+### Security
+
+- Sanitize `Content-Disposition` header filename in the export handler to
+  prevent HTTP response-splitting; CR, LF, double-quote, and backslash are
+  stripped before the value is written into the header.
+- Validate project name in the `anolis-package` CLI command via
+  `validate_name()`, matching the guard applied by the HTTP export handler
+  and closing a path-traversal gap when the name is supplied on the command
+  line.
+- Replace the user-derived temp-file path in `export_project` with a fixed
+  constant (`package.anpkg`), eliminating user-controlled data from all
+  filesystem path operations inside the handler; the user-visible filename
+  continues to be set only in the sanitized `Content-Disposition` header.
+- Canonicalize `out_path` at entry to `build_package` and
+  `_write_zip_deterministic` so all downstream path operations work on a
+  canonical absolute path regardless of call site.
+
+### CI
+
+- Add explicit `permissions: read-all` to `docs.yml` and `metrics.yml`
+  workflow files; previously no permissions block was declared, leaving the
+  `GITHUB_TOKEN` with repository-default (potentially write-all) access.
+
 ## [0.3.1] - 2026-04-23
 
 ### Changed
