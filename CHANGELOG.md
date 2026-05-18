@@ -15,6 +15,11 @@ Historical note:
 
 ### Added
 
+- `anolis-provision install` CLI command for local provisioning: downloads
+  pinned runtime + provider binaries from GitHub Releases, verifies SHA256
+  integrity, installs to a configurable prefix (default `/usr/local`), and
+  creates a ready-to-launch workbench project from a bundled template.
+- `anolis_workbench.core.installer` module with the provisioning domain logic.
 - `ANOLIS_FRONTEND_DIR` environment variable; when set, the workbench server
   uses the specified directory as the frontend dist root instead of the
   packaged or source-tree default.  Intended for custom deployment layouts
