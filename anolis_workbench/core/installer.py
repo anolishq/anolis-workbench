@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 import platform
-import subprocess
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -24,7 +23,7 @@ import requests
 import yaml
 
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core.executor import Executor, LocalExecutor
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -320,7 +319,7 @@ def download_and_verify(
 # ---------------------------------------------------------------------------
 
 
-def install_tarball(data: bytes, prefix: Path) -> None:
+def install_tarball(data: bytes, prefix: Path, *, executor: Executor | None = None) -> None:
     """Install a tarball to the given prefix using sudo tar.
 
     The tarball internal structure is `bin/<binary>`, so extracting to
@@ -329,14 +328,11 @@ def install_tarball(data: bytes, prefix: Path) -> None:
     Raises:
         InstallError: If tar extraction fails.
     """
-    result = subprocess.run(
-        ["sudo", "tar", "-xz", "-C", str(prefix)],
-        input=data,
-        capture_output=True,
-    )
+    if executor is None:
+        executor = LocalExecutor()
+    result = executor.run(["tar", "-xz", "-C", str(prefix)], input=data, sudo=True)
     if result.returncode != 0:
-        stderr = result.stderr.decode(errors="replace").strip()
-        raise InstallError(f"tar extraction failed (exit {result.returncode}): {stderr}")
+        raise InstallError(f"tar extraction failed (exit {result.returncode}): {result.stderr.strip()}")
 
 
 # ---------------------------------------------------------------------------
@@ -350,18 +346,21 @@ def provision_project(
     install_prefix: Path,
     *,
     force: bool = False,
+    executor: Executor | None = None,
+    systems_root: Path | None = None,
 ) -> Path:
     """Create a workbench project from a bundled template with patched paths.
 
     Loads the template, patches executable paths to point at the install prefix,
-    and calls save_project() which validates, renders all configs (including
-    anolis-runtime.yaml), and writes them to disk.
+    validates, renders all configs, and writes them to disk (locally or via executor).
 
     Args:
         template_name: Template directory name under templates/ (e.g. "bioreactor-manual").
         project_name: Name for the created project (e.g. "bioreactor-v1").
         install_prefix: Binary install prefix (e.g. /usr/local).
         force: If True, overwrite an existing project.
+        executor: Executor for file writes. Defaults to LocalExecutor.
+        systems_root: Override systems root (for remote targets). Defaults to local SYSTEMS_ROOT.
 
     Returns:
         Path to the created project directory.
@@ -372,8 +371,13 @@ def provision_project(
     """
     from datetime import datetime, timezone
 
-    project_dir = paths_module.SYSTEMS_ROOT / project_name
-    if project_dir.exists() and not force:
+    if executor is None:
+        executor = LocalExecutor()
+    if systems_root is None:
+        systems_root = paths_module.SYSTEMS_ROOT
+
+    project_dir = systems_root / project_name
+    if not force and executor.file_exists(str(project_dir)):
         raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
 
     # Load template
@@ -392,16 +396,47 @@ def provision_project(
     system["paths"]["runtime_executable"] = str(bin_dir / _RUNTIME_BINARY_NAME)
 
     for _provider_id, provider_data in system["paths"].get("providers", {}).items():
-        # Provider binary name matches the provider ID prefix (bread0 → anolis-provider-bread)
-        # We look it up from the template's original executable filename
         original_exe = Path(provider_data.get("executable", ""))
-        binary_name = original_exe.name  # e.g. "anolis-provider-bread"
+        binary_name = original_exe.name
         provider_data["executable"] = str(bin_dir / binary_name)
 
-    # Write project via save_project (validates + renders + writes all configs)
-    projects_module.save_project(project_name, system)
+    # Write project files via executor
+    write_project_files(executor, system, project_name, systems_root)
 
     return project_dir
+
+
+def write_project_files(
+    executor: Executor,
+    system: dict,
+    project_name: str,
+    systems_root: Path,
+) -> None:
+    """Validate, render, and write project configs via the given executor."""
+    from anolis_workbench.core import renderer as renderer_module
+    from anolis_workbench.core.projects import validate_system_payload
+
+    # Validate locally before writing
+    errors = validate_system_payload(system)
+    if errors:
+        raise ValueError(f"System validation failed: {errors}")
+
+    project_dir_str = str(systems_root / project_name)
+    executor.mkdir(project_dir_str)
+
+    # Write system.json
+    system_json = json.dumps(system, indent=2).encode("utf-8")
+    executor.write_file(f"{project_dir_str}/system.json", system_json)
+
+    # Render and write config files
+    rendered = renderer_module.render(system, project_name, systems_dir_name=systems_root.name)
+    for rel_path, content in rendered.items():
+        full_path = f"{project_dir_str}/{rel_path}"
+        # Ensure parent dir exists for provider configs
+        parent = str(Path(full_path).parent)
+        if parent != project_dir_str:
+            executor.mkdir(parent)
+        executor.write_file(full_path, content.encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +447,8 @@ def provision_project(
 def verify_installation(
     install_prefix: Path,
     components: list[ComponentSpec],
+    *,
+    executor: Executor | None = None,
 ) -> dict[str, str]:
     """Run --version on each installed binary and return version strings.
 
@@ -422,28 +459,21 @@ def verify_installation(
         VerificationError: If a binary cannot be executed or doesn't report
             the expected version.
     """
+    if executor is None:
+        executor = LocalExecutor()
     versions: dict[str, str] = {}
     bin_dir = install_prefix / "bin"
 
     for comp in components:
-        binary_path = bin_dir / comp.binary_name
-        try:
-            result = subprocess.run(
-                [str(binary_path), "--version"],
-                capture_output=True,
-                timeout=10,
-            )
-        except FileNotFoundError as exc:
-            raise VerificationError(f"Binary not found: {binary_path}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise VerificationError(f"Timed out running {binary_path} --version") from exc
+        binary_path = str(bin_dir / comp.binary_name)
+        result = executor.run([binary_path, "--version"])
 
         if result.returncode != 0:
+            if "not found" in result.stderr.lower() or "no such file" in result.stderr.lower():
+                raise VerificationError(f"Binary not found: {binary_path}")
             raise VerificationError(f"{binary_path} --version exited with code {result.returncode}")
 
-        version_output = result.stdout.decode(errors="replace").strip()
-        # Version string may be just the number or "component version"
-        # Extract the version-like part
+        version_output = result.stdout.strip()
         versions[comp.binary_name] = version_output
 
     return versions
@@ -457,31 +487,28 @@ def verify_installation(
 def check_existing_binaries(
     install_prefix: Path,
     components: list[ComponentSpec],
+    *,
+    executor: Executor | None = None,
 ) -> dict[str, str | None]:
     """Check which binaries already exist and their versions.
 
     Returns:
         Dict mapping binary_name → version string (or None if not found).
     """
+    if executor is None:
+        executor = LocalExecutor()
     results: dict[str, str | None] = {}
     bin_dir = install_prefix / "bin"
 
     for comp in components:
-        binary_path = bin_dir / comp.binary_name
-        if not binary_path.exists():
+        binary_path = str(bin_dir / comp.binary_name)
+        if not executor.file_exists(binary_path):
             results[comp.binary_name] = None
             continue
-        try:
-            result = subprocess.run(
-                [str(binary_path), "--version"],
-                capture_output=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                results[comp.binary_name] = result.stdout.decode(errors="replace").strip()
-            else:
-                results[comp.binary_name] = None
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        result = executor.run([binary_path, "--version"])
+        if result.returncode == 0:
+            results[comp.binary_name] = result.stdout.strip()
+        else:
             results[comp.binary_name] = None
 
     return results
@@ -502,6 +529,8 @@ def install(
     force: bool = False,
     dry_run: bool = False,
     progress_callback: Any = None,
+    executor: Executor | None = None,
+    systems_root: Path | None = None,
 ) -> InstallResult:
     """Run the full install flow.
 
@@ -514,10 +543,16 @@ def install(
         force: Overwrite existing binaries/project.
         dry_run: If True, fetch and verify but don't install.
         progress_callback: Optional callable(step: str, detail: str) for UI.
+        executor: Executor for I/O operations. Defaults to LocalExecutor.
+        systems_root: Override systems root (for remote targets).
 
     Returns:
         InstallResult with summary information.
     """
+    if executor is None:
+        executor = LocalExecutor()
+    if systems_root is None:
+        systems_root = paths_module.SYSTEMS_ROOT
 
     def _progress(step: str, detail: str = "") -> None:
         if progress_callback:
@@ -544,7 +579,7 @@ def install(
 
     # 4. Check existing binaries (Decision E)
     if not force:
-        existing = check_existing_binaries(install_prefix, components)
+        existing = check_existing_binaries(install_prefix, components, executor=executor)
         skip_components: list[ComponentSpec] = []
         install_components: list[ComponentSpec] = []
 
@@ -559,15 +594,22 @@ def install(
         if not install_components:
             _progress("skip_all", "All components already at correct versions")
             # Still provision the project if it doesn't exist
-            project_dir = paths_module.SYSTEMS_ROOT / project_name
-            if not project_dir.exists():
+            project_dir_str = str(systems_root / project_name)
+            if not executor.file_exists(project_dir_str):
                 _progress("project", f"Creating project '{project_name}'")
                 if not dry_run:
-                    provision_project(template_name, project_name, install_prefix, force=force)
+                    provision_project(
+                        template_name,
+                        project_name,
+                        install_prefix,
+                        force=force,
+                        executor=executor,
+                        systems_root=systems_root,
+                    )
             return InstallResult(
                 components=components,
                 install_prefix=install_prefix,
-                project_path=paths_module.SYSTEMS_ROOT / project_name,
+                project_path=systems_root / project_name,
                 verified_versions={c.binary_name: c.version for c in components},
                 dry_run=dry_run,
             )
@@ -591,7 +633,7 @@ def install(
     if not dry_run:
         for comp, data in tarballs:
             _progress("install", f"Installing {comp.binary_name} to {install_prefix}")
-            install_tarball(data, install_prefix)
+            install_tarball(data, install_prefix, executor=executor)
     else:
         _progress("dry_run", "Skipping install (dry-run mode)")
 
@@ -602,16 +644,18 @@ def install(
         all_components = resolve_components(load_compat_matrix(compat_matrix_path))
         if template_providers is not None:
             all_components = [c for c in all_components if c.name == "anolis" or c.binary_name in template_providers]
-        verified = verify_installation(install_prefix, all_components)
+        verified = verify_installation(install_prefix, all_components, executor=executor)
     else:
         verified = {c.binary_name: c.version for c in components}
 
     # 8. Create project
     _progress("project", f"Creating project '{project_name}'")
     if not dry_run:
-        provision_project(template_name, project_name, install_prefix, force=force)
+        provision_project(
+            template_name, project_name, install_prefix, force=force, executor=executor, systems_root=systems_root
+        )
 
-    project_path = paths_module.SYSTEMS_ROOT / project_name
+    project_path = systems_root / project_name
 
     return InstallResult(
         components=components,
