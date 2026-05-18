@@ -39,12 +39,27 @@ TEMPLATES_ROOT = _select_asset_path(
     _SOURCE_ASSET_ROOT / "templates",
     _PACKAGED_ASSET_ROOT / "templates",
 )
-# In dev: resolved to frontend/dist/ after `npm run build` in the frontend/ source tree.
-# In installed mode: resolved to the bundled anolis_workbench/frontend/dist/ package-data.
-FRONTEND_DIR = _select_asset_path(
-    _SOURCE_ASSET_ROOT / "frontend" / "dist",
-    _PACKAGED_ASSET_ROOT / "frontend" / "dist",
-)
+
+
+def _resolve_frontend_dir() -> pathlib.Path:
+    """Resolve frontend dist dir with optional env override.
+
+    The override is intended for test fixtures and custom deployment layouts.
+    When set, ANOLIS_FRONTEND_DIR is used as-is; otherwise the standard
+    source-tree / packaged asset fallback applies.
+    """
+    override = os.getenv("ANOLIS_FRONTEND_DIR")
+    if override and override.strip():
+        return pathlib.Path(override).expanduser().resolve()
+    # In dev: resolved to frontend/dist/ after `npm run build` in the frontend/ source tree.
+    # In installed mode: resolved to the bundled anolis_workbench/frontend/dist/ package-data.
+    return _select_asset_path(
+        _SOURCE_ASSET_ROOT / "frontend" / "dist",
+        _PACKAGED_ASSET_ROOT / "frontend" / "dist",
+    )
+
+
+FRONTEND_DIR = _resolve_frontend_dir()
 CATALOG_PATH = _select_asset_path(
     _SOURCE_ASSET_ROOT / "catalog" / "providers.json",
     _PACKAGED_ASSET_ROOT / "catalog" / "providers.json",

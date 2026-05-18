@@ -13,6 +13,19 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- `ANOLIS_FRONTEND_DIR` environment variable; when set, the workbench server
+  uses the specified directory as the frontend dist root instead of the
+  packaged or source-tree default.  Intended for custom deployment layouts
+  and test fixtures.
+
+### CI
+
+- `workbench_server` test fixture now creates a minimal HTML stub and directs
+  the server at it via `ANOLIS_FRONTEND_DIR`, so the shell-route integration
+  tests pass in local development without requiring a prior `npm run build`.
+
 ## [0.3.2] - 2026-05-18
 
 ### Security

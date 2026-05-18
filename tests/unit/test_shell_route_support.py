@@ -119,11 +119,23 @@ def _wait_for_ready(base_url: str, proc: subprocess.Popen[str], timeout_s: float
 def workbench_server(tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, None]:
     port = _pick_free_port()
     systems_root = tmp_path / "systems"
+
+    # Minimal frontend stub so the server satisfies verify_environment() and
+    # serves a recognisable HTML page without needing a full `npm run build`.
+    frontend_dir = tmp_path / "frontend_dist"
+    frontend_dir.mkdir()
+    (frontend_dir / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>Anolis Workbench</title></head>"
+        "<body><div id='app'>Anolis Workbench</div></body></html>",
+        encoding="utf-8",
+    )
+
     env = os.environ.copy()
     env["ANOLIS_WORKBENCH_HOST"] = "127.0.0.1"
     env["ANOLIS_WORKBENCH_PORT"] = str(port)
     env["ANOLIS_WORKBENCH_OPEN_BROWSER"] = "0"
     env["ANOLIS_DATA_DIR"] = str(systems_root)
+    env["ANOLIS_FRONTEND_DIR"] = str(frontend_dir)
     env["PYTHONPATH"] = f"{_REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
     proc = subprocess.Popen(
