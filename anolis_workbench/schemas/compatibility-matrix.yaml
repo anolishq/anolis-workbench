@@ -9,7 +9,7 @@ workbench_version: "0.3.2"
 
 runtime:
   repo: anolishq/anolis
-  version: "0.1.20"
+  version: "0.1.21"
 
 providers:
   anolis-provider-sim:
@@ -17,7 +17,7 @@ providers:
     version: "0.2.3"
   anolis-provider-bread:
     repo: anolishq/anolis-provider-bread
-    version: "0.2.7"
+    version: "0.2.8"
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
-    version: "0.2.4"
+    version: "0.2.5"
