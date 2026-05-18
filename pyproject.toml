@@ -32,6 +32,7 @@ dev = [
 anolis-workbench = "anolis_workbench.cli.main:main"
 anolis-package = "anolis_workbench.cli.package_cli:main"
 anolis-validate = "anolis_workbench.cli.validate_cli:main"
+anolis-provision = "anolis_workbench.cli.provision_cli:main"
 
 [tool.hatch.build]
 # Generated build output — gitignored but must be bundled in the distribution.
