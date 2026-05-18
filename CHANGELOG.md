@@ -13,6 +13,14 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- `anolis-provision bundle` CLI command for creating offline install bundles:
+  downloads pinned binaries for a specified architecture, renders project configs,
+  and assembles a self-contained directory with `install.sh` for air-gapped
+  deployment to Raspberry Pi targets.
+- `anolis_workbench.core.bundler` module with the bundle assembly logic.
+
 ## [0.4.0] - 2026-05-18
 
 ### Added
