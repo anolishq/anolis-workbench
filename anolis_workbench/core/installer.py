@@ -127,10 +127,7 @@ def detect_platform() -> str:
     machine = platform.machine()
     result = _ARCH_MAP.get(machine)
     if result is None:
-        raise PlatformError(
-            f"Unsupported architecture: {machine!r}. "
-            f"Supported: {', '.join(sorted(_ARCH_MAP.keys()))}"
-        )
+        raise PlatformError(f"Unsupported architecture: {machine!r}. Supported: {', '.join(sorted(_ARCH_MAP.keys()))}")
     return result
 
 
@@ -170,12 +167,14 @@ def resolve_components(compat_matrix: dict[str, Any]) -> list[ComponentSpec]:
     # Runtime
     rt = compat_matrix.get("runtime", {})
     if rt.get("repo") and rt.get("version"):
-        components.append(ComponentSpec(
-            name="anolis",
-            repo=rt["repo"],
-            version=rt["version"],
-            binary_name=_RUNTIME_BINARY_NAME,
-        ))
+        components.append(
+            ComponentSpec(
+                name="anolis",
+                repo=rt["repo"],
+                version=rt["version"],
+                binary_name=_RUNTIME_BINARY_NAME,
+            )
+        )
 
     # Providers
     providers = compat_matrix.get("providers", {})
@@ -183,12 +182,14 @@ def resolve_components(compat_matrix: dict[str, Any]) -> list[ComponentSpec]:
         if not isinstance(pdata, dict):
             continue
         if pdata.get("repo") and pdata.get("version"):
-            components.append(ComponentSpec(
-                name=provider_name,
-                repo=pdata["repo"],
-                version=pdata["version"],
-                binary_name=provider_name,
-            ))
+            components.append(
+                ComponentSpec(
+                    name=provider_name,
+                    repo=pdata["repo"],
+                    version=pdata["version"],
+                    binary_name=provider_name,
+                )
+            )
 
     return components
 
@@ -268,9 +269,7 @@ def fetch_manifest(
             break
 
     if tarball_url is None:
-        raise ManifestError(
-            f"Tarball asset {tarball_asset_name!r} not found in release {tag} of {repo}"
-        )
+        raise ManifestError(f"Tarball asset {tarball_asset_name!r} not found in release {tag} of {repo}")
 
     return ManifestData(
         component=manifest_data.get("component", ""),
@@ -312,11 +311,7 @@ def download_and_verify(
     data = resp.content
     actual_sha256 = hashlib.sha256(data).hexdigest()
     if actual_sha256 != expected_sha256:
-        raise IntegrityError(
-            f"SHA256 mismatch for {url}:\n"
-            f"  expected: {expected_sha256}\n"
-            f"  actual:   {actual_sha256}"
-        )
+        raise IntegrityError(f"SHA256 mismatch for {url}:\n  expected: {expected_sha256}\n  actual:   {actual_sha256}")
     return data
 
 
@@ -379,10 +374,7 @@ def provision_project(
 
     project_dir = paths_module.SYSTEMS_ROOT / project_name
     if project_dir.exists() and not force:
-        raise ValueError(
-            f"Project '{project_name}' already exists at {project_dir}. "
-            f"Use --force to overwrite."
-        )
+        raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
 
     # Load template
     tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
@@ -442,18 +434,12 @@ def verify_installation(
                 timeout=10,
             )
         except FileNotFoundError as exc:
-            raise VerificationError(
-                f"Binary not found: {binary_path}"
-            ) from exc
+            raise VerificationError(f"Binary not found: {binary_path}") from exc
         except subprocess.TimeoutExpired as exc:
-            raise VerificationError(
-                f"Timed out running {binary_path} --version"
-            ) from exc
+            raise VerificationError(f"Timed out running {binary_path} --version") from exc
 
         if result.returncode != 0:
-            raise VerificationError(
-                f"{binary_path} --version exited with code {result.returncode}"
-            )
+            raise VerificationError(f"{binary_path} --version exited with code {result.returncode}")
 
         version_output = result.stdout.decode(errors="replace").strip()
         # Version string may be just the number or "component version"
@@ -550,10 +536,7 @@ def install(
     # Filter to only the providers used by the template
     template_providers = _get_template_provider_names(template_name)
     if template_providers is not None:
-        components = [
-            c for c in components
-            if c.name == "anolis" or c.binary_name in template_providers
-        ]
+        components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
 
     # 3. Detect platform
     _progress("platform", "Detecting platform")
@@ -618,10 +601,7 @@ def install(
         # Verify ALL components (including ones we skipped as already-installed)
         all_components = resolve_components(load_compat_matrix(compat_matrix_path))
         if template_providers is not None:
-            all_components = [
-                c for c in all_components
-                if c.name == "anolis" or c.binary_name in template_providers
-            ]
+            all_components = [c for c in all_components if c.name == "anolis" or c.binary_name in template_providers]
         verified = verify_installation(install_prefix, all_components)
     else:
         verified = {c.binary_name: c.version for c in components}

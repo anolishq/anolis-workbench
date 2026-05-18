@@ -44,13 +44,17 @@ class TestDetectPlatform:
 class TestLoadCompatMatrix:
     def test_from_path(self, tmp_path: Path) -> None:
         matrix_file = tmp_path / "compat.yaml"
-        matrix_file.write_text(yaml.dump({
-            "workbench_version": "0.3.2",
-            "runtime": {"repo": "anolishq/anolis", "version": "0.1.21"},
-            "providers": {
-                "anolis-provider-bread": {"repo": "anolishq/anolis-provider-bread", "version": "0.2.8"},
-            },
-        }))
+        matrix_file.write_text(
+            yaml.dump(
+                {
+                    "workbench_version": "0.3.2",
+                    "runtime": {"repo": "anolishq/anolis", "version": "0.1.21"},
+                    "providers": {
+                        "anolis-provider-bread": {"repo": "anolishq/anolis-provider-bread", "version": "0.2.8"},
+                    },
+                }
+            )
+        )
         result = installer.load_compat_matrix(matrix_file)
         assert result["runtime"]["version"] == "0.1.21"
 
@@ -226,9 +230,7 @@ class TestProvisionProject:
         (systems_root / "force-test").mkdir()
         (systems_root / "force-test" / "old-file.txt").write_text("old")
 
-        project_dir = installer.provision_project(
-            "bioreactor-manual", "force-test", prefix, force=True
-        )
+        project_dir = installer.provision_project("bioreactor-manual", "force-test", prefix, force=True)
         assert (project_dir / "system.json").exists()
 
 
