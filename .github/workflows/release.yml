@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release (e.g. 0.3.14)
+        description: Version to release (e.g. 0.11.1)
         required: true
         type: string
       prerelease:
@@ -16,7 +16,19 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+
 jobs:
+
+  # =========================================================================
+  # 1. Validate — single source of truth for version alignment
+  # =========================================================================
   validate:
     name: Validate release request
     runs-on: ubuntu-24.04
@@ -28,7 +40,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate requested version
+      - name: Validate version alignment across all manifests
         id: validate
         run: |
           set -euo pipefail
@@ -39,44 +51,66 @@ jobs:
             exit 1
           fi
 
-          PYPROJECT_VERSION=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-
-          if [[ "$VERSION" != "$PYPROJECT_VERSION" ]]; then
-            echo "Version mismatch: input=$VERSION pyproject=$PYPROJECT_VERSION"
-            exit 1
-          fi
-
           TAG="v$VERSION"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag already exists: $TAG"
             exit 1
           fi
 
-          MATRIX_VERSION=$(python3 -c "import pathlib, yaml; m = yaml.safe_load(pathlib.Path('anolis_workbench/schemas/compatibility-matrix.yaml').read_text()); print(m['workbench_version'])")
-          if [[ "$MATRIX_VERSION" != "$VERSION" ]]; then
-            echo "compatibility-matrix.yaml workbench_version ($MATRIX_VERSION) does not match release version ($VERSION)"
-            echo "Update workbench_version in anolis_workbench/schemas/compatibility-matrix.yaml before releasing."
+          PYPROJECT_VERSION=$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          DESKTOP_PACKAGE_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('desktop/package.json').read_text())['version'])")
+          FRONTEND_PACKAGE_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('frontend/package.json').read_text())['version'])")
+          TAURI_CONF_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version'])")
+          CARGO_VERSION=$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('desktop/src-tauri/Cargo.toml').read_text())['package']['version'])")
+          MATRIX_VERSION=$(python3 -c "import pathlib,yaml; print(yaml.safe_load(pathlib.Path('anolis_workbench/schemas/compatibility-matrix.yaml').read_text())['workbench_version'])")
+
+          ERRORS=""
+          for pair in \
+            "pyproject.toml:$PYPROJECT_VERSION" \
+            "desktop/package.json:$DESKTOP_PACKAGE_VERSION" \
+            "frontend/package.json:$FRONTEND_PACKAGE_VERSION" \
+            "desktop/src-tauri/tauri.conf.json:$TAURI_CONF_VERSION" \
+            "desktop/src-tauri/Cargo.toml:$CARGO_VERSION" \
+            "compatibility-matrix.yaml:$MATRIX_VERSION"; do
+            FILE="${pair%%:*}"
+            FOUND="${pair#*:}"
+            if [[ "$FOUND" != "$VERSION" ]]; then
+              ERRORS="${ERRORS}  ${FILE}: found ${FOUND}, expected ${VERSION}\n"
+            fi
+          done
+
+          if [[ -n "$ERRORS" ]]; then
+            echo "Version mismatch(es):"
+            echo -e "$ERRORS"
             exit 1
           fi
-          echo "Compatibility matrix version matches: $MATRIX_VERSION"
 
+          echo "All 6 version locations match: $VERSION"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release request validated for $TAG"
 
-  metrics:
-    name: Collect metrics
-    needs: [validate]
-    uses: anolishq/.github/.github/workflows/metrics.yml@v1
-    with:
-      tag: ${{ needs.validate.outputs.tag }}
-
+  # =========================================================================
+  # 2. CI gate — reuse the existing CI workflow
+  # =========================================================================
   ci:
     name: CI gate
     needs: validate
     uses: ./.github/workflows/ci.yml
 
-  build:
-    name: Build sdist and wheel
+  # =========================================================================
+  # 3. Metrics
+  # =========================================================================
+  metrics:
+    name: Collect metrics
+    needs: validate
+    uses: anolishq/.github/.github/workflows/metrics.yml@v1
+    with:
+      tag: ${{ needs.validate.outputs.tag }}
+
+  # =========================================================================
+  # 4. Build Python sdist + wheel
+  # =========================================================================
+  build-python:
+    name: Build Python distributions
     needs: [validate, ci]
     runs-on: ubuntu-24.04
     steps:
@@ -118,8 +152,6 @@ jobs:
       - name: Verify dist artifacts
         run: |
           set -euo pipefail
-          test -d dist
-          ls -lh dist/
           ls dist/*.whl dist/*.tar.gz >/dev/null
 
       - name: Upload dist artifacts
@@ -130,15 +162,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # =========================================================================
+  # 5. Publish to PyPI
+  # =========================================================================
   publish-pypi:
     name: Publish to PyPI
-    needs: [validate, build]
+    needs: [validate, build-python]
     runs-on: ubuntu-24.04
     environment:
       name: pypi
       url: https://pypi.org/project/anolis-workbench/
     permissions:
-      id-token: write  # OIDC trusted publisher
+      id-token: write
       contents: read
     steps:
       - name: Download dist artifacts
@@ -153,8 +188,11 @@ jobs:
           print-hash: true
           skip-existing: true
 
+  # =========================================================================
+  # 6. Smoke test PyPI install
+  # =========================================================================
   smoke-test:
-    name: Smoke test from clean install
+    name: Smoke test PyPI install
     needs: [validate, publish-pypi]
     runs-on: ubuntu-24.04
     steps:
@@ -163,54 +201,266 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Wait for PyPI propagation and install
+      - name: Install from PyPI with retry
         run: |
           set -euxo pipefail
           VERSION="${{ inputs.version }}"
           python -m venv /tmp/smoke-venv
           /tmp/smoke-venv/bin/pip install --upgrade pip
 
-          # PyPI CDN can take up to ~60s to propagate. Retry with exponential backoff.
-          # pip --timeout caps each attempt at 30s so the job can't hang silently.
           MAX_ATTEMPTS=5
           DELAY=10
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
-            echo "=== Attempt $attempt/$MAX_ATTEMPTS: installing anolis-workbench==$VERSION ==="
+            echo "=== Attempt $attempt/$MAX_ATTEMPTS ==="
             if /tmp/smoke-venv/bin/pip install --timeout 30 "anolis-workbench==$VERSION"; then
-              echo "Install succeeded on attempt $attempt."
               break
             fi
             if [[ $attempt -eq $MAX_ATTEMPTS ]]; then
-              echo "Package not available on PyPI after $MAX_ATTEMPTS attempts."
+              echo "Package not available after $MAX_ATTEMPTS attempts."
               exit 1
             fi
-            echo "Not yet available — waiting ${DELAY}s before retry..."
             sleep $DELAY
             DELAY=$(( DELAY * 2 > 60 ? 60 : DELAY * 2 ))
           done
 
-      - name: Verify installed package
-        run: |
-          set -euxo pipefail
-          echo "=== Installed packages ==="
-          /tmp/smoke-venv/bin/pip show anolis-workbench
-          echo "=== Package files ==="
-          /tmp/smoke-venv/bin/pip show -f anolis-workbench | grep -E '(frontend|dist|Location)' || true
-
       - name: Run smoke checks
         run: |
           set -euxo pipefail
-          # anolis-workbench starts a blocking server; use --version and --help to verify it
-          # exits cleanly. Use timeout as a safety net in case something blocks unexpectedly.
           timeout 10 /tmp/smoke-venv/bin/anolis-workbench --version
           timeout 10 /tmp/smoke-venv/bin/anolis-workbench --help
           timeout 10 /tmp/smoke-venv/bin/anolis-package --help
           timeout 10 /tmp/smoke-venv/bin/anolis-validate --help
-          echo "Smoke test passed for anolis-workbench==${{ inputs.version }}"
 
+  # =========================================================================
+  # 7. Freeze sidecar (cross-platform)
+  # =========================================================================
+  freeze-server:
+    name: Freeze sidecar (${{ matrix.target }})
+    needs: [validate, ci]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+          - os: macos-14
+            target: x86_64-apple-darwin
+            ext: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install freeze dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install .[dev,ssh]
+
+      - name: Freeze sidecar executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/freeze_server.py \
+            --name anolis-workbench \
+            --output-dir dist \
+            --min-size-bytes 10000000
+
+      - name: Stage sidecar artifact for Tauri target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sidecar
+          cp "dist/anolis-workbench${{ matrix.ext }}" "sidecar/anolis-workbench-sidecar-${{ matrix.target }}${{ matrix.ext }}"
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: sidecar/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # =========================================================================
+  # 8. Package Tauri desktop bundles (cross-platform)
+  # =========================================================================
+  package-desktop:
+    name: Build desktop bundle (${{ matrix.target }})
+    needs: [validate, freeze-server]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-14
+            target: x86_64-apple-darwin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download frozen sidecar
+        uses: actions/download-artifact@v8
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: desktop/src-tauri/binaries
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Install desktop dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop
+          npm ci
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            patchelf
+
+      - name: Build Tauri desktop bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop
+          npx tauri build --target ${{ matrix.target }}
+
+      - name: Upload Windows bundle
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-bundle-${{ matrix.target }}
+          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Linux bundles
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-bundle-${{ matrix.target }}
+          path: |
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS bundle
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-bundle-${{ matrix.target }}
+          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  # =========================================================================
+  # 9. SBOM
+  # =========================================================================
+  sbom:
+    name: Generate CycloneDX SBOM
+    needs: package-desktop
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          syft dir:. -o cyclonedx-json=sbom-python.cdx.json
+          syft dir:frontend -o cyclonedx-json=sbom-node.cdx.json
+          syft dir:desktop/src-tauri -o cyclonedx-json=sbom-rust.cdx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-sbom-cyclonedx
+          path: |
+            sbom-python.cdx.json
+            sbom-node.cdx.json
+            sbom-rust.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+  # =========================================================================
+  # 10. Create GitHub Release with ALL assets
+  # =========================================================================
   create-release:
-    name: Tag and create GitHub Release
-    needs: [validate, smoke-test, metrics]
+    name: Create GitHub Release
+    needs: [validate, build-python, smoke-test, package-desktop, sbom, metrics]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -220,11 +470,53 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download dist artifacts
+      - name: Download Python dist artifacts
         uses: actions/download-artifact@v8
         with:
           name: dist-artifacts
           path: dist
+
+      - name: Download desktop bundle artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-bundle-*
+          path: raw-bundles
+          merge-multiple: true
+
+      - name: Download SBOM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-sbom-*
+          path: raw-bundles
+          merge-multiple: true
+
+      - name: Download metrics artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: metrics-${{ github.event.repository.name }}-${{ github.run_number }}
+          path: metrics-out/
+
+      - name: Normalize desktop artifact filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          mkdir -p release-assets
+
+          for f in raw-bundles/*; do
+            [[ -f "$f" ]] || continue
+            base=$(basename "$f")
+            # Replace spaces with hyphens, lowercase
+            normalized=$(echo "$base" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+            # Normalize Tauri naming: "anolis-workbench_ver_" -> "anolis-workbench-ver-"
+            normalized=$(echo "$normalized" | sed "s/anolis-workbench_${VERSION}_/anolis-workbench-${VERSION}-/g")
+            # Remove "-setup" suffix from MSI
+            normalized=$(echo "$normalized" | sed 's/-setup\.msi/.msi/g')
+            cp "$f" "release-assets/${normalized}"
+          done
+
+          echo "=== Release assets ==="
+          ls -lh release-assets/
 
       - name: Create and push release tag
         run: |
@@ -235,46 +527,33 @@ jobs:
           git tag -a "$TAG" -m "Release ${{ inputs.version }}"
           git push origin "$TAG"
 
-      - name: Generate release notes
-        id: notes
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const version = '${{ inputs.version }}';
-            const tag = '${{ needs.validate.outputs.tag }}';
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            return [
-              `Release ${version}`,
-              ``,
-              `Install: \`pip install anolis-workbench==${version}\``,
-              ``,
-              `Assets include wheel and source distribution.`,
-              ``,
-              `Tag: ${tag}`,
-              `Repository: ${owner}/${repo}`,
-            ].join('\n');
-          result-encoding: string
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
           name: Release ${{ inputs.version }}
-          body: ${{ steps.notes.outputs.result }}
           prerelease: ${{ inputs.prerelease }}
+          body: |
+            ## Release ${{ inputs.version }}
+
+            ### Python Package
+
+            ```
+            pip install anolis-workbench==${{ inputs.version }}
+            ```
+
+            ### Desktop Downloads
+
+            | Platform | File |
+            |----------|------|
+            | Windows x64 | `anolis-workbench-${{ inputs.version }}-x64.msi` |
+            | macOS Apple Silicon | `anolis-workbench-${{ inputs.version }}-aarch64.dmg` |
+            | macOS Intel | `anolis-workbench-${{ inputs.version }}-x64.dmg` |
+            | Linux x64 (.deb) | `anolis-workbench-${{ inputs.version }}-amd64.deb` |
+            | Linux x64 (.AppImage) | `anolis-workbench-${{ inputs.version }}-amd64.appimage` |
           files: |
             dist/*.whl
             dist/*.tar.gz
-
-      - name: Download metrics artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: metrics-${{ github.event.repository.name }}-${{ github.run_number }}
-          path: metrics-out/
-
-      - name: Upload metrics.json to release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.validate.outputs.tag }}
-          files: metrics-out/metrics.json
+            release-assets/anolis-workbench-*
+            release-assets/sbom-*
+            metrics-out/metrics.json
