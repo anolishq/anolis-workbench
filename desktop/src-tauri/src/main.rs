@@ -77,7 +77,7 @@ fn stop_sidecar(app: &AppHandle) {
         }
     };
 
-    let Some(mut child) = guard.take() else {
+    let Some(child) = guard.take() else {
         return;
     };
 
@@ -156,14 +156,13 @@ fn main() {
 
             if !start_sidecar(app.handle()) {
                 show_startup_error(app.handle());
-                app.exit(1);
-                return Ok(());
+                std::process::exit(1);
             }
 
             if !wait_for_workbench_ready(STARTUP_TIMEOUT) {
                 stop_sidecar(app.handle());
                 show_startup_error(app.handle());
-                app.exit(1);
+                std::process::exit(1);
             }
 
             Ok(())

@@ -45,6 +45,7 @@ dependencies = [
 name = "anolis-workbench-desktop"
 version = "0.11.1"
 dependencies = [
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
