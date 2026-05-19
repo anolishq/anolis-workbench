@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
-from anolis_workbench.server.routes import commission, compose, operate
+from anolis_workbench.server.routes import commission, compose, operate, provision
 
 
 def _env_int(name: str, default: int) -> int:
@@ -111,6 +111,9 @@ class _Handler(BaseHTTPRequestHandler):
             compose.serve_catalog(self)
         elif path == "/api/templates":
             compose.serve_templates(self)
+        elif path.startswith("/api/provision/status/"):
+            job_id = path.split("/")[-1]
+            provision.get_status(self, job_id)
         elif path.startswith("/v0/"):
             operate.proxy_runtime(self, "GET", self.path)
         else:
@@ -118,7 +121,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.split("?")[0]
-        if path == "/api/projects":
+        if path == "/api/provision/install":
+            provision.start_install(self)
+        elif path == "/api/provision/remote":
+            provision.start_remote(self)
+        elif path.startswith("/api/provision/cancel/"):
+            job_id = path.split("/")[-1]
+            provision.cancel_job(self, job_id)
+        elif path == "/api/projects":
             compose.create_project(self)
         elif path.startswith("/api/projects/"):
             name, sub = self._parse_project_path(path)
