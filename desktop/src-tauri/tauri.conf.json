@@ -6,7 +6,7 @@
   "build": {
     "beforeBuildCommand": "",
     "beforeDevCommand": "",
-    "frontendDist": "../../anolis_workbench/frontend/dist",
+    "frontendDist": "http://127.0.0.1:3010",
     "devUrl": "http://127.0.0.1:3010"
   },
   "app": {
@@ -14,7 +14,6 @@
       {
         "label": "main",
         "title": "Anolis Workbench",
-        "url": "http://127.0.0.1:3010",
         "width": 1440,
         "height": 920,
         "resizable": true,
