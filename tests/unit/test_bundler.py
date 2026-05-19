@@ -263,3 +263,90 @@ class TestBuildBundle:
                 platform_str="linux-arm64",
                 out_dir=out_dir,
             )
+
+    def test_system_path_overrides_template(
+        self, tmp_path: Path, components: list[ComponentSpec], tarballs: list, fake_template: Path
+    ) -> None:
+        """--system should load from the given file instead of the template."""
+        out_dir = tmp_path / "bundle-out"
+
+        # Create a custom system.json
+        custom_system = {
+            "schema_version": 1,
+            "meta": {"name": "custom", "created": ""},
+            "paths": {
+                "runtime_executable": "build/anolis-runtime",
+                "providers": {
+                    "ezo0": {"executable": "build/anolis-provider-ezo", "bus_path": "/dev/i2c-1"},
+                },
+            },
+            "topology": {
+                "runtime": {"grpc_port": 50051, "telemetry": {"enabled": False}},
+                "providers": {"ezo0": {"type": "ezo", "devices": []}},
+            },
+        }
+        system_file = tmp_path / "my-system.json"
+        system_file.write_text(json.dumps(custom_system), encoding="utf-8")
+
+        with patch("anolis_workbench.core.bundler.renderer_module.render", return_value={}):
+            result = build_bundle(
+                components=components,
+                tarballs=tarballs,
+                template_name="bioreactor-manual",
+                project_name="custom-project",
+                platform_str="linux-arm64",
+                out_dir=out_dir,
+                system_path=system_file,
+            )
+
+        assert result.bundle_path == out_dir
+        system = json.loads((out_dir / "project" / "system.json").read_text(encoding="utf-8"))
+        assert system["meta"]["name"] == "custom-project"
+        assert system["paths"]["providers"]["ezo0"]["executable"] == "/usr/local/bin/anolis-provider-ezo"
+
+    def test_include_wheels_creates_wheels_dir(
+        self, tmp_path: Path, components: list[ComponentSpec], tarballs: list, fake_template: Path
+    ) -> None:
+        """--include-wheels should create a wheels/ directory."""
+        out_dir = tmp_path / "bundle-out"
+
+        with (
+            patch("anolis_workbench.core.bundler.renderer_module.render", return_value={}),
+            patch("anolis_workbench.core.bundler._download_wheels") as mock_dl,
+        ):
+            build_bundle(
+                components=components,
+                tarballs=tarballs,
+                template_name="bioreactor-manual",
+                project_name="bioreactor-v1",
+                platform_str="linux-arm64",
+                out_dir=out_dir,
+                include_wheels=True,
+            )
+
+        assert (out_dir / "wheels").is_dir()
+        mock_dl.assert_called_once_with(out_dir / "wheels")
+
+        content = (out_dir / "install.sh").read_text(encoding="utf-8")
+        assert "pip install --no-index" in content
+        assert "anolis-workbench" in content
+
+    def test_no_wheels_by_default(
+        self, tmp_path: Path, components: list[ComponentSpec], tarballs: list, fake_template: Path
+    ) -> None:
+        """Without --include-wheels, no wheels/ dir and no pip section in install.sh."""
+        out_dir = tmp_path / "bundle-out"
+
+        with patch("anolis_workbench.core.bundler.renderer_module.render", return_value={}):
+            build_bundle(
+                components=components,
+                tarballs=tarballs,
+                template_name="bioreactor-manual",
+                project_name="bioreactor-v1",
+                platform_str="linux-arm64",
+                out_dir=out_dir,
+            )
+
+        assert not (out_dir / "wheels").exists()
+        content = (out_dir / "install.sh").read_text(encoding="utf-8")
+        assert "pip install --no-index" not in content

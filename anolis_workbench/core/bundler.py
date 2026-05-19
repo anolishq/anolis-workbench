@@ -1,9 +1,9 @@
-"""Bundle builder for offline provisioning (pass 4).
+"""Bundle builder for offline provisioning (pass 4 + pass 7).
 
 Assembles a self-contained bundle directory that can be transferred to an
 air-gapped RPi and installed via the included install.sh script.
 
-No HTTP, no subprocess, no sudo — pure file I/O.
+Supports optional Python wheel bundling for true air-gap operation.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import stat
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,8 @@ def build_bundle(
     *,
     install_prefix: Path = Path("/usr/local"),
     workbench_version: str = "",
+    system_path: Path | None = None,
+    include_wheels: bool = False,
 ) -> BundleResult:
     """Assemble a complete bundle directory for offline provisioning.
 
@@ -55,6 +58,8 @@ def build_bundle(
         out_dir: Directory to write the bundle into. Must not exist.
         install_prefix: Install prefix for path patching (default /usr/local).
         workbench_version: Workbench version for manifest metadata.
+        system_path: Optional custom system.json (overrides template).
+        include_wheels: If True, bundle Python wheels for offline pip install.
 
     Returns:
         BundleResult with the bundle path and metadata.
@@ -97,7 +102,7 @@ def build_bundle(
     project_dir.mkdir()
     (project_dir / "providers").mkdir()
 
-    system = _render_project_configs(template_name, project_name, install_prefix)
+    system = _render_project_configs(template_name, project_name, install_prefix, system_path=system_path)
     (project_dir / "system.json").write_text(json.dumps(system, indent=2) + "\n", encoding="utf-8")
 
     rendered = renderer_module.render(system, project_name, systems_dir_name="systems")
@@ -106,8 +111,16 @@ def build_bundle(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(content, encoding="utf-8")
 
+    # --- wheels/ (optional, for offline pip install) ---
+    has_wheels = False
+    if include_wheels:
+        wheels_dir = out_dir / "wheels"
+        wheels_dir.mkdir()
+        _download_wheels(wheels_dir)
+        has_wheels = True
+
     # --- install.sh ---
-    install_script = _generate_install_sh(project_name, components)
+    install_script = _generate_install_sh(project_name, components, has_wheels=has_wheels)
     install_sh_path = out_dir / "install.sh"
     install_sh_path.write_text(install_script, encoding="utf-8")
     install_sh_path.chmod(install_sh_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -120,13 +133,19 @@ def build_bundle(
     )
 
 
-def _render_project_configs(template_name: str, project_name: str, install_prefix: Path) -> dict[str, Any]:
-    """Load template, patch paths for target prefix. Returns the patched system dict."""
-    tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
-    if not tpl_path.exists():
-        raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
-
-    system: dict = json.loads(tpl_path.read_text(encoding="utf-8"))
+def _render_project_configs(
+    template_name: str, project_name: str, install_prefix: Path, *, system_path: Path | None = None
+) -> dict[str, Any]:
+    """Load template or custom system.json, patch paths for target prefix."""
+    if system_path is not None:
+        if not system_path.exists():
+            raise FileNotFoundError(f"System file not found: {system_path}")
+        system: dict = json.loads(system_path.read_text(encoding="utf-8"))
+    else:
+        tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
+        if not tpl_path.exists():
+            raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
+        system = json.loads(tpl_path.read_text(encoding="utf-8"))
 
     # Patch meta
     system["meta"]["name"] = project_name
@@ -144,9 +163,43 @@ def _render_project_configs(template_name: str, project_name: str, install_prefi
     return system
 
 
-def _generate_install_sh(project_name: str, components: list[ComponentSpec]) -> str:
+def _download_wheels(wheels_dir: Path) -> None:
+    """Download all Python wheels for offline install.
+
+    Uses pip download to capture anolis-workbench and all transitive dependencies.
+    The result is a directory of .whl files that can be installed with:
+        pip install --no-index --find-links wheels/ anolis-workbench
+    """
+    pip_args = [
+        "pip",
+        "download",
+        "--dest",
+        str(wheels_dir),
+        "--no-cache-dir",
+        "anolis-workbench",
+    ]
+
+    result = subprocess.run(pip_args, capture_output=True, timeout=300)
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace").strip()
+        raise RuntimeError(f"Failed to download wheels: {stderr}")
+
+
+def _generate_install_sh(project_name: str, components: list[ComponentSpec], *, has_wheels: bool = False) -> str:
     """Generate the install.sh script content."""
     verify_lines = "\n".join(f'"{c.binary_name}" --version' for c in components)
+
+    wheels_section = ""
+    if has_wheels:
+        wheels_section = """
+# 4. Install Python packages (offline)
+if [[ -d "$BUNDLE_DIR/wheels" ]]; then
+    echo "Installing Python packages (offline)..."
+    pip install --no-index --find-links "$BUNDLE_DIR/wheels" anolis-workbench
+    echo "✓ Python packages installed"
+    echo ""
+fi
+"""
 
     return f'''#!/usr/bin/env bash
 set -euo pipefail
@@ -185,8 +238,8 @@ cp "$BUNDLE_DIR/project/anolis-runtime.yaml" "$SYSTEMS_ROOT/$PROJECT_NAME/anolis
 cp "$BUNDLE_DIR/project/providers/"*.yaml "$SYSTEMS_ROOT/$PROJECT_NAME/providers/"
 echo "✓ Project written to $SYSTEMS_ROOT/$PROJECT_NAME/"
 echo ""
-
-# 4. Verify
+{wheels_section}
+# Verify
 echo "Verifying binaries..."
 {verify_lines}
 echo ""
@@ -194,7 +247,6 @@ echo ""
 echo "=== Done ==="
 echo ""
 echo "Next steps:"
-echo "  pip install anolis-workbench"
 echo "  anolis-workbench"
 echo "  → open http://127.0.0.1:3010 → $PROJECT_NAME → Launch"
 '''

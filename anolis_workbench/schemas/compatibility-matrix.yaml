@@ -5,7 +5,7 @@
 # The scheduled check-compat-matrix workflow will open a PR when upstreams
 # publish newer releases.
 
-workbench_version: "0.5.0"
+workbench_version: "0.6.0"
 
 runtime:
   repo: anolishq/anolis
@@ -21,3 +21,8 @@ providers:
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
     version: "0.2.5"
+
+optional_components:
+  telemetry_export:
+    package: anolis-telemetry-export
+    version: "0.1.0"
