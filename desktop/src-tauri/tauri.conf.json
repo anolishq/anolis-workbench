@@ -35,14 +35,5 @@
     ],
     "externalBin": ["binaries/anolis-workbench-sidecar"]
   },
-  "plugins": {
-    "shell": {
-      "scope": [
-        {
-          "name": "anolis-workbench-sidecar",
-          "sidecar": true
-        }
-      ]
-    }
-  }
+  "plugins": {}
 }
