@@ -32,6 +32,12 @@ def _parse_args() -> argparse.Namespace:
         help="Template to use for project creation (default: bioreactor-manual).",
     )
     install_parser.add_argument(
+        "--system",
+        type=Path,
+        default=None,
+        help="Path to a custom system.json (mutually exclusive with --template).",
+    )
+    install_parser.add_argument(
         "--install-prefix",
         type=Path,
         default=Path("/usr/local"),
@@ -85,6 +91,12 @@ def _parse_args() -> argparse.Namespace:
         help="Template to use for config rendering (default: bioreactor-manual).",
     )
     bundle_parser.add_argument(
+        "--system",
+        type=Path,
+        default=None,
+        help="Path to a custom system.json (mutually exclusive with --template).",
+    )
+    bundle_parser.add_argument(
         "--arch",
         required=True,
         choices=["arm64", "aarch64", "x86_64"],
@@ -108,6 +120,11 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Override path to compatibility-matrix.yaml (for testing).",
     )
+    bundle_parser.add_argument(
+        "--include-wheels",
+        action="store_true",
+        help="Bundle Python wheels for fully offline install (true air-gap).",
+    )
 
     # --- remote subcommand (pass 5) ---
     remote_parser = subparsers.add_parser(
@@ -128,6 +145,12 @@ def _parse_args() -> argparse.Namespace:
         "--template",
         default="bioreactor-manual",
         help="Template to use for project creation (default: bioreactor-manual).",
+    )
+    remote_parser.add_argument(
+        "--system",
+        type=Path,
+        default=None,
+        help="Path to a custom system.json (mutually exclusive with --template).",
     )
     remote_parser.add_argument(
         "--install-prefix",
@@ -204,15 +227,32 @@ def _print_progress(step: str, detail: str = "") -> None:
     print(msg)
 
 
+def _validate_system_template(args: argparse.Namespace) -> bool:
+    """Validate --system and --template mutual exclusivity.
+
+    Returns True if valid, False if error was printed.
+    """
+    if hasattr(args, "system") and args.system is not None and args.template != "bioreactor-manual":
+        print("ERROR: --system and --template are mutually exclusive", file=sys.stderr)
+        return False
+    return True
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand."""
     import os
+
+    if not _validate_system_template(args):
+        return 1
 
     token = os.environ.get("GITHUB_TOKEN")
 
     print("Anolis Provision — Install")
     print(f"  Project:  {args.project}")
-    print(f"  Template: {args.template}")
+    if args.system:
+        print(f"  System:   {args.system}")
+    else:
+        print(f"  Template: {args.template}")
     print(f"  Prefix:   {args.install_prefix}")
     if args.dry_run:
         print("  Mode:     DRY RUN")
@@ -222,6 +262,7 @@ def _run_install(args: argparse.Namespace) -> int:
         result = installer.install(
             project_name=args.project,
             template_name=args.template,
+            system_path=args.system,
             install_prefix=args.install_prefix,
             compat_matrix_path=args.compat_matrix,
             github_token=token,
@@ -289,6 +330,9 @@ def _run_bundle(args: argparse.Namespace) -> int:
 
     from anolis_workbench.core import bundler
 
+    if not _validate_system_template(args):
+        return 1
+
     # Map arch flag to platform string
     arch_map = {"arm64": "linux-arm64", "aarch64": "linux-arm64", "x86_64": "linux-x86_64"}
     platform_str = arch_map[args.arch]
@@ -296,7 +340,10 @@ def _run_bundle(args: argparse.Namespace) -> int:
 
     print("Anolis Provision — Bundle")
     print(f"  Project:  {args.project}")
-    print(f"  Template: {args.template}")
+    if args.system:
+        print(f"  System:   {args.system}")
+    else:
+        print(f"  Template: {args.template}")
     print(f"  Arch:     {args.arch} → {platform_str}")
     print(f"  Output:   {args.out}")
     print(f"  Prefix:   {args.install_prefix}")
@@ -311,10 +358,15 @@ def _run_bundle(args: argparse.Namespace) -> int:
         print("ERROR: No components found in compatibility matrix", file=sys.stderr)
         return 1
 
-    # Filter to template-relevant providers
-    template_providers = installer._get_template_provider_names(args.template)
-    if template_providers is not None:
-        components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
+    # Filter to providers needed by the system or template
+    if args.system:
+        system_providers = installer.get_system_provider_names(args.system)
+        if system_providers is not None:
+            components = [c for c in components if c.name == "anolis" or c.binary_name in system_providers]
+    else:
+        template_providers = installer._get_template_provider_names(args.template)
+        if template_providers is not None:
+            components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
 
     # 2. Fetch manifests + download tarballs
     session = requests.Session()
@@ -341,6 +393,8 @@ def _run_bundle(args: argparse.Namespace) -> int:
             out_dir=args.out,
             install_prefix=args.install_prefix,
             workbench_version=workbench_version,
+            system_path=args.system,
+            include_wheels=args.include_wheels,
         )
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
@@ -379,6 +433,9 @@ def _run_remote(args: argparse.Namespace) -> int:
     import uuid
 
     from anolis_workbench.core.executor import SubprocessSSHExecutor
+
+    if not _validate_system_template(args):
+        return 1
 
     try:
         user, host = _parse_target(args.target)
@@ -429,6 +486,7 @@ def _run_remote(args: argparse.Namespace) -> int:
         result = installer.install(
             project_name=args.project,
             template_name=args.template,
+            system_path=args.system,
             install_prefix=args.install_prefix,
             compat_matrix_path=args.compat_matrix,
             github_token=token,

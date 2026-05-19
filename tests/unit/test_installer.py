@@ -392,3 +392,46 @@ class TestCheckExistingBinaries:
         with patch("subprocess.run", return_value=mock_result):
             result = installer.check_existing_binaries(tmp_path, components)
         assert result["anolis-runtime"] == "0.1.21"
+
+
+# ---------------------------------------------------------------------------
+# get_system_provider_names
+# ---------------------------------------------------------------------------
+
+
+class TestGetSystemProviderNames:
+    def test_extracts_provider_names(self, tmp_path: Path) -> None:
+        system = {
+            "schema_version": 1,
+            "meta": {"name": "test", "created": ""},
+            "paths": {
+                "runtime_executable": "build/anolis-runtime",
+                "providers": {
+                    "bread0": {"executable": "build/anolis-provider-bread", "bus_path": "/dev/i2c-1"},
+                    "ezo0": {"executable": "build/anolis-provider-ezo", "bus_path": "/dev/i2c-2"},
+                },
+            },
+            "topology": {},
+        }
+        system_file = tmp_path / "system.json"
+        system_file.write_text(json.dumps(system), encoding="utf-8")
+
+        result = installer.get_system_provider_names(system_file)
+        assert result == {"anolis-provider-bread", "anolis-provider-ezo"}
+
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        result = installer.get_system_provider_names(tmp_path / "missing.json")
+        assert result is None
+
+    def test_no_providers_returns_empty_set(self, tmp_path: Path) -> None:
+        system = {
+            "schema_version": 1,
+            "meta": {"name": "test", "created": ""},
+            "paths": {"runtime_executable": "build/anolis-runtime", "providers": {}},
+            "topology": {},
+        }
+        system_file = tmp_path / "system.json"
+        system_file.write_text(json.dumps(system), encoding="utf-8")
+
+        result = installer.get_system_provider_names(system_file)
+        assert result == set()

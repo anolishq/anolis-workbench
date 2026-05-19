@@ -353,11 +353,12 @@ def provision_project(
     force: bool = False,
     executor: Executor | None = None,
     systems_root: Path | None = None,
+    system_path: Path | None = None,
 ) -> Path:
-    """Create a workbench project from a bundled template with patched paths.
+    """Create a workbench project from a bundled template or custom system.json.
 
-    Loads the template, patches executable paths to point at the install prefix,
-    validates, renders all configs, and writes them to disk (locally or via executor).
+    Loads the template (or custom system.json), patches executable paths to point
+    at the install prefix, validates, renders all configs, and writes them to disk.
 
     Args:
         template_name: Template directory name under templates/ (e.g. "bioreactor-manual").
@@ -366,12 +367,13 @@ def provision_project(
         force: If True, overwrite an existing project.
         executor: Executor for file writes. Defaults to LocalExecutor.
         systems_root: Override systems root (for remote targets). Defaults to local SYSTEMS_ROOT.
+        system_path: Optional path to a custom system.json (overrides template_name).
 
     Returns:
         Path to the created project directory.
 
     Raises:
-        FileNotFoundError: If the template doesn't exist.
+        FileNotFoundError: If the template/system file doesn't exist.
         ValueError: If the project exists and force=False.
     """
     from datetime import datetime, timezone
@@ -385,12 +387,16 @@ def provision_project(
     if not force and executor.file_exists(str(project_dir)):
         raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
 
-    # Load template
-    tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
-    if not tpl_path.exists():
-        raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
-
-    system: dict = json.loads(tpl_path.read_text(encoding="utf-8"))
+    # Load system definition from custom path or template
+    if system_path is not None:
+        if not system_path.exists():
+            raise FileNotFoundError(f"System file not found: {system_path}")
+        system: dict = json.loads(system_path.read_text(encoding="utf-8"))
+    else:
+        tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
+        if not tpl_path.exists():
+            raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
+        system = json.loads(tpl_path.read_text(encoding="utf-8"))
 
     # Patch meta
     system["meta"]["name"] = project_name
@@ -528,6 +534,7 @@ def install(
     project_name: str,
     *,
     template_name: str = "bioreactor-manual",
+    system_path: Path | None = None,
     install_prefix: Path = Path("/usr/local"),
     compat_matrix_path: Path | None = None,
     github_token: str | None = None,
@@ -543,6 +550,7 @@ def install(
     Args:
         project_name: Project name to create (e.g. "bioreactor-v1").
         template_name: Template to use for project creation.
+        system_path: Optional path to a custom system.json (overrides template).
         install_prefix: Where to install binaries (default /usr/local).
         compat_matrix_path: Override path to compat matrix YAML.
         github_token: Optional GitHub token for API auth.
@@ -594,10 +602,15 @@ def install(
     if not components:
         raise InstallerError("No components found in compatibility matrix")
 
-    # Filter to only the providers used by the template
-    template_providers = _get_template_provider_names(template_name)
-    if template_providers is not None:
-        components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
+    # Filter to only the providers used by the system or template
+    if system_path is not None:
+        system_providers = get_system_provider_names(system_path)
+        if system_providers is not None:
+            components = [c for c in components if c.name == "anolis" or c.binary_name in system_providers]
+    else:
+        template_providers = _get_template_provider_names(template_name)
+        if template_providers is not None:
+            components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
 
     # 3. Detect platform
     _progress("platform", "Detecting platform")
@@ -631,6 +644,7 @@ def install(
                         force=force,
                         executor=executor,
                         systems_root=systems_root,
+                        system_path=system_path,
                     )
             return InstallResult(
                 components=components,
@@ -668,8 +682,14 @@ def install(
         _progress("verify", "Verifying installed binaries")
         # Verify ALL components (including ones we skipped as already-installed)
         all_components = resolve_components(load_compat_matrix(compat_matrix_path))
-        if template_providers is not None:
-            all_components = [c for c in all_components if c.name == "anolis" or c.binary_name in template_providers]
+        if system_path is not None:
+            sys_providers = get_system_provider_names(system_path)
+            if sys_providers is not None:
+                all_components = [c for c in all_components if c.name == "anolis" or c.binary_name in sys_providers]
+        else:
+            tpl_providers = _get_template_provider_names(template_name)
+            if tpl_providers is not None:
+                all_components = [c for c in all_components if c.name == "anolis" or c.binary_name in tpl_providers]
         verified = verify_installation(install_prefix, all_components, executor=executor)
     else:
         verified = {c.binary_name: c.version for c in components}
@@ -678,7 +698,13 @@ def install(
     _progress("project", f"Creating project '{project_name}'")
     if not dry_run:
         provision_project(
-            template_name, project_name, install_prefix, force=force, executor=executor, systems_root=systems_root
+            template_name,
+            project_name,
+            install_prefix,
+            force=force,
+            executor=executor,
+            systems_root=systems_root,
+            system_path=system_path,
         )
 
     project_path = systems_root / project_name
@@ -707,6 +733,26 @@ def _get_template_provider_names(template_name: str) -> set[str] | None:
         return None
     try:
         system = json.loads(tpl_path.read_text(encoding="utf-8"))
+        providers = system.get("paths", {}).get("providers", {})
+        names: set[str] = set()
+        for _pid, pdata in providers.items():
+            exe = pdata.get("executable", "")
+            if exe:
+                names.add(Path(exe).name)
+        return names
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def get_system_provider_names(system_path: Path) -> set[str] | None:
+    """Get the set of provider binary names from a custom system.json file.
+
+    Returns None if the file cannot be loaded (caller should not filter).
+    """
+    if not system_path.exists():
+        return None
+    try:
+        system = json.loads(system_path.read_text(encoding="utf-8"))
         providers = system.get("paths", {}).get("providers", {})
         names: set[str] = set()
         for _pid, pdata in providers.items():
