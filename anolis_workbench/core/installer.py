@@ -343,17 +343,38 @@ def download_and_verify(
 # ---------------------------------------------------------------------------
 
 
-def install_tarball(data: bytes, prefix: Path, *, executor: Executor | None = None) -> None:
+def install_tarball(
+    data: bytes,
+    prefix: Path,
+    *,
+    executor: Executor | None = None,
+    backup: bool = False,
+    binary_names: list[str] | None = None,
+) -> None:
     """Install a tarball to the given prefix using sudo tar.
 
     The tarball internal structure is `bin/<binary>`, so extracting to
     /usr/local yields /usr/local/bin/<binary>.
+
+    Args:
+        data: Raw tarball bytes.
+        prefix: Install prefix (e.g. /usr/local).
+        executor: Executor for I/O.
+        backup: If True, back up existing binaries to .prev before overwriting.
+        binary_names: Names of binaries to back up (required if backup=True).
 
     Raises:
         InstallError: If tar extraction fails.
     """
     if executor is None:
         executor = LocalExecutor()
+
+    # Backup existing binaries before overwriting
+    if backup and binary_names:
+        from anolis_workbench.core.rollback import backup_binaries
+
+        backup_binaries(binary_names, prefix, executor=executor)
+
     result = executor.run(["tar", "-xz", "-C", str(prefix)], input=data, sudo=True)
     if result.returncode != 0:
         raise InstallError(f"tar extraction failed (exit {result.returncode}): {result.stderr.strip()}")
@@ -692,7 +713,13 @@ def install(
     if not dry_run:
         for comp, data in tarballs:
             _progress("install", f"Installing {comp.binary_name} to {install_prefix}")
-            install_tarball(data, install_prefix, executor=executor)
+            install_tarball(
+                data,
+                install_prefix,
+                executor=executor,
+                backup=True,
+                binary_names=[comp.binary_name],
+            )
     else:
         _progress("dry_run", "Skipping install (dry-run mode)")
 
