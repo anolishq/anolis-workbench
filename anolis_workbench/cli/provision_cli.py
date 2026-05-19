@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from anolis_workbench.core import installer
+from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
 
 
 def _parse_args() -> argparse.Namespace:
@@ -73,6 +74,33 @@ def _parse_args() -> argparse.Namespace:
         "--wait-ready",
         action="store_true",
         help="After start, poll the runtime health endpoint until ready.",
+    )
+    install_parser.add_argument(
+        "--profile",
+        choices=VALID_PROFILES,
+        default="manual",
+        help="Provisioning profile: manual, telemetry, automation, full (default: manual).",
+    )
+    install_parser.add_argument(
+        "--with-observability",
+        action="store_true",
+        help="Deploy the Docker-based observability stack (InfluxDB + Grafana).",
+    )
+    install_parser.add_argument(
+        "--with-telemetry-export",
+        action="store_true",
+        help="Install and configure the telemetry export service.",
+    )
+    install_parser.add_argument(
+        "--start-observability",
+        action="store_true",
+        help="Auto-start the observability stack with docker compose (requires Docker).",
+    )
+    install_parser.add_argument(
+        "--behavior-tree",
+        type=Path,
+        default=None,
+        help="Path to a behavior tree XML file (required for automation/full profiles).",
     )
 
     # --- bundle subcommand (pass 4) ---
@@ -196,6 +224,33 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="After start, poll the runtime health endpoint until ready.",
     )
+    remote_parser.add_argument(
+        "--profile",
+        choices=VALID_PROFILES,
+        default="manual",
+        help="Provisioning profile: manual, telemetry, automation, full (default: manual).",
+    )
+    remote_parser.add_argument(
+        "--with-observability",
+        action="store_true",
+        help="Deploy the Docker-based observability stack (InfluxDB + Grafana).",
+    )
+    remote_parser.add_argument(
+        "--with-telemetry-export",
+        action="store_true",
+        help="Install and configure the telemetry export service.",
+    )
+    remote_parser.add_argument(
+        "--start-observability",
+        action="store_true",
+        help="Auto-start the observability stack with docker compose (requires Docker).",
+    )
+    remote_parser.add_argument(
+        "--behavior-tree",
+        type=Path,
+        default=None,
+        help="Path to a behavior tree XML file (required for automation/full profiles).",
+    )
 
     return parser.parse_args()
 
@@ -238,6 +293,114 @@ def _validate_system_template(args: argparse.Namespace) -> bool:
     return True
 
 
+def _wants_observability(args: argparse.Namespace) -> bool:
+    """Check if observability should be deployed (profile or explicit flag)."""
+    return args.with_observability or profile_includes(args.profile, "observability")
+
+
+def _wants_telemetry_export(args: argparse.Namespace) -> bool:
+    """Check if telemetry export should be installed (profile or explicit flag)."""
+    return args.with_telemetry_export or profile_includes(args.profile, "telemetry_export")
+
+
+def _run_observability_step(
+    args: argparse.Namespace,
+    result: installer.InstallResult,
+    token: str | None,
+) -> None:
+    """Download and deploy the observability stack."""
+    import requests
+
+    from anolis_workbench.core import observability
+
+    # Check Docker if --start-observability
+    if args.start_observability:
+        available, detail = observability.check_docker_available()
+        if not available:
+            print(f"\nWARNING: {detail} — stack will be extracted but not started", file=sys.stderr)
+            args.start_observability = False
+
+    # Get runtime version from compat matrix
+    matrix = installer.load_compat_matrix(getattr(args, "compat_matrix", None))
+    rt_version = matrix.get("runtime", {}).get("version", "")
+    rt_repo = matrix.get("runtime", {}).get("repo", "anolishq/anolis")
+
+    # Download the observability tarball from the runtime release
+    asset_name = f"anolis-{rt_version}-observability.tar.gz"
+    _print_progress("download", f"Downloading observability stack: {asset_name}")
+
+    session = requests.Session()
+    headers: dict[str, str] = {"Accept": "application/octet-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = f"https://github.com/{rt_repo}/releases/download/v{rt_version}/{asset_name}"
+    resp = session.get(url, headers=headers, timeout=120)
+    if resp.status_code != 200:
+        print(f"\nWARNING: Failed to download observability stack ({resp.status_code})", file=sys.stderr)
+        return
+
+    _print_progress("install", "Deploying observability stack")
+    obs_result = observability.deploy_observability(
+        resp.content,
+        start=args.start_observability,
+    )
+
+    if obs_result.error:
+        print(f"\nWARNING: observability: {obs_result.error}", file=sys.stderr)
+    elif obs_result.started:
+        _print_progress("done", f"Observability stack running at {obs_result.stack_path}")
+    else:
+        _print_progress("done", f"Observability stack extracted to {obs_result.stack_path}")
+        print(f"    To start: cd {obs_result.stack_path} && docker compose up -d")
+
+
+def _run_telemetry_export_step(
+    args: argparse.Namespace,
+    result: installer.InstallResult,
+) -> None:
+    """Install and configure the telemetry export service."""
+    import os
+
+    from anolis_workbench.core import telemetry_config
+
+    # Get version from compat matrix
+    matrix = installer.load_compat_matrix(getattr(args, "compat_matrix", None))
+    tel_version = matrix.get("optional_components", {}).get("telemetry_export", {}).get("version")
+    if not tel_version:
+        print("\nWARNING: telemetry_export version not found in compat matrix", file=sys.stderr)
+        return
+
+    # Install the package
+    _print_progress("install", f"Installing anolis-telemetry-export v{tel_version}")
+    success = telemetry_config.install_telemetry_export_package(tel_version)
+    if not success:
+        print("\nWARNING: Failed to install anolis-telemetry-export", file=sys.stderr)
+        return
+
+    # Render config
+    _print_progress("project", "Rendering telemetry export config")
+    config_path = telemetry_config.render_telemetry_config(
+        args.project,
+        systems_root=result.project_path.parent,
+    )
+    _print_progress("done", f"Config: {config_path}")
+    print("    NOTE: Set INFLUXDB_TOKEN env var before starting the service.")
+
+    # Install systemd unit if --systemd was also passed
+    if getattr(args, "systemd", False):
+        _print_progress("systemd", "Installing telemetry export systemd service")
+        svc_result = telemetry_config.install_telemetry_service(
+            args.project,
+            config_path,
+            user=os.environ.get("USER", "root"),
+        )
+        if svc_result.error:
+            print(f"\nWARNING: telemetry systemd: {svc_result.error}", file=sys.stderr)
+        else:
+            _print_progress("systemd", f"Service {svc_result.service_name} installed")
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand."""
     import os
@@ -254,6 +417,8 @@ def _run_install(args: argparse.Namespace) -> int:
     else:
         print(f"  Template: {args.template}")
     print(f"  Prefix:   {args.install_prefix}")
+    if args.profile != "manual":
+        print(f"  Profile:  {args.profile}")
     if args.dry_run:
         print("  Mode:     DRY RUN")
     print()
@@ -301,6 +466,14 @@ def _run_install(args: argparse.Namespace) -> int:
                 _print_progress("health", "Runtime is ready")
             else:
                 print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
+
+    # Observability stack (if requested and not dry-run)
+    if _wants_observability(args) and not result.dry_run:
+        _run_observability_step(args, result, token)
+
+    # Telemetry export (if requested and not dry-run)
+    if _wants_telemetry_export(args) and not result.dry_run:
+        _run_telemetry_export_step(args, result)
 
     # Print summary
     print()
@@ -525,6 +698,14 @@ def _run_remote(args: argparse.Namespace) -> int:
                 _print_progress("health", "Runtime is ready")
             else:
                 print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
+
+    # Observability stack (if requested)
+    if _wants_observability(args):
+        _run_observability_step(args, result, token)
+
+    # Telemetry export (if requested)
+    if _wants_telemetry_export(args):
+        _run_telemetry_export_step(args, result)
 
     # Print summary
     print()
