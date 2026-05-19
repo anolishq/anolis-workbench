@@ -12,12 +12,21 @@
   --border: #d1d5db;
   --accent: #1d4ed8;
   --accent-hover: #1e40af;
-  --success: #15803d;
-  --warning: #a16207;
-  --danger: #b91c1c;
   --topbar-height: 56px;
   --radius: 8px;
   --radius-sm: 6px;
+
+  /* System-state colors (reserved for device/provider/runtime status) */
+  --state-fault: #b91c1c;
+  --state-fault-bg: #fee2e2;
+  --state-warning: #a16207;
+  --state-warning-bg: #fef3c7;
+  --state-nominal: #374151;
+  --state-nominal-bg: #f3f4f6;
+
+  /* UI feedback colors (user action results — intentionally muted) */
+  --feedback-ok: #1a6b3d;
+  --feedback-error: #9f1239;
 }
 
 * {
@@ -111,9 +120,9 @@ body {
 }
 
 .tab-btn.active {
-  background: #1e3a8a;
-  color: #eff6ff;
-  border-color: #1e40af;
+  background: #1f2937;
+  color: #f9fafb;
+  border-color: #4b5563;
 }
 
 .runtime-indicator {
@@ -325,7 +334,7 @@ body {
 }
 
 .field-error {
-  color: var(--danger);
+  color: var(--feedback-error);
   font-size: 12px;
 }
 
@@ -489,13 +498,13 @@ body {
 }
 
 .note-success {
-  background: #f0fdf4;
-  color: #166534;
+  background: var(--state-nominal-bg);
+  color: var(--state-nominal);
 }
 
 .note-warning {
-  background: #fffbeb;
-  color: #92400e;
+  background: var(--state-warning-bg);
+  color: var(--state-warning);
 }
 
 #launch-panel {
@@ -602,11 +611,11 @@ body {
 }
 
 .check-ok .check-icon {
-  color: var(--success);
+  color: var(--state-nominal);
 }
 
 .check-fail .check-icon {
-  color: var(--danger);
+  color: var(--state-fault);
 }
 
 .check-skip .check-icon {
@@ -624,13 +633,13 @@ body {
 }
 
 .health-badge.healthy {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--state-nominal-bg);
+  color: var(--state-nominal);
 }
 
 .health-badge.unavailable {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--state-warning-bg);
+  color: var(--state-warning);
 }
 
 .health-badge.starting {
@@ -656,7 +665,7 @@ body {
 }
 
 #export-package-feedback.error {
-  color: var(--danger);
+  color: var(--feedback-error);
 }
 
 #log-pane {
@@ -778,8 +787,9 @@ body {
 }
 
 .operate-list li.selected {
-  border-color: #1d4ed8;
-  background: #eff6ff;
+  border-color: var(--border);
+  border-left: 3px solid var(--text-primary);
+  background: var(--bg-muted);
 }
 
 .operate-list li button {
@@ -817,20 +827,20 @@ body {
 }
 
 .badge.ok {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #86efac;
+  background: var(--state-nominal-bg);
+  color: var(--state-nominal);
+  border-color: #9ca3af;
 }
 
 .badge.fault {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--state-fault-bg);
+  color: var(--state-fault);
   border-color: #fca5a5;
 }
 
 .badge.unavailable {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--state-warning-bg);
+  color: var(--state-warning);
   border-color: #fde68a;
 }
 
@@ -845,9 +855,9 @@ body {
 }
 
 .badge.bt-running {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #86efac;
+  background: var(--state-nominal-bg);
+  color: var(--state-nominal);
+  border-color: #9ca3af;
 }
 
 .badge.bt-idle {
@@ -857,14 +867,14 @@ body {
 }
 
 .badge.bt-stalled {
-  background: #ffedd5;
-  color: #9a3412;
-  border-color: #fdba74;
+  background: var(--state-warning-bg);
+  color: var(--state-warning);
+  border-color: #fde68a;
 }
 
 .badge.bt-error {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--state-fault-bg);
+  color: var(--state-fault);
   border-color: #fca5a5;
 }
 
@@ -973,11 +983,11 @@ body {
 }
 
 .feedback.error {
-  color: var(--danger);
+  color: var(--feedback-error);
 }
 
 .feedback.success {
-  color: var(--success);
+  color: var(--feedback-ok);
 }
 
 .error-text {
@@ -1054,15 +1064,15 @@ body {
 }
 
 .function-feedback.error {
-  color: var(--danger);
+  color: var(--feedback-error);
 }
 
 .function-feedback.success {
-  color: var(--success);
+  color: var(--feedback-ok);
 }
 
 .required {
-  color: var(--danger);
+  color: var(--feedback-error);
 }
 
 .constraint-hint {

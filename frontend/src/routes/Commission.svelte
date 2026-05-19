@@ -424,7 +424,7 @@
         {#if preflightResults !== null}
           <span
             class="launch-summary"
-            style="color: {preflightResults.ok ? 'var(--success)' : 'var(--danger)'}"
+            style="color: {preflightResults.ok ? 'var(--state-nominal)' : 'var(--state-fault)'}"
           >
             {preflightResults.ok ? "✓ All checks passed" : "✗ Checks failed"}
           </span>
@@ -494,7 +494,9 @@
     {/if}
 
     {#if actionError}
-      <div class="launch-summary" style="color:var(--danger);margin-top:6px;">{actionError}</div>
+      <div class="launch-summary" style="color:var(--feedback-error);margin-top:6px;">
+        {actionError}
+      </div>
     {/if}
   </div>
 
@@ -590,7 +592,7 @@
       <span
         id="export-package-feedback"
         class="launch-summary"
-        style="color: {exportIsError ? 'var(--danger)' : 'var(--success)'}"
+        style="color: {exportIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
       >
         {exportFeedback}
       </span>
