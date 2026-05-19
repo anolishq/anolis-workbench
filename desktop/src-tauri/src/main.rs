@@ -9,6 +9,27 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
+/// Workaround for WebKitGTK blank-screen issue on Linux systems where GPU
+/// hardware compositing (DMA-BUF / GBM) fails — commonly observed with NVIDIA
+/// GPUs running the nouveau driver or in environments without proper DRI/GBM
+/// support.  When compositing fails the rendering pipeline freezes, which
+/// blocks the WebView event loop and results in a blank window.
+///
+/// Setting these environment variables before GTK/WebKit initialization forces
+/// software rendering which avoids the GPU path entirely.
+///
+/// Ref: <https://github.com/tauri-apps/tauri/issues/8254>
+#[cfg(target_os = "linux")]
+fn apply_linux_webview_workarounds() {
+    use std::env;
+    if env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+        env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+    if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 const SIDECAR_NAME: &str = "anolis-workbench-sidecar";
 const WORKBENCH_HOST: &str = "127.0.0.1";
 const WORKBENCH_PORT: u16 = 3010;
@@ -148,6 +169,9 @@ Stop any process already bound to that port and relaunch the app."
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    apply_linux_webview_workarounds();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
