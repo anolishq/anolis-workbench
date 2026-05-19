@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "anolis-workbench-desktop"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "serde_json",
  "tauri",
