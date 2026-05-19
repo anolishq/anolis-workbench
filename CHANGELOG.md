@@ -13,6 +13,24 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-18
+
+### Added
+
+- **First-run onboarding endpoint** (`GET /api/onboarding`): detects whether
+  the system has projects or runtime installed; returns `first_run` flag.
+- **Onboarding UI** (`Onboarding.svelte`): guided wizard with three paths —
+  local install, remote SSH provisioning, and import/skip.
+- **Tauri auto-updater**: `tauri-plugin-updater` integrated with GitHub
+  Releases endpoint (`latest.json`).
+- `scripts/generate-update-manifest.py` for CI release manifest generation.
+- Updater manifest step added to `desktop-release.yml` workflow.
+
+### Fixed
+
+- `happy-dom` version specifier aligned to `^20.9.0` (was `^20.10.0` which
+  doesn't exist, breaking `npm ci`).
+
 ## [0.10.0] - 2026-05-18
 
 ### Added
