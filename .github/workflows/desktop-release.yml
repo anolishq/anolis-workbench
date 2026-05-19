@@ -194,11 +194,7 @@ jobs:
         run: |
           set -euo pipefail
           cd desktop
-          if [[ -f package-lock.json ]]; then
-            npm ci
-          else
-            npm install
-          fi
+          npm ci
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
