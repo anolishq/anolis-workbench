@@ -13,18 +13,64 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-18
+
+### Added
+
+- **Observability stack deployment** (`--with-observability`): downloads and
+  extracts the Docker Compose observability stack (InfluxDB + Grafana) from
+  the runtime release. Optional `--start-observability` auto-starts the stack.
+- **Telemetry export service** (`--with-telemetry-export`): installs the
+  `anolis-telemetry-export` package, renders configuration YAML, and
+  optionally installs a systemd unit.
+- **Provisioning profiles** (`--profile manual|telemetry|automation|full`):
+  compose observability and telemetry features into predefined bundles.
+- `--behavior-tree` flag for automation/full profiles.
+- `anolis_workbench.core.observability` module.
+- `anolis_workbench.core.telemetry_config` module.
+- `observability` entry in `compatibility-matrix.yaml` optional_components.
+
+## [0.7.0] - 2026-05-18
+
+### Added
+
+- `--system` flag on install/bundle/remote subcommands: load a custom
+  `system.json` instead of a template (mutually exclusive with `--template`).
+- `--include-wheels` flag on bundle subcommand: downloads all transitive
+  Python wheels for true air-gap installs.
+- `get_system_provider_names()` in installer for component filtering from
+  custom system.json files.
+- `_download_wheels()` and offline `pip install` section in bundle's
+  `install.sh`.
+- `optional_components` section in `compatibility-matrix.yaml`.
+
+## [0.6.0] - 2026-05-18
+
+### Added
+
+- **Preflight checks** (`anolis_workbench.core.preflight`): verifies target
+  readiness (architecture, I2C, disk space, Python version, sudo) before
+  install. Runs via the Executor abstraction for local and remote targets.
+- **Systemd service management** (`anolis_workbench.core.systemd`): renders
+  unit files, installs/enables/starts services, and polls health endpoint.
+- `--systemd` and `--wait-ready` flags on install and remote subcommands.
+- `--no-preflight` flag to skip preflight checks.
+
+## [0.5.0] - 2026-05-18
+
 ### Added
 
 - `anolis-provision bundle` CLI command for creating offline install bundles:
-  downloads pinned binaries for a specified architecture, renders project configs,
-  and assembles a self-contained directory with `install.sh` for air-gapped
-  deployment to Raspberry Pi targets.
+  downloads pinned binaries for a specified architecture, renders project
+  configs, and assembles a self-contained directory with `install.sh` for
+  air-gapped deployment to Raspberry Pi targets.
 - `anolis_workbench.core.bundler` module with the bundle assembly logic.
 - `anolis-provision remote` CLI command for SSH-based remote provisioning:
   downloads binaries locally, transfers and installs them on a remote target
-  via SSH, and writes project configs to the remote `~/.anolis/systems/` directory.
-- `anolis_workbench.core.executor` module: `Executor` ABC with `LocalExecutor`
-  and `SubprocessSSHExecutor` implementations for local/remote command dispatch.
+  via SSH, and writes project configs to the remote `~/.anolis/systems/`.
+- `anolis_workbench.core.executor` module: `Executor` ABC with
+  `LocalExecutor` and `SubprocessSSHExecutor` implementations for
+  local/remote command dispatch.
 
 ### Changed
 
