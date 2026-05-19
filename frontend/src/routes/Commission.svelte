@@ -501,8 +501,8 @@
   <!-- Log pane -->
   {#if logVisible}
     <div id="log-pane" class="log-pane visible">
-      <div class="log-header">
-        <span class="log-title">Runtime Log</span>
+      <div class="log-toolbar">
+        <span>Runtime Log</span>
         <button
           type="button"
           class="btn-secondary btn-sm"
@@ -520,12 +520,12 @@
   {/if}
 
   <!-- Commission health panel -->
-  <div class="commission-health-panel">
+  <div class="commission-health-section">
     <h3>Runtime Health</h3>
     {#if commissionHealthError}
       <p class="placeholder">{commissionHealthError}</p>
     {:else if commissionRuntimeStatus}
-      <div id="commission-runtime-card" class="commission-runtime-card">
+      <div id="commission-runtime-card" class="commission-health-card">
         <div class="runtime-status-row">
           <span>Mode: <strong>{commissionRuntimeStatus.mode ?? "UNKNOWN"}</strong></span>
           <span
@@ -549,7 +549,7 @@
       <p class="placeholder">Runtime status unavailable.</p>
     {/if}
 
-    <h4>Provider Health</h4>
+    <h3>Provider Health</h3>
     <ul id="commission-provider-health" class="commission-provider-health">
       {#if commissionProviderHealth.length === 0}
         <li class="placeholder">No provider health data.</li>
