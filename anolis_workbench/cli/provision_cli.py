@@ -53,6 +53,21 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fetch and verify but do not install or write files.",
     )
+    install_parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip preflight checks before install.",
+    )
+    install_parser.add_argument(
+        "--systemd",
+        action="store_true",
+        help="Install and enable a systemd service for the runtime.",
+    )
+    install_parser.add_argument(
+        "--wait-ready",
+        action="store_true",
+        help="After start, poll the runtime health endpoint until ready.",
+    )
 
     # --- bundle subcommand (pass 4) ---
     bundle_parser = subparsers.add_parser(
@@ -143,6 +158,21 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite existing binaries and project on target.",
     )
+    remote_parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="Skip preflight checks before install.",
+    )
+    remote_parser.add_argument(
+        "--systemd",
+        action="store_true",
+        help="Install and enable a systemd service for the runtime.",
+    )
+    remote_parser.add_argument(
+        "--wait-ready",
+        action="store_true",
+        help="After start, poll the runtime health endpoint until ready.",
+    )
 
     return parser.parse_args()
 
@@ -150,6 +180,9 @@ def _parse_args() -> argparse.Namespace:
 def _print_progress(step: str, detail: str = "") -> None:
     """Print structured progress to stdout."""
     prefix_map = {
+        "preflight": "🔍",
+        "preflight_ok": "✓ ",
+        "preflight_warn": "⚠️ ",
         "compat": "📋",
         "resolve": "🔍",
         "platform": "🖥️ ",
@@ -161,6 +194,8 @@ def _print_progress(step: str, detail: str = "") -> None:
         "install": "📥",
         "verify": "🔎",
         "project": "📁",
+        "systemd": "⚙️ ",
+        "health": "💓",
         "dry_run": "🔍",
         "done": "✅",
     }
@@ -192,11 +227,39 @@ def _run_install(args: argparse.Namespace) -> int:
             github_token=token,
             force=args.force,
             dry_run=args.dry_run,
+            skip_preflight=args.no_preflight,
             progress_callback=_print_progress,
         )
     except installer.InstallerError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
+
+    # Systemd service install (if requested and not dry-run)
+    if args.systemd and not args.dry_run:
+        from anolis_workbench.core import systemd
+
+        _print_progress("systemd", f"Installing systemd service: {systemd.service_name(args.project)}")
+        from anolis_workbench.core import paths as paths_module
+
+        svc_result = systemd.install_service(
+            args.project,
+            install_prefix=args.install_prefix,
+            systems_root=paths_module.SYSTEMS_ROOT,
+            user=os.environ.get("USER", "root"),
+        )
+        if svc_result.error:
+            print(f"\nWARNING: systemd: {svc_result.error}", file=sys.stderr)
+        else:
+            _print_progress("systemd", f"Service {svc_result.service_name} started")
+
+        # Health check (if requested)
+        if args.wait_ready:
+            _print_progress("health", "Waiting for runtime to become ready...")
+            ready = systemd.wait_ready()
+            if ready:
+                _print_progress("health", "Runtime is ready")
+            else:
+                print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
 
     # Print summary
     print()
@@ -370,6 +433,7 @@ def _run_remote(args: argparse.Namespace) -> int:
             compat_matrix_path=args.compat_matrix,
             github_token=token,
             force=args.force,
+            skip_preflight=args.no_preflight,
             progress_callback=_print_progress,
             executor=executor,
             systems_root=systems_root,
@@ -377,6 +441,32 @@ def _run_remote(args: argparse.Namespace) -> int:
     except installer.InstallerError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
+
+    # Systemd service install (if requested)
+    if args.systemd:
+        from anolis_workbench.core import systemd
+
+        _print_progress("systemd", f"Installing systemd service: {systemd.service_name(args.project)}")
+        svc_result = systemd.install_service(
+            args.project,
+            executor=executor,
+            install_prefix=args.install_prefix,
+            systems_root=systems_root,
+            user=user,
+        )
+        if svc_result.error:
+            print(f"\nWARNING: systemd: {svc_result.error}", file=sys.stderr)
+        else:
+            _print_progress("systemd", f"Service {svc_result.service_name} started")
+
+        # Health check (if requested)
+        if args.wait_ready:
+            _print_progress("health", "Waiting for runtime to become ready...")
+            ready = systemd.wait_ready(executor)
+            if ready:
+                _print_progress("health", "Runtime is ready")
+            else:
+                print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
 
     # Print summary
     print()
