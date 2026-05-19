@@ -17,10 +17,11 @@ wheels = [
 
 [[package]]
 name = "anolis-workbench"
-version = "0.11.1"
+version = "0.11.2"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
+    { name = "psutil" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -28,7 +29,6 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
-    { name = "psutil" },
     { name = "pyinstaller" },
     { name = "pytest" },
     { name = "pytest-timeout" },
@@ -47,7 +47,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.22.0,<5.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0,<2.0.0" },
     { name = "paramiko", marker = "extra == 'ssh'", specifier = ">=3.4.0,<4.0.0" },
-    { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9.0,<7.0.0" },
+    { name = "psutil", specifier = ">=5.9.0,<7.0.0" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.0.0,<7.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0,<10.0.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.0.0,<3.0.0" },

@@ -25,12 +25,24 @@ DEFAULT_FRONTEND_INDEX = REPO_ROOT / "anolis_workbench" / "frontend" / "dist" / 
 DEFAULT_HIDDEN_IMPORTS = [
     "anolis_workbench.server.routes.compose",
     "anolis_workbench.server.routes.commission",
+    "anolis_workbench.server.routes.onboarding",
     "anolis_workbench.server.routes.operate",
+    "anolis_workbench.server.routes.provision",
+    "anolis_workbench.core.bundler",
+    "anolis_workbench.core.executor",
     "anolis_workbench.core.exporter",
+    "anolis_workbench.core.fleet",
+    "anolis_workbench.core.installer",
     "anolis_workbench.core.launcher",
+    "anolis_workbench.core.observability",
     "anolis_workbench.core.package_validator",
+    "anolis_workbench.core.paths",
+    "anolis_workbench.core.preflight",
     "anolis_workbench.core.projects",
     "anolis_workbench.core.renderer",
+    "anolis_workbench.core.rollback",
+    "anolis_workbench.core.systemd",
+    "anolis_workbench.core.telemetry_config",
     "anolis_workbench.core.validator",
 ]
 
@@ -67,8 +79,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-size-bytes",
         type=int,
-        default=20_000_000,
-        help="Fail if executable size is smaller than this threshold (default: 20000000).",
+        default=10_000_000,
+        help="Fail if executable size is smaller than this threshold (default: 10000000).",
     )
     parser.add_argument(
         "--smoke-timeout-seconds",
