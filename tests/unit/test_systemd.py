@@ -150,6 +150,7 @@ class TestInstallService:
 
         assert result.installed is True
         assert result.enabled is False
+        assert result.error is not None
         assert "reload error" in result.error
 
     def test_enable_failure(self):
@@ -197,6 +198,7 @@ class TestInstallService:
         assert result.installed is True
         assert result.enabled is True
         assert result.started is False
+        assert result.error is not None
         assert "start error" in result.error
 
 

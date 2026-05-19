@@ -178,6 +178,7 @@ class TestCheckSudo:
         result = _check_sudo(executor)
         assert result.passed is False
         assert result.fatal is False
+        assert result.fix_hint is not None
         assert "sudoers" in result.fix_hint
 
 
