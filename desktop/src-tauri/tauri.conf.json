@@ -24,7 +24,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "appimage", "deb"],
+    "targets": ["msi", "appimage", "deb", "dmg"],
     "externalBin": ["binaries/anolis-workbench-sidecar"]
   },
   "plugins": {

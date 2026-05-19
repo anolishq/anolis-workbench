@@ -85,6 +85,12 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: ".exe"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: ""
 
     steps:
       - name: Checkout repository
@@ -153,6 +159,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
 
     steps:
       - name: Checkout repository
@@ -168,6 +178,16 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run build
 
       - name: Install desktop dependencies
         shell: bash
@@ -222,6 +242,15 @@ jobs:
           path: |
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS bundle
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-bundle-${{ matrix.target }}
+          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 14
 
@@ -315,5 +344,6 @@ jobs:
             release-assets/*.msi
             release-assets/*.deb
             release-assets/*.AppImage
+            release-assets/*.dmg
             release-assets/*sbom*.json
             release-assets/latest.json
