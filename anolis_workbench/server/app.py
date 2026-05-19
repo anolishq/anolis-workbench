@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
-from anolis_workbench.server.routes import commission, compose, operate, provision
+from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
 
 def _env_int(name: str, default: int) -> int:
@@ -111,6 +111,8 @@ class _Handler(BaseHTTPRequestHandler):
             compose.serve_catalog(self)
         elif path == "/api/templates":
             compose.serve_templates(self)
+        elif path == "/api/onboarding":
+            onboarding.get_onboarding_status(self)
         elif path.startswith("/api/provision/status/"):
             job_id = path.split("/")[-1]
             provision.get_status(self, job_id)

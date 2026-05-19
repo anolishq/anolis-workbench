@@ -151,6 +151,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::init())
         .setup(|app| {
             app.manage(SidecarState::default());
 
