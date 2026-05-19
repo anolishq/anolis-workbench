@@ -35,6 +35,12 @@
           "sidecar": true
         }
       ]
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/anolishq/anolis-workbench/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
     }
   }
 }

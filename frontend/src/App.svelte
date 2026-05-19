@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Home from "./routes/Home.svelte";
+  import Onboarding from "./routes/Onboarding.svelte";
   import Compose from "./routes/Compose.svelte";
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
@@ -30,6 +31,7 @@
   let templates = $state<TemplateSummary[]>([]);
   let projects = $state<ProjectSummary[]>([]);
   let runtimeStatus = $state<RuntimeStatus | null>(null);
+  let showOnboarding = $state<boolean>(false);
   let projectName = $state<string | null>(null);
   let system = $state<SystemConfig | null>(null);
   let workspace = $state<WorkspaceName | null>(null);
@@ -249,6 +251,18 @@
         refreshStatus(),
       ]);
 
+      // Check first-run onboarding when no projects exist
+      if (projects.length === 0) {
+        try {
+          const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
+          if (ob.first_run) {
+            showOnboarding = true;
+          }
+        } catch {
+          // Non-fatal — just show normal home
+        }
+      }
+
       await navigateTo(window.location.pathname, { replaceHistory: true, bypassGuards: true });
       statusInterval = setInterval(() => void refreshStatus(), 2000);
     };
@@ -334,7 +348,14 @@
 {/if}
 
 <main id="shell-main">
-  {#if !projectName}
+  {#if showOnboarding && !projectName}
+    <Onboarding
+      onNavigate={(path) => {
+        showOnboarding = false;
+        void navigateTo(path, { bypassGuards: true });
+      }}
+    />
+  {:else if !projectName}
     <Home
       {projects}
       {templates}
