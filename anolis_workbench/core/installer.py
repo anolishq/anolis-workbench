@@ -24,6 +24,7 @@ import yaml
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import Executor, LocalExecutor
+from anolis_workbench.core.preflight import run_preflight
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -107,6 +108,10 @@ class InstallError(InstallerError):
 
 class VerificationError(InstallerError):
     """Post-install version verification failed."""
+
+
+class PreflightError(InstallerError):
+    """Preflight checks failed with fatal errors."""
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +533,7 @@ def install(
     github_token: str | None = None,
     force: bool = False,
     dry_run: bool = False,
+    skip_preflight: bool = False,
     progress_callback: Any = None,
     executor: Executor | None = None,
     systems_root: Path | None = None,
@@ -542,12 +548,16 @@ def install(
         github_token: Optional GitHub token for API auth.
         force: Overwrite existing binaries/project.
         dry_run: If True, fetch and verify but don't install.
+        skip_preflight: If True, skip preflight checks.
         progress_callback: Optional callable(step: str, detail: str) for UI.
         executor: Executor for I/O operations. Defaults to LocalExecutor.
         systems_root: Override systems root (for remote targets).
 
     Returns:
         InstallResult with summary information.
+
+    Raises:
+        PreflightError: If preflight checks fail with fatal errors.
     """
     if executor is None:
         executor = LocalExecutor()
@@ -557,6 +567,22 @@ def install(
     def _progress(step: str, detail: str = "") -> None:
         if progress_callback:
             progress_callback(step, detail)
+
+    # 0. Preflight checks (run by default, skip with --no-preflight)
+    if not skip_preflight and not dry_run:
+        _progress("preflight", "Running preflight checks")
+        preflight_result = run_preflight(executor, install_prefix=str(install_prefix))
+        if not preflight_result.passed:
+            # Collect fatal failure messages
+            fatal_failures = [c for c in preflight_result.checks if c.fatal and not c.passed]
+            details = "; ".join(f"{c.name}: {c.detail}" for c in fatal_failures)
+            raise PreflightError(f"Preflight failed: {details}")
+        if preflight_result.has_warnings:
+            _progress("preflight_warn", "Preflight passed with warnings (non-fatal)")
+        else:
+            _progress("preflight_ok", "Preflight passed")
+    elif skip_preflight:
+        _progress("preflight", "Skipped (--no-preflight)")
 
     # 1. Load compat matrix
     _progress("compat", "Loading compatibility matrix")
