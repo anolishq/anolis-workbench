@@ -13,6 +13,20 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-05-18
+
+### Fixed
+
+- Desktop release workflow: add macOS builds (`.dmg` for Apple Silicon + Intel).
+- Desktop release workflow: add frontend build step to `package-desktop` job
+  (Tauri requires `frontendDist` at build time).
+- Desktop release workflow: fix artifact attachment — only desktop bundles and
+  SBOMs are attached (no intermediate sidecar binaries).
+- Normalize release asset filenames to `anolis-workbench-{version}-{arch}.{ext}`
+  (no spaces, lowercase, consistent across platforms).
+- Updater manifest (`latest.json`) now covers all platforms (macOS, Windows,
+  Linux) with correct normalized filenames.
+
 ## [0.11.0] - 2026-05-18
 
 ### Added

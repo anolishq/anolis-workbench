@@ -29,11 +29,7 @@ def build_manifest(version: str, notes: str = "") -> dict:
         "pub_date": pub_date,
         "platforms": {
             "linux-x86_64": {
-                "url": f"{GITHUB_RELEASES}/{tag}/anolis-workbench-{version}-amd64.AppImage.tar.gz",
-                "signature": "",
-            },
-            "linux-aarch64": {
-                "url": f"{GITHUB_RELEASES}/{tag}/anolis-workbench-{version}-arm64.AppImage.tar.gz",
+                "url": f"{GITHUB_RELEASES}/{tag}/anolis-workbench-{version}-amd64.appimage.tar.gz",
                 "signature": "",
             },
             "darwin-aarch64": {
@@ -41,7 +37,7 @@ def build_manifest(version: str, notes: str = "") -> dict:
                 "signature": "",
             },
             "darwin-x86_64": {
-                "url": f"{GITHUB_RELEASES}/{tag}/anolis-workbench-{version}-x86_64.app.tar.gz",
+                "url": f"{GITHUB_RELEASES}/{tag}/anolis-workbench-{version}-x64.app.tar.gz",
                 "signature": "",
             },
             "windows-x86_64": {

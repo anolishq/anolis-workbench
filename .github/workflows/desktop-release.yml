@@ -295,11 +295,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download release artifacts
+      - name: Download desktop bundle artifacts
         uses: actions/download-artifact@v8
         with:
-          path: release-assets
+          pattern: desktop-bundle-*
+          path: raw-bundles
           merge-multiple: true
+
+      - name: Download SBOM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-sbom-*
+          path: raw-bundles
+          merge-multiple: true
+
+      - name: Normalize artifact filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          mkdir -p release-assets
+
+          # Rename Tauri outputs to consistent scheme:
+          #   anolis-workbench-{version}-{arch}.{ext}
+          for f in raw-bundles/*; do
+            base=$(basename "$f")
+            # Replace spaces with hyphens, lowercase
+            normalized=$(echo "$base" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+            # Replace product-name prefix pattern: "anolis-workbench_ver_" -> "anolis-workbench-ver-"
+            normalized=$(echo "$normalized" | sed "s/anolis-workbench_${VERSION}_/anolis-workbench-${VERSION}-/g")
+            # Remove "-setup" suffix from MSI (Tauri adds it)
+            normalized=$(echo "$normalized" | sed 's/-setup\.msi/.msi/g')
+            cp "$f" "release-assets/${normalized}"
+          done
+
+          echo "=== Release assets ==="
+          ls -lh release-assets/
 
       - name: Create and push release tag if missing
         shell: bash
@@ -314,12 +345,6 @@ jobs:
             git tag -a "$TAG" -m "Desktop release ${{ inputs.version }}"
             git push origin "$TAG"
           fi
-
-      - name: List release artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          ls -lh release-assets
 
       - name: Generate updater manifest
         shell: bash
@@ -337,13 +362,16 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           append_body: true
           body: |
-            ## Desktop Artifacts
+            ## Desktop Downloads
 
-            This release includes native desktop bundles and sidecar SBOMs.
+            | Platform | File |
+            |----------|------|
+            | Windows x64 | `anolis-workbench-${{ inputs.version }}-x64.msi` |
+            | macOS Apple Silicon | `anolis-workbench-${{ inputs.version }}-aarch64.dmg` |
+            | macOS Intel | `anolis-workbench-${{ inputs.version }}-x64.dmg` |
+            | Linux x64 (.deb) | `anolis-workbench-${{ inputs.version }}-amd64.deb` |
+            | Linux x64 (.AppImage) | `anolis-workbench-${{ inputs.version }}-amd64.appimage` |
           files: |
-            release-assets/*.msi
-            release-assets/*.deb
-            release-assets/*.AppImage
-            release-assets/*.dmg
-            release-assets/*sbom*.json
+            release-assets/anolis-workbench-*
+            release-assets/sbom-*
             release-assets/latest.json
