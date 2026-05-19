@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from anolis_workbench.core import installer
 from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
+
+if TYPE_CHECKING:
+    from anolis_workbench.core import fleet as fleet_module
 
 
 def _parse_args() -> argparse.Namespace:
@@ -250,6 +254,91 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Path to a behavior tree XML file (required for automation/full profiles).",
+    )
+
+    # --- fleet subcommand (pass 9) ---
+    fleet_parser = subparsers.add_parser(
+        "fleet",
+        help="Provision multiple targets from a fleet.yaml file.",
+    )
+    fleet_parser.add_argument(
+        "--file",
+        type=Path,
+        required=True,
+        help="Path to fleet.yaml defining targets.",
+    )
+    fleet_parser.add_argument(
+        "--only",
+        default=None,
+        help="Comma-separated list of target names to provision.",
+    )
+    fleet_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=4,
+        help="Max parallel jobs (default: 4). Use 1 for serial mode.",
+    )
+    fleet_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch and verify but do not install.",
+    )
+    fleet_parser.add_argument(
+        "--compat-matrix",
+        type=Path,
+        default=None,
+        help="Override path to compatibility-matrix.yaml (for testing).",
+    )
+
+    # --- rollback subcommand (pass 9) ---
+    rollback_parser = subparsers.add_parser(
+        "rollback",
+        help="Roll back binaries to previous version.",
+    )
+    rollback_parser.add_argument(
+        "--target",
+        default=None,
+        help="SSH target in user@host format (omit for local rollback).",
+    )
+    rollback_parser.add_argument(
+        "--project",
+        default="bioreactor-v1",
+        help="Project name (default: bioreactor-v1).",
+    )
+    rollback_parser.add_argument(
+        "--install-prefix",
+        type=Path,
+        default=Path("/usr/local"),
+        help="Binary install prefix (default: /usr/local).",
+    )
+    rollback_parser.add_argument(
+        "--systemd",
+        action="store_true",
+        help="Restart the systemd service after rollback.",
+    )
+    rollback_parser.add_argument(
+        "--compat-matrix",
+        type=Path,
+        default=None,
+        help="Override path to compatibility-matrix.yaml (for testing).",
+    )
+    rollback_parser.add_argument(
+        "--key",
+        type=Path,
+        default=None,
+        help="Path to SSH private key file (for remote rollback).",
+    )
+    rollback_parser.add_argument(
+        "--port",
+        type=int,
+        default=22,
+        help="SSH port (default: 22).",
+    )
+    rollback_parser.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        help="Fleet file for fleet-wide rollback.",
     )
 
     return parser.parse_args()
@@ -725,6 +814,158 @@ def _run_remote(args: argparse.Namespace) -> int:
     return 0
 
 
+def _provision_single_target(
+    target: "fleet_module.FleetTarget",
+    *,
+    dry_run: bool = False,
+    compat_matrix_path: Path | None = None,
+) -> "fleet_module.TargetResult":
+    """Provision a single fleet target. Used as the callback for fleet execution."""
+    import os
+
+    from anolis_workbench.core import fleet as fleet_module
+    from anolis_workbench.core.executor import SubprocessSSHExecutor
+
+    # Parse host
+    if "@" not in target.host:
+        return fleet_module.TargetResult(
+            name=target.name, host=target.host, success=False, error="Invalid host format (expected user@host)"
+        )
+
+    user, host = target.host.split("@", 1)
+    token = os.environ.get("GITHUB_TOKEN")
+
+    executor = SubprocessSSHExecutor(
+        host=host,
+        user=user,
+        key_file=target.key,
+    )
+
+    try:
+        result = installer.install(
+            project_name=target.project,
+            template_name=target.template,
+            install_prefix=target.install_prefix,
+            compat_matrix_path=compat_matrix_path,
+            github_token=token,
+            force=False,
+            dry_run=dry_run,
+            skip_preflight=False,
+            executor=executor,
+        )
+        components = [f"{b} {v}" for b, v in result.verified_versions.items()]
+        return fleet_module.TargetResult(name=target.name, host=target.host, success=True, components=components)
+    except Exception as exc:
+        return fleet_module.TargetResult(name=target.name, host=target.host, success=False, error=str(exc))
+
+
+def _run_fleet(args: argparse.Namespace) -> int:
+    """Execute the fleet subcommand."""
+    from anolis_workbench.core import fleet as fleet_module
+
+    try:
+        config = fleet_module.load_fleet_file(args.file)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    # Filter targets
+    only = [s.strip() for s in args.only.split(",")] if args.only else None
+    try:
+        targets = fleet_module.filter_targets(config, only)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    print("Anolis Provision — Fleet")
+    print(f"  Fleet file: {args.file}")
+    print(f"  Targets:    {len(targets)}")
+    print(f"  Jobs:       {args.jobs}")
+    if args.dry_run:
+        print("  Mode:       DRY RUN")
+    print()
+
+    def _provision_fn(target: fleet_module.FleetTarget, *, dry_run: bool = False) -> fleet_module.TargetResult:
+        return _provision_single_target(target, dry_run=dry_run, compat_matrix_path=args.compat_matrix)
+
+    result = fleet_module.provision_fleet(
+        targets,
+        jobs=args.jobs,
+        dry_run=args.dry_run,
+        provision_fn=_provision_fn,
+    )
+
+    print()
+    print("─" * 60)
+    print(fleet_module.format_fleet_result(result))
+    print("─" * 60)
+    return 0 if result.failed == 0 else 1
+
+
+def _run_rollback(args: argparse.Namespace) -> int:
+    """Execute the rollback subcommand."""
+    from anolis_workbench.core import rollback as rollback_module
+    from anolis_workbench.core.executor import LocalExecutor, SubprocessSSHExecutor
+
+    # Determine executor
+    executor: installer.Executor
+    if args.target:
+        try:
+            user, host = _parse_target(args.target)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        executor = SubprocessSSHExecutor(
+            host=host,
+            user=user,
+            key_file=str(args.key) if args.key else None,
+            port=args.port,
+        )
+    else:
+        executor = LocalExecutor()
+
+    # Resolve binary names from compat matrix
+    matrix = installer.load_compat_matrix(args.compat_matrix)
+    components = installer.resolve_components(matrix)
+    binary_names = [c.binary_name for c in components]
+
+    target_label = args.target or "localhost"
+    print("Anolis Provision — Rollback")
+    print(f"  Target:   {target_label}")
+    print(f"  Project:  {args.project}")
+    print(f"  Prefix:   {args.install_prefix}")
+    print(f"  Binaries: {', '.join(binary_names)}")
+    print()
+
+    result = rollback_module.rollback(
+        binary_names,
+        args.install_prefix,
+        project_name=args.project,
+        systemd=args.systemd,
+        executor=executor,
+    )
+
+    if result.error and not result.rolled_back:
+        print(f"ERROR: {result.error}", file=sys.stderr)
+        return 1
+
+    print("─" * 60)
+    if result.rolled_back:
+        print("Rollback complete:")
+        for name in result.rolled_back:
+            print(f"  ✓ {name} restored from .prev")
+    if result.failed:
+        print("Failed (no .prev backup):")
+        for name in result.failed:
+            print(f"  ✗ {name}")
+    if result.service_restarted:
+        print(f"  ✓ Service anolis-{args.project} restarted")
+    if result.error:
+        print(f"\n  ⚠️  {result.error}")
+    print("─" * 60)
+    return 0 if not result.failed else 1
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -735,6 +976,8 @@ def main() -> int:
         print("  install   Install binaries and create a project locally", file=sys.stderr)
         print("  bundle    Download binaries and create an offline install bundle", file=sys.stderr)
         print("  remote    Provision a remote machine via SSH", file=sys.stderr)
+        print("  fleet     Provision multiple targets from a fleet.yaml", file=sys.stderr)
+        print("  rollback  Roll back binaries to previous version", file=sys.stderr)
         return 2
 
     if args.command == "install":
@@ -745,6 +988,12 @@ def main() -> int:
 
     if args.command == "remote":
         return _run_remote(args)
+
+    if args.command == "fleet":
+        return _run_fleet(args)
+
+    if args.command == "rollback":
+        return _run_rollback(args)
 
     print(f"Command '{args.command}' is not yet implemented.", file=sys.stderr)
     return 2
