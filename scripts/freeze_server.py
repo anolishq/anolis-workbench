@@ -67,8 +67,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-size-bytes",
         type=int,
-        default=20_000_000,
-        help="Fail if executable size is smaller than this threshold (default: 20000000).",
+        default=10_000_000,
+        help="Fail if executable size is smaller than this threshold (default: 10000000).",
     )
     parser.add_argument(
         "--smoke-timeout-seconds",
