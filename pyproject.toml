@@ -16,6 +16,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ssh = [
+    "paramiko>=3.4.0,<4.0.0",
+]
 dev = [
     "ruff>=0.15.0,<1.0.0",
     "pytest>=8.0.0,<10.0.0",
@@ -25,6 +28,7 @@ dev = [
     "types-requests>=2.31.0",
     "types-psutil>=5.9.0",
     "types-PyYAML>=6.0.0",
+    "types-paramiko>=3.4.0",
     "pyinstaller>=6.0.0,<7.0.0",
 ]
 

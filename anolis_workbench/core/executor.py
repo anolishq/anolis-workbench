@@ -115,3 +115,112 @@ class SubprocessSSHExecutor(Executor):
     def file_exists(self, path: str) -> bool:
         result = self.run(["test", "-e", path])
         return result.returncode == 0
+
+
+class ParamikoSSHExecutor(Executor):
+    """Executes operations on a remote machine via paramiko (programmatic SSH).
+
+    Used when running inside the workbench server (Tauri sidecar) where no
+    system terminal is available. Lazy-imports paramiko so it's only required
+    when this executor is actually instantiated.
+
+    Known-host verification: loads system ~/.ssh/known_hosts. Unknown hosts
+    are rejected (no auto-add).
+    """
+
+    def __init__(
+        self,
+        host: str,
+        user: str,
+        *,
+        key_file: str | None = None,
+        port: int = 22,
+    ):
+        import paramiko
+
+        self.host = host
+        self.user = user
+        self.port = port
+        self._client = paramiko.SSHClient()
+        self._client.load_system_host_keys()
+        self._client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        connect_kwargs: dict[str, object] = {
+            "hostname": host,
+            "port": port,
+            "username": user,
+        }
+        if key_file:
+            connect_kwargs["key_filename"] = key_file
+        self._client.connect(**connect_kwargs)  # type: ignore[arg-type]
+        self._sftp = self._client.open_sftp()
+
+    def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+        remote_cmd = shlex.join(cmd)
+        if sudo:
+            remote_cmd = f"sudo {remote_cmd}"
+        stdin, stdout, stderr = self._client.exec_command(remote_cmd)
+        if input:
+            stdin.write(input)
+            stdin.flush()
+            stdin.channel.shutdown_write()
+        exit_code = stdout.channel.recv_exit_status()
+        return RunResult(
+            returncode=exit_code,
+            stdout=stdout.read().decode(errors="replace"),
+            stderr=stderr.read().decode(errors="replace"),
+        )
+
+    def write_file(self, path: str, data: bytes) -> None:
+        with self._sftp.open(path, "wb") as f:
+            f.write(data)
+
+    def mkdir(self, path: str) -> None:
+        # Walk path components and create each level
+        parts = Path(path).parts
+        current = ""
+        for part in parts:
+            current = f"{current}/{part}" if current else part
+            if current == "/":
+                continue
+            try:
+                self._sftp.stat(current)
+            except FileNotFoundError:
+                self._sftp.mkdir(current)
+
+    def file_exists(self, path: str) -> bool:
+        try:
+            self._sftp.stat(path)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def close(self) -> None:
+        """Close the SSH connection and SFTP channel."""
+        self._sftp.close()
+        self._client.close()
+
+
+def create_ssh_executor(
+    host: str,
+    user: str,
+    *,
+    key_file: str | None = None,
+    port: int = 22,
+    use_paramiko: bool = False,
+) -> Executor:
+    """Factory for creating the appropriate SSH executor.
+
+    Args:
+        host: Remote hostname.
+        user: SSH username.
+        key_file: Optional path to private key.
+        port: SSH port.
+        use_paramiko: If True, use ParamikoSSHExecutor (server/UI mode).
+                      If False, use SubprocessSSHExecutor (CLI mode).
+
+    Returns:
+        An Executor instance connected to the remote host.
+    """
+    if use_paramiko:
+        return ParamikoSSHExecutor(host=host, user=user, key_file=key_file, port=port)
+    return SubprocessSSHExecutor(host=host, user=user, key_file=key_file, port=port)
