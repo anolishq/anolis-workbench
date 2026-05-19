@@ -503,16 +503,41 @@ jobs:
           VERSION="${{ inputs.version }}"
           mkdir -p release-assets
 
-          for f in raw-bundles/*; do
-            [[ -f "$f" ]] || continue
+          echo "=== Raw bundle contents ==="
+          find raw-bundles -type f | sort
+
+          find raw-bundles -type f | while read -r f; do
             base=$(basename "$f")
-            # Replace spaces with hyphens, lowercase
-            normalized=$(echo "$base" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
-            # Normalize Tauri naming: "anolis-workbench_ver_" -> "anolis-workbench-ver-"
-            normalized=$(echo "$normalized" | sed "s/anolis-workbench_${VERSION}_/anolis-workbench-${VERSION}-/g")
-            # Remove "-setup" suffix from MSI
-            normalized=$(echo "$normalized" | sed 's/-setup\.msi/.msi/g')
-            cp "$f" "release-assets/${normalized}"
+            ext="${base##*.}"
+            ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+
+            case "$ext_lower" in
+              msi)
+                cp "$f" "release-assets/anolis-workbench-${VERSION}-x64.msi"
+                ;;
+              dmg)
+                # Determine arch from filename or path
+                if echo "$f" | grep -qi "aarch64\|arm64\|apple.silicon"; then
+                  cp "$f" "release-assets/anolis-workbench-${VERSION}-aarch64.dmg"
+                else
+                  cp "$f" "release-assets/anolis-workbench-${VERSION}-x64.dmg"
+                fi
+                ;;
+              deb)
+                cp "$f" "release-assets/anolis-workbench-${VERSION}-amd64.deb"
+                ;;
+              appimage)
+                cp "$f" "release-assets/anolis-workbench-${VERSION}-amd64.appimage"
+                ;;
+              json)
+                # SBOM or other JSON - keep original name lowercase
+                normalized=$(echo "$base" | tr '[:upper:]' '[:lower:]')
+                cp "$f" "release-assets/${normalized}"
+                ;;
+              *)
+                cp "$f" "release-assets/${base}"
+                ;;
+            esac
           done
 
           echo "=== Release assets ==="
