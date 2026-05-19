@@ -13,6 +13,33 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-18
+
+### Added
+
+- **ParamikoSSHExecutor** for server/UI mode SSH connections: lazy-imports
+  paramiko, loads system known_hosts, rejects unknown hosts (RejectPolicy).
+- **`create_ssh_executor()` factory** for choosing SSH backend (CLI uses
+  subprocess, server uses paramiko).
+- **Provision route handlers**: `start_install`, `start_remote`, `get_status`
+  (SSE progress streaming), `cancel_job`.
+- Provision endpoints wired into server app.py routing.
+- `paramiko` as optional `[ssh]` dependency group.
+- `types-paramiko` in dev dependencies.
+- Unit tests for ParamikoSSHExecutor and provision routes.
+
+## [0.9.0] - 2026-05-18
+
+### Added
+
+- **Fleet provisioning** (`provision fleet` subcommand): parallel multi-target
+  provisioning with configurable concurrency and per-host status tracking.
+- **Rollback support** (`provision rollback` subcommand): reverts a target to
+  the previous installed version using snapshot metadata.
+- `FleetTarget` dataclass and `FleetResult` for structured fleet outcomes.
+- `--concurrency` flag for fleet operations.
+- Fleet and rollback unit tests.
+
 ## [0.8.0] - 2026-05-18
 
 ### Added
