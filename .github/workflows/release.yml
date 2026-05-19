@@ -340,6 +340,11 @@ jobs:
           name: sidecar-${{ matrix.target }}
           path: desktop/src-tauri/binaries
 
+      - name: Mark sidecar executable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: chmod +x desktop/src-tauri/binaries/*
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
