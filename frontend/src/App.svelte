@@ -347,7 +347,7 @@
   <div id="global-banner" class="global-banner">{crossProjectBanner}</div>
 {/if}
 
-<main id="shell-main">
+<main id="shell-main" class:has-banner={Boolean(crossProjectBanner)}>
   {#if showOnboarding && !projectName}
     <Onboarding
       onNavigate={(path) => {

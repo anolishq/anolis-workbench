@@ -765,7 +765,7 @@
     <div class="operate-section operate-devices-layout">
       <div class="operate-device-list-col">
         <h3>Devices</h3>
-        <ul class="operate-device-list">
+        <ul class="operate-list">
           {#if devices.length === 0}
             <li class="placeholder">No devices found.</li>
           {:else}
@@ -997,7 +997,7 @@
             </span>
           {/if}
         </div>
-        <pre class="behavior-tree-viewer">{formatBtOutline(behaviorTree)}</pre>
+        <pre class="bt-viewer">{formatBtOutline(behaviorTree)}</pre>
       {/if}
     </div>
 
