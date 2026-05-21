@@ -1,6 +1,29 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "description": "Group all GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "pinDigests": true
+    },
+    {
+      "description": "Supply-chain safety: wait 3 days for npm packages",
+      "matchManagers": ["npm"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Supply-chain safety: wait 3 days for pypi packages",
+      "matchManagers": ["pep621"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Group Tauri ecosystem updates",
+      "matchManagers": ["cargo"],
+      "matchPackagePatterns": ["^tauri"],
+      "groupName": "tauri"
+    }
   ]
 }
