@@ -102,7 +102,7 @@ jobs:
   metrics:
     name: Collect metrics
     needs: validate
-    uses: anolishq/.github/.github/workflows/metrics.yml@fa90acda2a76e1a81fb6266be94f50d7d2fb6fd0 # v1
+    uses: anolishq/.github/.github/workflows/metrics.yml@bc164399678c8e0921a9c606b660bb4a16ad9e98 # v2
     with:
       tag: ${{ needs.validate.outputs.tag }}
 
@@ -136,7 +136,7 @@ jobs:
           python-version: "3.12"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
