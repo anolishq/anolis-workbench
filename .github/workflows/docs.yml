@@ -21,4 +21,4 @@ permissions: read-all
 
 jobs:
   check:
-    uses: anolishq/.github/.github/workflows/docs-check.yml@v2
+    uses: anolishq/.github/.github/workflows/docs-check.yml@bc164399678c8e0921a9c606b660bb4a16ad9e98 # v2
