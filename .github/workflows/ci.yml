@@ -243,7 +243,7 @@ jobs:
           timeout 10 dist/anolis-workbench --help
 
   version-sync:
-    uses: anolishq/.github/.github/workflows/version-sync.yml@afc2d268fb34aae478284589c29e3043c136a897 # main
+    uses: anolishq/.github/.github/workflows/version-sync.yml@01b61259e549666b145d941a5aa8a851b98ec399 # main
     with:
       python-version: '3.12'
       working-directory: '.'
