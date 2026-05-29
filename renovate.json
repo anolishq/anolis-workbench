@@ -22,8 +22,10 @@
     {
       "description": "Group Tauri ecosystem updates",
       "matchManagers": ["cargo"],
-      "matchPackagePatterns": ["^tauri"],
-      "groupName": "tauri"
+      "groupName": "tauri",
+      "matchPackageNames": [
+        "/^tauri/"
+      ]
     }
   ]
 }
