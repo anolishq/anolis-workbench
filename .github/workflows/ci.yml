@@ -3,18 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.svg"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.svg"
   workflow_dispatch:
   workflow_call:
 
@@ -26,8 +16,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - '!(docs/**|**/*.md|**/*.png|**/*.svg)'
+
   frontend:
     name: Frontend (Node / Vite build)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -78,6 +86,8 @@ jobs:
 
   lint:
     name: Lint (ruff)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -105,6 +115,8 @@ jobs:
 
   typecheck:
     name: Type check (mypy)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -130,6 +142,8 @@ jobs:
 
   test:
     name: Unit tests
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -183,6 +197,8 @@ jobs:
 
   contract-drift:
     name: Contract drift check
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -204,6 +220,8 @@ jobs:
 
   freeze-smoke:
     name: Freeze smoke test (Linux)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -243,7 +261,22 @@ jobs:
           timeout 10 dist/anolis-workbench --help
 
   version-sync:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     uses: anolishq/.github/.github/workflows/version-sync.yml@01b61259e549666b145d941a5aa8a851b98ec399 # main
     with:
       python-version: '3.12'
       working-directory: '.'
+
+  ok:
+    name: ok
+    if: always()
+    needs: [changes, frontend, lint, typecheck, test, contract-drift, freeze-smoke, version-sync]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any upstream job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - name: Pass
+        run: echo 'All checks passed or were skipped'
