@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -26,7 +28,7 @@ class FleetTarget:
     host: str
     project: str
     template: str = "bioreactor-manual"
-    install_prefix: Path = field(default_factory=lambda: Path("/usr/local"))
+    install_prefix: Path = field(default_factory=lambda: DEFAULT_INSTALL_PREFIX)
     systemd: bool = False
     key: str | None = None
     profile: str = "manual"
@@ -115,7 +117,9 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
                 host=entry["host"],
                 project=entry.get("project", defaults.get("project", "bioreactor-v1")),
                 template=entry.get("template", defaults.get("template", "bioreactor-manual")),
-                install_prefix=Path(entry.get("install_prefix", defaults.get("install_prefix", "/usr/local"))),
+                install_prefix=Path(
+                    entry.get("install_prefix", defaults.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
+                ),
                 systemd=entry.get("systemd", defaults.get("systemd", False)),
                 key=entry.get("key", defaults.get("key")),
                 profile=entry.get("profile", defaults.get("profile", "manual")),

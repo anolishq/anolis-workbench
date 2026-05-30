@@ -14,6 +14,7 @@ from typing import Any
 
 from anolis_workbench.core import installer
 from anolis_workbench.core.executor import ParamikoSSHExecutor
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 # ---------------------------------------------------------------------------
 # Job management
@@ -63,7 +64,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         result = installer.install(
             project_name=params.get("project", "bioreactor-v1"),
             template_name=params.get("template", "bioreactor-manual"),
-            install_prefix=installer.Path(params.get("install_prefix", "/usr/local")),
+            install_prefix=installer.Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             github_token=params.get("github_token"),
             force=params.get("force", False),
             skip_preflight=params.get("skip_preflight", False),
@@ -108,7 +109,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         result = installer.install(
             project_name=params.get("project", "bioreactor-v1"),
             template_name=params.get("template", "bioreactor-manual"),
-            install_prefix=installer.Path(params.get("install_prefix", "/usr/local")),
+            install_prefix=installer.Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             github_token=params.get("github_token"),
             force=params.get("force", False),
             skip_preflight=params.get("skip_preflight", False),

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from anolis_workbench.core.executor import Executor, LocalExecutor
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 
 @dataclass
@@ -105,7 +106,7 @@ def _check_i2c_permissions(executor: Executor) -> CheckResult:
     )
 
 
-def _check_disk_space(executor: Executor, path: str = "/usr/local") -> CheckResult:
+def _check_disk_space(executor: Executor, path: str = str(DEFAULT_INSTALL_PREFIX)) -> CheckResult:
     """Check that at least 50 MB is free at the install prefix."""
     result = executor.run(["df", "--output=avail", "-B1", path])
     if result.returncode != 0:
@@ -191,7 +192,7 @@ def _check_sudo(executor: Executor) -> CheckResult:
 def run_preflight(
     executor: Executor | None = None,
     *,
-    install_prefix: str = "/usr/local",
+    install_prefix: str = str(DEFAULT_INSTALL_PREFIX),
 ) -> PreflightResult:
     """Run all preflight checks on the target.
 

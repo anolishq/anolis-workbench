@@ -23,19 +23,19 @@ class TestBackupBinary:
         mock_executor.file_exists.return_value = True
         mock_executor.run.return_value = MagicMock(returncode=0)
 
-        result = backup_binary("anolis-runtime", Path("/usr/local"), executor=mock_executor)
+        result = backup_binary("anolis-runtime", Path("/opt/anolis"), executor=mock_executor)
 
         assert result is True
-        mock_executor.file_exists.assert_called_with("/usr/local/bin/anolis-runtime")
+        mock_executor.file_exists.assert_called_with("/opt/anolis/bin/anolis-runtime")
         mock_executor.run.assert_called_once()
         cmd = mock_executor.run.call_args[0][0]
-        assert cmd == ["cp", "/usr/local/bin/anolis-runtime", "/usr/local/bin/anolis-runtime.prev"]
+        assert cmd == ["cp", "/opt/anolis/bin/anolis-runtime", "/opt/anolis/bin/anolis-runtime.prev"]
 
     def test_no_backup_if_binary_missing(self) -> None:
         mock_executor = MagicMock()
         mock_executor.file_exists.return_value = False
 
-        result = backup_binary("anolis-runtime", Path("/usr/local"), executor=mock_executor)
+        result = backup_binary("anolis-runtime", Path("/opt/anolis"), executor=mock_executor)
 
         assert result is False
         mock_executor.run.assert_not_called()
@@ -47,7 +47,7 @@ class TestBackupBinary:
 
         result = backup_binaries(
             ["anolis-runtime", "anolis-provider-bread"],
-            Path("/usr/local"),
+            Path("/opt/anolis"),
             executor=mock_executor,
         )
 
@@ -66,17 +66,17 @@ class TestRollbackBinary:
         mock_executor.file_exists.return_value = True
         mock_executor.run.return_value = MagicMock(returncode=0)
 
-        result = rollback_binary("anolis-runtime", Path("/usr/local"), executor=mock_executor)
+        result = rollback_binary("anolis-runtime", Path("/opt/anolis"), executor=mock_executor)
 
         assert result is True
         cmd = mock_executor.run.call_args[0][0]
-        assert cmd == ["mv", "/usr/local/bin/anolis-runtime.prev", "/usr/local/bin/anolis-runtime"]
+        assert cmd == ["mv", "/opt/anolis/bin/anolis-runtime.prev", "/opt/anolis/bin/anolis-runtime"]
 
     def test_rollback_no_prev_returns_false(self) -> None:
         mock_executor = MagicMock()
         mock_executor.file_exists.return_value = False
 
-        result = rollback_binary("anolis-runtime", Path("/usr/local"), executor=mock_executor)
+        result = rollback_binary("anolis-runtime", Path("/opt/anolis"), executor=mock_executor)
 
         assert result is False
 
@@ -89,7 +89,7 @@ class TestRollback:
 
         result = rollback(
             ["anolis-runtime", "anolis-provider-bread"],
-            Path("/usr/local"),
+            Path("/opt/anolis"),
             executor=mock_executor,
         )
 
@@ -103,7 +103,7 @@ class TestRollback:
 
         result = rollback(
             ["anolis-runtime"],
-            Path("/usr/local"),
+            Path("/opt/anolis"),
             executor=mock_executor,
         )
 
@@ -119,7 +119,7 @@ class TestRollback:
 
         result = rollback(
             ["anolis-runtime"],
-            Path("/usr/local"),
+            Path("/opt/anolis"),
             project_name="bioreactor-v1",
             systemd=True,
             executor=mock_executor,
@@ -140,7 +140,7 @@ class TestRollback:
 
         result = rollback(
             ["anolis-runtime", "anolis-provider-bread"],
-            Path("/usr/local"),
+            Path("/opt/anolis"),
             executor=mock_executor,
         )
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from anolis_workbench.core import installer
 from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
     from anolis_workbench.core import fleet as fleet_module
@@ -45,8 +46,8 @@ def _parse_args() -> argparse.Namespace:
     install_parser.add_argument(
         "--install-prefix",
         type=Path,
-        default=Path("/usr/local"),
-        help="Binary install prefix (default: /usr/local).",
+        default=DEFAULT_INSTALL_PREFIX,
+        help="Binary install prefix (default: /opt/anolis).",
     )
     install_parser.add_argument(
         "--compat-matrix",
@@ -143,8 +144,8 @@ def _parse_args() -> argparse.Namespace:
     bundle_parser.add_argument(
         "--install-prefix",
         type=Path,
-        default=Path("/usr/local"),
-        help="Target install prefix for path patching (default: /usr/local).",
+        default=DEFAULT_INSTALL_PREFIX,
+        help="Target install prefix for path patching (default: /opt/anolis).",
     )
     bundle_parser.add_argument(
         "--compat-matrix",
@@ -187,8 +188,8 @@ def _parse_args() -> argparse.Namespace:
     remote_parser.add_argument(
         "--install-prefix",
         type=Path,
-        default=Path("/usr/local"),
-        help="Binary install prefix on the target (default: /usr/local).",
+        default=DEFAULT_INSTALL_PREFIX,
+        help="Binary install prefix on the target (default: /opt/anolis).",
     )
     remote_parser.add_argument(
         "--compat-matrix",
@@ -308,8 +309,8 @@ def _parse_args() -> argparse.Namespace:
     rollback_parser.add_argument(
         "--install-prefix",
         type=Path,
-        default=Path("/usr/local"),
-        help="Binary install prefix (default: /usr/local).",
+        default=DEFAULT_INSTALL_PREFIX,
+        help="Binary install prefix (default: /opt/anolis).",
     )
     rollback_parser.add_argument(
         "--systemd",

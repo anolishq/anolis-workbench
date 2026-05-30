@@ -20,6 +20,7 @@ from typing import Any
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import renderer as renderer_module
 from anolis_workbench.core.installer import ComponentSpec
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 _RUNTIME_BINARY_NAME = "anolis-runtime"
 
@@ -42,7 +43,7 @@ def build_bundle(
     platform_str: str,
     out_dir: Path,
     *,
-    install_prefix: Path = Path("/usr/local"),
+    install_prefix: Path = DEFAULT_INSTALL_PREFIX,
     workbench_version: str = "",
     system_path: Path | None = None,
     include_wheels: bool = False,
@@ -56,7 +57,7 @@ def build_bundle(
         project_name: Target project name.
         platform_str: Target platform (e.g. "linux-arm64").
         out_dir: Directory to write the bundle into. Must not exist.
-        install_prefix: Install prefix for path patching (default /usr/local).
+        install_prefix: Install prefix for path patching (default /opt/anolis).
         workbench_version: Workbench version for manifest metadata.
         system_path: Optional custom system.json (overrides template).
         include_wheels: If True, bundle Python wheels for offline pip install.
@@ -205,7 +206,7 @@ fi
 set -euo pipefail
 
 BUNDLE_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-INSTALL_PREFIX="${{ANOLIS_INSTALL_PREFIX:-/usr/local}}"
+INSTALL_PREFIX="${{ANOLIS_INSTALL_PREFIX:-/opt/anolis}}"
 PROJECT_NAME="{project_name}"
 SYSTEMS_ROOT="${{ANOLIS_DATA_DIR:-$HOME/.anolis}}/systems"
 

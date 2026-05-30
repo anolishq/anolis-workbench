@@ -215,7 +215,7 @@ class TestProvisionProject:
         (systems_root / "existing-project").mkdir()
 
         with pytest.raises(ValueError, match="already exists"):
-            installer.provision_project("bioreactor-manual", "existing-project", Path("/usr/local"))
+            installer.provision_project("bioreactor-manual", "existing-project", Path("/opt/anolis"))
 
     def test_force_overwrites(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         systems_root = tmp_path / "systems"
@@ -343,10 +343,10 @@ class TestInstallTarball:
         mock_result.returncode = 0
 
         with patch("subprocess.run", return_value=mock_result) as mock_run:
-            installer.install_tarball(b"fake-tarball-data", Path("/usr/local"))
+            installer.install_tarball(b"fake-tarball-data", Path("/opt/anolis"))
 
         mock_run.assert_called_once_with(
-            ["sudo", "tar", "-xz", "-C", "/usr/local"],
+            ["sudo", "tar", "-xz", "-C", "/opt/anolis"],
             input=b"fake-tarball-data",
             capture_output=True,
             timeout=30,
@@ -359,7 +359,7 @@ class TestInstallTarball:
 
         with patch("subprocess.run", return_value=mock_result):
             with pytest.raises(installer.InstallError, match="permission denied"):
-                installer.install_tarball(b"data", Path("/usr/local"))
+                installer.install_tarball(b"data", Path("/opt/anolis"))
 
 
 # ---------------------------------------------------------------------------

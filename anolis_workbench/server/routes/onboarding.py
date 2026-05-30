@@ -22,7 +22,7 @@ def _has_projects() -> bool:
 
 def _runtime_path() -> str:
     """Return the expected runtime binary path."""
-    return os.environ.get("ANOLIS_RUNTIME_PATH", "/usr/local/bin/anolis-runtime")
+    return os.environ.get("ANOLIS_RUNTIME_PATH", "/opt/anolis/bin/anolis-runtime")
 
 
 def _has_runtime() -> bool:

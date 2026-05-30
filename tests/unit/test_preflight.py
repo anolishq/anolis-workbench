@@ -124,7 +124,7 @@ class TestCheckDiskSpace:
         executor = MagicMock()
         # 2 GB in bytes
         executor.run.return_value = RunResult(returncode=0, stdout="Avail\n2147483648\n", stderr="")
-        result = _check_disk_space(executor, "/usr/local")
+        result = _check_disk_space(executor, "/opt/anolis")
         assert result.passed is True
         assert "GB" in result.detail
 
@@ -132,14 +132,14 @@ class TestCheckDiskSpace:
         executor = MagicMock()
         # 10 MB in bytes
         executor.run.return_value = RunResult(returncode=0, stdout="Avail\n10485760\n", stderr="")
-        result = _check_disk_space(executor, "/usr/local")
+        result = _check_disk_space(executor, "/opt/anolis")
         assert result.passed is False
         assert result.fatal is True
 
     def test_df_failure(self):
         executor = MagicMock()
         executor.run.return_value = RunResult(returncode=1, stdout="", stderr="error")
-        result = _check_disk_space(executor, "/usr/local")
+        result = _check_disk_space(executor, "/opt/anolis")
         assert result.passed is False
 
 
