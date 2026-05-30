@@ -40,7 +40,9 @@
 
   <div class="fleet-actions">
     <button type="button" class="btn-secondary btn-sm" onclick={loadFleet}>Refresh</button>
-    <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/")}>← Home</button>
+    <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/")}
+      >← Home</button
+    >
   </div>
 
   {#if loading}
@@ -48,7 +50,9 @@
   {:else if error}
     <p class="fleet-error">{error}</p>
   {:else if targets.length === 0}
-    <p class="fleet-empty">No targets registered. Provision a remote target to populate this list.</p>
+    <p class="fleet-empty">
+      No targets registered. Provision a remote target to populate this list.
+    </p>
   {:else}
     <table class="fleet-table">
       <thead>

@@ -409,7 +409,13 @@
       const evtSource = new EventSource(`/api/provision/status/${jobId}`);
       await new Promise<void>((resolve, reject) => {
         evtSource.onmessage = (ev) => {
-          const data = JSON.parse(ev.data) as { stage: string; status?: string; detail?: string; error?: string; filename?: string };
+          const data = JSON.parse(ev.data) as {
+            stage: string;
+            status?: string;
+            detail?: string;
+            error?: string;
+            filename?: string;
+          };
           if (data.stage === "done") {
             bundleFeedback = data.detail ?? "Bundle ready";
             evtSource.close();

@@ -12,6 +12,50 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+# Allowlist of binaries that executors are permitted to invoke.
+# Commands not in this set are rejected to prevent command injection.
+_ALLOWED_COMMANDS: set[str] = {
+    "cat",
+    "chmod",
+    "cp",
+    "curl",
+    "df",
+    "docker",
+    "echo",
+    "false",
+    "groups",
+    "ln",
+    "ls",
+    "mkdir",
+    "mv",
+    "pip3",
+    "python3",
+    "rm",
+    "sh",
+    "systemctl",
+    "tar",
+    "test",
+    "true",
+    "uname",
+    "anolis-runtime",
+    "anolis-provider-bread",
+    "anolis-provider-ezo",
+    "anolis-provider-sim",
+}
+
+
+def _validate_command(cmd: list[str]) -> None:
+    """Validate that a command uses an allowed binary.
+
+    Raises:
+        ValueError: If the command binary is not in the allowlist.
+    """
+    if not cmd:
+        raise ValueError("Empty command")
+    binary = cmd[0].rsplit("/", 1)[-1]  # basename
+    if binary not in _ALLOWED_COMMANDS:
+        raise ValueError(f"Command '{binary}' is not in the executor allowlist. Allowed: {sorted(_ALLOWED_COMMANDS)}")
+
 
 @dataclass
 class RunResult:
@@ -46,6 +90,7 @@ class LocalExecutor(Executor):
     """Executes operations on the local machine via subprocess + pathlib."""
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+        _validate_command(cmd)
         full_cmd = (["sudo"] + cmd) if sudo else cmd
         result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=30)
         return RunResult(
@@ -85,6 +130,7 @@ class SubprocessSSHExecutor(Executor):
         return args
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+        _validate_command(cmd)
         remote_cmd = (["sudo"] + cmd) if sudo else cmd
         ssh_cmd = self._ssh_base(allocate_pty=sudo) + [shlex.join(remote_cmd)]
         result = subprocess.run(
@@ -155,6 +201,7 @@ class ParamikoSSHExecutor(Executor):
         self._sftp = self._client.open_sftp()
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+        _validate_command(cmd)
         remote_cmd = shlex.join(cmd)
         if sudo:
             remote_cmd = f"sudo {remote_cmd}"

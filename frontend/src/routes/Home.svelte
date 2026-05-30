@@ -152,7 +152,6 @@
       rollbackRunning = false;
     }
   }
-
 </script>
 
 <section id="workspace-home" class="workspace visible">
@@ -259,12 +258,18 @@
         </button>
       </div>
       {#if updateFeedback}
-        <p class="system-feedback" style="color: {updateIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}">
+        <p
+          class="system-feedback"
+          style="color: {updateIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+        >
           {updateFeedback}
         </p>
       {/if}
       {#if rollbackFeedback}
-        <p class="system-feedback" style="color: {rollbackIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}">
+        <p
+          class="system-feedback"
+          style="color: {rollbackIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+        >
           {rollbackFeedback}
         </p>
       {/if}
