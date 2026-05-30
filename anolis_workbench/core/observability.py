@@ -51,11 +51,7 @@ def deploy_observability(
 
     # Extract tarball
     with tarfile.open(fileobj=BytesIO(data), mode="r:gz") as tar:
-        # Security: prevent path traversal
-        for member in tar.getmembers():
-            if member.name.startswith("/") or ".." in member.name:
-                raise ValueError(f"Unsafe path in tarball: {member.name}")
-        tar.extractall(path=str(stack_path))  # noqa: S202
+        tar.extractall(path=str(stack_path), filter="data")
 
     # Create .env from .env.example if it doesn't exist
     env_example = stack_path / ".env.example"

@@ -5,7 +5,6 @@
 - [ ] Implement proper code-signing for release builds (Windows, macOS, Linux)
 - [ ] Re-add auto-updater once signing is in place (requires valid pubkey + signed artifacts)
 - [ ] Replace placeholder icon.png with final branded asset (all required sizes)
-- [ ] Tauri `tar.extractall` deprecation warning — add `filter` arg before Python 3.14
 
 ## CI / Release
 
@@ -15,5 +14,4 @@
 
 ## General
 
-- [ ] Remove `# noqa: S202` once extractall filter is applied
 - [ ] Audit remaining `DeprecationWarning`s in test suite
