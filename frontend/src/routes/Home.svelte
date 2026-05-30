@@ -153,10 +153,6 @@
     }
   }
 
-  // Auto-check on mount
-  $effect(() => {
-    checkForUpdate();
-  });
 </script>
 
 <section id="workspace-home" class="workspace visible">
