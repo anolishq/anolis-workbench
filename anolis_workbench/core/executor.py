@@ -44,8 +44,11 @@ _ALLOWED_COMMANDS: set[str] = {
 }
 
 
-def _validate_command(cmd: list[str]) -> None:
-    """Validate that a command uses an allowed binary.
+def _validate_command(cmd: list[str]) -> list[str]:
+    """Validate command against the binary allowlist and return a sanitized copy.
+
+    The returned list is a fresh copy with the binary resolved from the
+    allowlist set, breaking data-flow from untrusted sources.
 
     Raises:
         ValueError: If the command binary is not in the allowlist.
@@ -54,7 +57,15 @@ def _validate_command(cmd: list[str]) -> None:
         raise ValueError("Empty command")
     binary = cmd[0].rsplit("/", 1)[-1]  # basename
     if binary not in _ALLOWED_COMMANDS:
-        raise ValueError(f"Command '{binary}' is not in the executor allowlist. Allowed: {sorted(_ALLOWED_COMMANDS)}")
+        raise ValueError(
+            f"Command '{binary}' is not in the executor allowlist. "
+            f"Allowed: {sorted(_ALLOWED_COMMANDS)}"
+        )
+    # Rebuild command with the verified binary from _ALLOWED_COMMANDS.
+    # This severs taint propagation: the binary value originates from the
+    # frozen allowlist, not from caller-supplied data.
+    verified_binary: str = next(b for b in _ALLOWED_COMMANDS if b == binary)
+    return [verified_binary, *(str(a) for a in cmd[1:])]
 
 
 @dataclass
@@ -90,8 +101,8 @@ class LocalExecutor(Executor):
     """Executes operations on the local machine via subprocess + pathlib."""
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
-        _validate_command(cmd)
-        full_cmd = (["sudo"] + cmd) if sudo else cmd
+        safe_cmd = _validate_command(cmd)
+        full_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
         result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=30)
         return RunResult(
             returncode=result.returncode,
@@ -130,8 +141,8 @@ class SubprocessSSHExecutor(Executor):
         return args
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
-        _validate_command(cmd)
-        remote_cmd = (["sudo"] + cmd) if sudo else cmd
+        safe_cmd = _validate_command(cmd)
+        remote_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
         ssh_cmd = self._ssh_base(allocate_pty=sudo) + [shlex.join(remote_cmd)]
         result = subprocess.run(
             ssh_cmd,
@@ -201,8 +212,8 @@ class ParamikoSSHExecutor(Executor):
         self._sftp = self._client.open_sftp()
 
     def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
-        _validate_command(cmd)
-        remote_cmd = shlex.join(cmd)
+        safe_cmd = _validate_command(cmd)
+        remote_cmd = shlex.join(safe_cmd)
         if sudo:
             remote_cmd = f"sudo {remote_cmd}"
         stdin, stdout, stderr = self._client.exec_command(remote_cmd)
