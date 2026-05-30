@@ -8,6 +8,9 @@ import pathlib
 CORE_DIR = pathlib.Path(__file__).resolve().parent
 PACKAGE_DIR = CORE_DIR.parent
 
+# Default install prefix for provisioned binaries on target machines.
+DEFAULT_INSTALL_PREFIX = pathlib.Path("/opt/anolis")
+
 # In editable mode these resolve to source-tree assets. In installed mode they
 # resolve to bundled package-data assets under the same package root.
 _SOURCE_ASSET_ROOT = PACKAGE_DIR

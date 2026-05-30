@@ -1,7 +1,7 @@
 """Local provisioning installer for Anolis components.
 
 Downloads pre-built binaries from GitHub Releases, verifies integrity,
-installs to a prefix (default /usr/local), and creates a ready-to-launch
+installs to a prefix (default /opt/anolis), and creates a ready-to-launch
 workbench project from a bundled template.
 
 No HTTP server dependency. Subprocess use limited to the install (tar) and
@@ -67,6 +67,8 @@ class InstallResult:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX  # noqa: E402
 
 # The runtime compat matrix key is "anolis" but the binary is "anolis-runtime".
 # Provider keys match their binary names.
@@ -354,11 +356,11 @@ def install_tarball(
     """Install a tarball to the given prefix using sudo tar.
 
     The tarball internal structure is `bin/<binary>`, so extracting to
-    /usr/local yields /usr/local/bin/<binary>.
+    /opt/anolis yields /opt/anolis/bin/<binary>.
 
     Args:
         data: Raw tarball bytes.
-        prefix: Install prefix (e.g. /usr/local).
+        prefix: Install prefix (e.g. /opt/anolis).
         executor: Executor for I/O.
         backup: If True, back up existing binaries to .prev before overwriting.
         binary_names: Names of binaries to back up (required if backup=True).
@@ -403,7 +405,7 @@ def provision_project(
     Args:
         template_name: Template directory name under templates/ (e.g. "bioreactor-manual").
         project_name: Name for the created project (e.g. "bioreactor-v1").
-        install_prefix: Binary install prefix (e.g. /usr/local).
+        install_prefix: Binary install prefix (e.g. /opt/anolis).
         force: If True, overwrite an existing project.
         executor: Executor for file writes. Defaults to LocalExecutor.
         systems_root: Override systems root (for remote targets). Defaults to local SYSTEMS_ROOT.
@@ -575,7 +577,7 @@ def install(
     *,
     template_name: str = "bioreactor-manual",
     system_path: Path | None = None,
-    install_prefix: Path = Path("/usr/local"),
+    install_prefix: Path = DEFAULT_INSTALL_PREFIX,
     compat_matrix_path: Path | None = None,
     github_token: str | None = None,
     force: bool = False,
@@ -591,7 +593,7 @@ def install(
         project_name: Project name to create (e.g. "bioreactor-v1").
         template_name: Template to use for project creation.
         system_path: Optional path to a custom system.json (overrides template).
-        install_prefix: Where to install binaries (default /usr/local).
+        install_prefix: Where to install binaries (default /opt/anolis).
         compat_matrix_path: Override path to compat matrix YAML.
         github_token: Optional GitHub token for API auth.
         force: Overwrite existing binaries/project.

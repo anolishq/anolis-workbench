@@ -12,6 +12,7 @@ from pathlib import Path
 from textwrap import dedent
 
 from anolis_workbench.core.executor import Executor, LocalExecutor
+from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 _UNIT_TEMPLATE = dedent("""\
     [Unit]
@@ -54,7 +55,7 @@ def service_name(project_name: str) -> str:
 def render_unit_file(
     project_name: str,
     *,
-    install_prefix: Path = Path("/usr/local"),
+    install_prefix: Path = DEFAULT_INSTALL_PREFIX,
     systems_root: Path,
     user: str,
 ) -> str:
@@ -85,7 +86,7 @@ def install_service(
     project_name: str,
     *,
     executor: Executor | None = None,
-    install_prefix: Path = Path("/usr/local"),
+    install_prefix: Path = DEFAULT_INSTALL_PREFIX,
     systems_root: Path,
     user: str,
 ) -> SystemdResult:

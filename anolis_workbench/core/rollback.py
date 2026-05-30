@@ -44,7 +44,7 @@ def backup_binary(
 
     Args:
         binary_name: Name of the binary (e.g. "anolis-runtime").
-        prefix: Install prefix (e.g. /usr/local).
+        prefix: Install prefix (e.g. /opt/anolis).
         executor: Executor for I/O.
 
     Returns:

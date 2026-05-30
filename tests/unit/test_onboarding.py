@@ -69,12 +69,12 @@ class TestGetOnboardingStatus:
         with (
             patch.object(onboarding, "_systems_root", return_value=Path("/nonexistent")),
             patch.object(onboarding, "_has_runtime", return_value=False),
-            patch.object(onboarding, "_runtime_path", return_value="/usr/local/bin/anolis-runtime"),
+            patch.object(onboarding, "_runtime_path", return_value="/opt/anolis/bin/anolis-runtime"),
         ):
             onboarding.get_onboarding_status(handler)
 
         _, data = handler._responses[0]
-        assert data["runtime_path"] == "/usr/local/bin/anolis-runtime"
+        assert data["runtime_path"] == "/opt/anolis/bin/anolis-runtime"
 
 
 class TestHelpers:

@@ -155,7 +155,7 @@ class TestBuildBundle:
         assert manifest["bundle_format"] == "anolis-bundle-v1"
         assert manifest["project"] == "bioreactor-v1"
         assert manifest["target_platform"] == "linux-arm64"
-        assert manifest["install_prefix"] == "/usr/local"
+        assert manifest["install_prefix"] == "/opt/anolis"
         assert manifest["workbench_version"] == "0.4.0"
         assert len(manifest["components"]) == 2
         assert manifest["components"][0]["name"] == "anolis"
@@ -210,8 +210,8 @@ class TestBuildBundle:
 
         system = json.loads((out_dir / "project" / "system.json").read_text(encoding="utf-8"))
         assert system["meta"]["name"] == "bioreactor-v1"
-        assert system["paths"]["runtime_executable"] == "/usr/local/bin/anolis-runtime"
-        assert system["paths"]["providers"]["bread0"]["executable"] == "/usr/local/bin/anolis-provider-bread"
+        assert system["paths"]["runtime_executable"] == "/opt/anolis/bin/anolis-runtime"
+        assert system["paths"]["providers"]["bread0"]["executable"] == "/opt/anolis/bin/anolis-provider-bread"
 
     def test_custom_install_prefix(
         self, tmp_path: Path, components: list[ComponentSpec], tarballs: list, fake_template: Path
@@ -302,7 +302,7 @@ class TestBuildBundle:
         assert result.bundle_path == out_dir
         system = json.loads((out_dir / "project" / "system.json").read_text(encoding="utf-8"))
         assert system["meta"]["name"] == "custom-project"
-        assert system["paths"]["providers"]["ezo0"]["executable"] == "/usr/local/bin/anolis-provider-ezo"
+        assert system["paths"]["providers"]["ezo0"]["executable"] == "/opt/anolis/bin/anolis-provider-ezo"
 
     def test_include_wheels_creates_wheels_dir(
         self, tmp_path: Path, components: list[ComponentSpec], tarballs: list, fake_template: Path
