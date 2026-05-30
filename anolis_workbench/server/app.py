@@ -264,12 +264,15 @@ class _Handler(BaseHTTPRequestHandler):
         from anolis_workbench.core.updater import check_for_update
 
         status = check_for_update()
-        self._json(200, {
-            "current_version": status.current_version,
-            "latest_version": status.latest_version,
-            "update_available": status.update_available,
-            "error": status.error,
-        })
+        self._json(
+            200,
+            {
+                "current_version": status.current_version,
+                "latest_version": status.latest_version,
+                "update_available": status.update_available,
+                "error": status.error,
+            },
+        )
 
 
 def main() -> None:
