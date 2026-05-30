@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core.appliance import default_host, default_open_browser
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
 
@@ -41,11 +42,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
-HOST = os.getenv("ANOLIS_WORKBENCH_HOST", "127.0.0.1")
+HOST = os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()
 PORT = _env_int("ANOLIS_WORKBENCH_PORT", 3010)
 OPERATOR_UI_BASE = os.getenv("ANOLIS_OPERATOR_UI_BASE", "http://localhost:3000").rstrip("/")
 TELEMETRY_URL = os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3001").rstrip("/")
-OPEN_BROWSER = _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", True)
+OPEN_BROWSER = _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", default_open_browser())
 FRONTEND_DIR = paths_module.FRONTEND_DIR
 
 _WORKSPACE_ROUTE_RE = re.compile(r"^/projects/[^/]+(?:/(?:compose|commission|operate))?/?$")
