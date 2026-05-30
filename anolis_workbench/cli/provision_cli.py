@@ -342,6 +342,29 @@ def _parse_args() -> argparse.Namespace:
         help="Fleet file for fleet-wide rollback.",
     )
 
+    # --- check-update subcommand ---
+    subparsers.add_parser(
+        "check-update",
+        help="Check if a newer workbench version is available on GitHub.",
+    )
+
+    # --- update subcommand ---
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Download and install the latest version.",
+    )
+    update_parser.add_argument(
+        "--install-prefix",
+        type=Path,
+        default=DEFAULT_INSTALL_PREFIX,
+        help="Binary install prefix (default: /opt/anolis).",
+    )
+    update_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without executing.",
+    )
+
     return parser.parse_args()
 
 
@@ -967,6 +990,68 @@ def _run_rollback(args: argparse.Namespace) -> int:
     return 0 if not result.failed else 1
 
 
+def _run_check_update() -> int:
+    """Check for available updates."""
+    from anolis_workbench.core.updater import check_for_update
+
+    status = check_for_update()
+    print(f"  Current version: {status.current_version}")
+
+    if status.error:
+        print(f"  ⚠️  {status.error}")
+        return 0
+
+    print(f"  Latest version:  {status.latest_version}")
+    if status.update_available:
+        print(f"\n  ⬆️  Update available: {status.current_version} → {status.latest_version}")
+        print("     Run install.sh or re-run anolis-provision install to update.")
+    else:
+        print("\n  ✓ You are on the latest version.")
+    return 0
+
+
+def _run_update(args: argparse.Namespace) -> int:
+    """Download and install the latest version."""
+    from anolis_workbench.core.updater import check_for_update, perform_update
+
+    print("Anolis Provision — Update")
+    print()
+
+    status = check_for_update()
+    print(f"  Current version: {status.current_version}")
+
+    if status.error:
+        print(f"  ⚠️  {status.error}")
+        return 1
+
+    if not status.update_available:
+        print(f"  Latest version:  {status.latest_version}")
+        print("\n  ✓ Already up to date.")
+        return 0
+
+    print(f"  Latest version:  {status.latest_version}")
+    print(f"\n  ⬆️  Updating {status.current_version} → {status.latest_version}...")
+    if args.dry_run:
+        print("  Mode: DRY RUN")
+
+    assert status.latest_version is not None  # guaranteed when update_available is True
+    result = perform_update(
+        target_version=status.latest_version,
+        install_prefix=args.install_prefix,
+        dry_run=args.dry_run,
+    )
+
+    if result.success:
+        if args.dry_run:
+            print(f"\n  {result.error}")
+        else:
+            print(f"\n  ✅ Updated to v{result.version}")
+        return 0
+    else:
+        print(f"\n  ❌ Update failed: {result.error}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -974,11 +1059,13 @@ def main() -> int:
         print("Usage: anolis-provision <command> [options]", file=sys.stderr)
         print("", file=sys.stderr)
         print("Commands:", file=sys.stderr)
-        print("  install   Install binaries and create a project locally", file=sys.stderr)
-        print("  bundle    Download binaries and create an offline install bundle", file=sys.stderr)
-        print("  remote    Provision a remote machine via SSH", file=sys.stderr)
-        print("  fleet     Provision multiple targets from a fleet.yaml", file=sys.stderr)
-        print("  rollback  Roll back binaries to previous version", file=sys.stderr)
+        print("  install       Install binaries and create a project locally", file=sys.stderr)
+        print("  bundle        Download binaries and create an offline install bundle", file=sys.stderr)
+        print("  remote        Provision a remote machine via SSH", file=sys.stderr)
+        print("  fleet         Provision multiple targets from a fleet.yaml", file=sys.stderr)
+        print("  rollback      Roll back binaries to previous version", file=sys.stderr)
+        print("  check-update  Check if a newer version is available", file=sys.stderr)
+        print("  update        Download and install the latest version", file=sys.stderr)
         return 2
 
     if args.command == "install":
@@ -995,6 +1082,12 @@ def main() -> int:
 
     if args.command == "rollback":
         return _run_rollback(args)
+
+    if args.command == "check-update":
+        return _run_check_update()
+
+    if args.command == "update":
+        return _run_update(args)
 
     print(f"Command '{args.command}' is not yet implemented.", file=sys.stderr)
     return 2
