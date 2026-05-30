@@ -107,6 +107,11 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Path to a behavior tree XML file (required for automation/full profiles).",
     )
+    install_parser.add_argument(
+        "--workbench-service",
+        action="store_true",
+        help="Install a systemd service to auto-start the workbench UI on boot (appliance mode).",
+    )
 
     # --- bundle subcommand (pass 4) ---
     bundle_parser = subparsers.add_parser(
@@ -587,6 +592,19 @@ def _run_install(args: argparse.Namespace) -> int:
     # Telemetry export (if requested and not dry-run)
     if _wants_telemetry_export(args) and not result.dry_run:
         _run_telemetry_export_step(args, result)
+
+    # Workbench systemd service (appliance mode, if requested and not dry-run)
+    if getattr(args, "workbench_service", False) and not result.dry_run:
+        from anolis_workbench.core import workbench_service
+
+        _print_progress("systemd", "Installing workbench systemd service")
+        wb_result = workbench_service.install_service(
+            user=os.environ.get("USER", "root"),
+        )
+        if wb_result.error:
+            print(f"\nWARNING: workbench service: {wb_result.error}", file=sys.stderr)
+        else:
+            _print_progress("systemd", "Workbench service enabled and started")
 
     # Print summary
     print()

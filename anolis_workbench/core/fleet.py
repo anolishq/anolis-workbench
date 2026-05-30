@@ -228,3 +228,55 @@ def format_fleet_result(result: FleetResult) -> str:
     lines.append("")
     lines.append(f"{result.succeeded}/{len(result.results)} succeeded, {result.failed} failed.")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Auto-registration after successful remote provision
+# ---------------------------------------------------------------------------
+
+_FLEET_REGISTRY_PATH = Path.home() / ".anolis" / "fleet.yaml"
+
+
+def auto_register_host(
+    host: str,
+    project: str,
+    template: str = "bioreactor-manual",
+) -> None:
+    """Add a host to the fleet registry if not already present.
+
+    Called automatically after a successful remote provision.
+    """
+    _FLEET_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if _FLEET_REGISTRY_PATH.is_file():
+        raw = yaml.safe_load(_FLEET_REGISTRY_PATH.read_text(encoding="utf-8")) or {}
+    else:
+        raw = {}
+
+    if not isinstance(raw, dict):
+        raw = {}
+
+    targets = raw.get("targets", [])
+    if not isinstance(targets, list):
+        targets = []
+
+    # Check if host is already registered
+    existing_hosts = {t.get("host") for t in targets if isinstance(t, dict)}
+    if host in existing_hosts:
+        return
+
+    # Add new entry
+    name = host.replace(".", "-").split("@")[-1] if "@" not in host else host.split("@")[1].replace(".", "-")
+    targets.append(
+        {
+            "name": name,
+            "host": host,
+            "project": project,
+            "template": template,
+        }
+    )
+    raw["targets"] = targets
+    _FLEET_REGISTRY_PATH.write_text(
+        yaml.dump(raw, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
