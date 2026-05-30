@@ -108,6 +108,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "telemetry_url": TELEMETRY_URL,
                 },
             )
+        elif path == "/api/update-check":
+            self._check_update()
         elif path == "/api/catalog":
             compose.serve_catalog(self)
         elif path == "/api/templates":
@@ -257,6 +259,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _not_found(self) -> None:
         self._json(404, {"error": "Not found"})
+
+    def _check_update(self) -> None:
+        from anolis_workbench.core.updater import check_for_update
+
+        status = check_for_update()
+        self._json(200, {
+            "current_version": status.current_version,
+            "latest_version": status.latest_version,
+            "update_available": status.update_available,
+            "error": status.error,
+        })
 
 
 def main() -> None:
