@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Home from "./routes/Home.svelte";
+  import Fleet from "./routes/Fleet.svelte";
   import Onboarding from "./routes/Onboarding.svelte";
   import Compose from "./routes/Compose.svelte";
   import Commission from "./routes/Commission.svelte";
@@ -59,6 +60,7 @@
   // ── Navigation ────────────────────────────────────────────────────────────
   function parseRoute(path: string): Route | null {
     if (path === "/") return { path: "/", project: null, workspace: null };
+    if (path === "/fleet") return { path: "/fleet", project: null, workspace: null };
     const match = path.match(/^\/projects\/([^/]+)(?:\/(compose|commission|operate))?\/?$/);
     if (!match) return null;
     const project = decodeURIComponent(match[1]);
@@ -355,6 +357,8 @@
         void navigateTo(path, { bypassGuards: true });
       }}
     />
+  {:else if !projectName && currentPath === "/fleet"}
+    <Fleet onNavigate={(path) => void navigateTo(path, { bypassGuards: true })} />
   {:else if !projectName}
     <Home
       {projects}

@@ -10,6 +10,7 @@ import json
 import threading
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from anolis_workbench.core import installer
@@ -117,6 +118,14 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             executor=executor,
             systems_root=systems_root,
         )
+        # Auto-add host to fleet registry
+        from anolis_workbench.core.fleet import auto_register_host
+
+        auto_register_host(
+            host=host,
+            project=params.get("project", "bioreactor-v1"),
+            template=params.get("template", "bioreactor-manual"),
+        )
         job.events.append(
             {
                 "stage": "done",
@@ -217,3 +226,138 @@ def cancel_job(handler: Any, job_id: str) -> None:
         handler._json(200, {"job_id": job_id, "status": "cancelled"})
     else:
         handler._json(409, {"error": f"Job already {job.status}"})
+
+
+# ---------------------------------------------------------------------------
+# Bundle export
+# ---------------------------------------------------------------------------
+
+_bundle_artifacts: dict[str, Path] = {}
+_bundle_artifacts_lock = threading.Lock()
+
+
+def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
+    """Run bundle creation in a background thread."""
+    import os
+    import platform
+    import tarfile
+    import tempfile
+
+    import requests
+
+    def _progress(step: str, detail: str = "") -> None:
+        job.events.append({"stage": step, "detail": detail})
+
+    try:
+        arch = params.get("arch") or ("arm64" if platform.machine() in ("aarch64", "arm64") else "x86_64")
+        project = params.get("project", "bioreactor-v1")
+        template = params.get("template", "bioreactor-manual")
+
+        _progress("resolve", f"Building bundle for {project} ({arch})")
+
+        token = params.get("github_token") or os.environ.get("GITHUB_TOKEN")
+        tmp_dir = Path(tempfile.mkdtemp(prefix="anolis-bundle-"))
+
+        from anolis_workbench.core import bundler
+
+        arch_map = {
+            "arm64": "linux-arm64",
+            "aarch64": "linux-arm64",
+            "x86_64": "linux-x86_64",
+        }
+        platform_str = arch_map.get(arch, f"linux-{arch}")
+        matrix = installer.load_compat_matrix(None)
+
+        # Resolve components
+        _progress("resolve", "Resolving components")
+        components = installer.resolve_components(matrix)
+        if not components:
+            raise RuntimeError("No components found in compatibility matrix")
+
+        # Download tarballs
+        session = requests.Session()
+        tarballs: list[tuple[installer.ComponentSpec, bytes]] = []
+
+        for comp in components:
+            _progress("manifest", f"Fetching manifest for {comp.name} v{comp.version}")
+            manifest = installer.fetch_manifest(session, comp.repo, comp.version, platform_str, token=token)
+            _progress("download", f"Downloading {manifest.asset_name}")
+            data = installer.download_and_verify(session, manifest.download_url, manifest.sha256, token=token)
+            tarballs.append((comp, data))
+
+        # Build bundle
+        _progress("build", "Assembling bundle")
+        out_dir = tmp_dir / f"anolis-{project}-bundle"
+        workbench_version = matrix.get("workbench_version", "")
+        result = bundler.build_bundle(
+            components=components,
+            tarballs=tarballs,
+            template_name=template,
+            project_name=project,
+            platform_str=platform_str,
+            out_dir=out_dir,
+            workbench_version=workbench_version,
+        )
+
+        # Create tarball archive
+        tarball_path = tmp_dir / f"anolis-{project}-{arch}.tar.gz"
+        with tarfile.open(str(tarball_path), "w:gz") as tar:
+            tar.add(str(result.bundle_path), arcname=result.bundle_path.name)
+
+        with _bundle_artifacts_lock:
+            _bundle_artifacts[job.job_id] = tarball_path
+
+        job.events.append(
+            {
+                "stage": "done",
+                "detail": f"Bundle ready: {tarball_path.name}",
+                "filename": tarball_path.name,
+            }
+        )
+        job.status = "done"
+    except Exception as exc:
+        job.error = str(exc)
+        job.status = "failed"
+        job.events.append({"stage": "error", "detail": str(exc)})
+
+
+def start_bundle(handler: Any) -> None:
+    """POST /api/provision/bundle — start a bundle creation job."""
+    content_length = int(handler.headers.get("Content-Length", 0))
+    body = handler.rfile.read(content_length) if content_length else b"{}"
+    params = json.loads(body)
+
+    job = _create_job()
+    thread = threading.Thread(target=_run_bundle_job, args=(job, params), daemon=True)
+    thread.start()
+
+    handler._json(202, {"job_id": job.job_id})
+
+
+def download_bundle(handler: Any, job_id: str) -> None:
+    """GET /api/provision/bundle/<job_id> — download completed bundle tarball."""
+    job = _get_job(job_id)
+    if job is None:
+        handler._json(404, {"error": f"Job {job_id} not found"})
+        return
+
+    if job.status != "done":
+        handler._json(409, {"error": f"Job not complete (status: {job.status})"})
+        return
+
+    with _bundle_artifacts_lock:
+        tarball_path = _bundle_artifacts.get(job_id)
+
+    if tarball_path is None or not tarball_path.exists():
+        handler._json(404, {"error": "Bundle artifact not found"})
+        return
+
+    data = tarball_path.read_bytes()
+    filename = tarball_path.name
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/gzip")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    handler.end_headers()
+    handler.wfile.write(data)

@@ -66,6 +66,11 @@
   let exportFeedback = $state<string>("");
   let exportIsError = $state<boolean>(false);
 
+  // ── Bundle Export ─────────────────────────────────────────────────────────
+  let bundleRunning = $state<boolean>(false);
+  let bundleFeedback = $state<string>("");
+  let bundleIsError = $state<boolean>(false);
+
   // ── Operator UI ──────────────────────────────────────────────────────────
   const operatorUiBase = $derived(() => {
     const explicit = system?.topology?.runtime?.operator_ui_base;
@@ -383,6 +388,63 @@
       exportRunning = false;
     }
   }
+
+  // ── Bundle Export ─────────────────────────────────────────────────────────
+  async function doExportBundle() {
+    if (!projectName) return;
+    bundleRunning = true;
+    bundleFeedback = "";
+    bundleIsError = false;
+    try {
+      // Start bundle job
+      const startRes = await fetchJson<{ job_id: string }>("/api/provision/bundle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: projectName, arch: "arm64" }),
+      });
+      const jobId = startRes.job_id;
+      bundleFeedback = "Building bundle…";
+
+      // Poll for completion via SSE
+      const evtSource = new EventSource(`/api/provision/status/${jobId}`);
+      await new Promise<void>((resolve, reject) => {
+        evtSource.onmessage = (ev) => {
+          const data = JSON.parse(ev.data) as { stage: string; status?: string; detail?: string; error?: string; filename?: string };
+          if (data.stage === "done") {
+            bundleFeedback = data.detail ?? "Bundle ready";
+            evtSource.close();
+            resolve();
+          } else if (data.stage === "error" || data.status === "failed") {
+            evtSource.close();
+            reject(new Error(data.error ?? data.detail ?? "Bundle failed"));
+          } else if (data.detail) {
+            bundleFeedback = data.detail;
+          }
+        };
+        evtSource.onerror = () => {
+          evtSource.close();
+          reject(new Error("Connection lost"));
+        };
+      });
+
+      // Download the bundle
+      const dlRes = await fetchResponse(`/api/provision/bundle/${jobId}`);
+      if (!dlRes.ok) throw new Error(`Download failed (HTTP ${dlRes.status})`);
+      const blob = await dlRes.blob();
+      const fallback = `anolis-${projectName}-arm64.tar.gz`;
+      const filename = filenameFromContentDisposition(
+        dlRes.headers.get("Content-Disposition"),
+        fallback,
+      );
+      downloadBlob(blob, filename);
+      bundleFeedback = `Downloaded ${filename}`;
+    } catch (err) {
+      bundleFeedback = `Bundle failed: ${err instanceof Error ? err.message : String(err)}`;
+      bundleIsError = true;
+    } finally {
+      bundleRunning = false;
+    }
+  }
 </script>
 
 <section id="workspace-commission" class="workspace visible">
@@ -595,6 +657,28 @@
         style="color: {exportIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
       >
         {exportFeedback}
+      </span>
+    {/if}
+  </div>
+
+  <!-- Export bundle (offline install package) -->
+  <div class="commission-export">
+    <button
+      type="button"
+      class="btn-secondary"
+      id="btn-export-bundle"
+      disabled={bundleRunning}
+      onclick={doExportBundle}
+    >
+      {bundleRunning ? "Building Bundle…" : "Export Bundle"}
+    </button>
+    {#if bundleFeedback}
+      <span
+        id="export-bundle-feedback"
+        class="launch-summary"
+        style="color: {bundleIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+      >
+        {bundleFeedback}
       </span>
     {/if}
   </div>

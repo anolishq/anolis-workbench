@@ -110,6 +110,8 @@ class _Handler(BaseHTTPRequestHandler):
             )
         elif path == "/api/update-check":
             self._check_update()
+        elif path == "/api/fleet":
+            self._get_fleet()
         elif path == "/api/catalog":
             compose.serve_catalog(self)
         elif path == "/api/templates":
@@ -119,6 +121,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/provision/status/"):
             job_id = path.split("/")[-1]
             provision.get_status(self, job_id)
+        elif path.startswith("/api/provision/bundle/"):
+            job_id = path.split("/")[-1]
+            provision.download_bundle(self, job_id)
         elif path.startswith("/v0/"):
             operate.proxy_runtime(self, "GET", self.path)
         else:
@@ -130,6 +135,12 @@ class _Handler(BaseHTTPRequestHandler):
             provision.start_install(self)
         elif path == "/api/provision/remote":
             provision.start_remote(self)
+        elif path == "/api/provision/bundle":
+            provision.start_bundle(self)
+        elif path == "/api/update":
+            self._trigger_update()
+        elif path == "/api/rollback":
+            self._trigger_rollback()
         elif path.startswith("/api/provision/cancel/"):
             job_id = path.split("/")[-1]
             provision.cancel_job(self, job_id)
@@ -273,6 +284,70 @@ class _Handler(BaseHTTPRequestHandler):
                 "error": status.error,
             },
         )
+
+    def _trigger_update(self) -> None:
+        from anolis_workbench.core.updater import check_for_update, perform_update
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else b"{}"
+        params = json.loads(body) if body else {}
+
+        status = check_for_update()
+        if not status.update_available or not status.latest_version:
+            self._json(200, {"update_available": False, "current_version": status.current_version})
+            return
+
+        result = perform_update(
+            target_version=status.latest_version,
+            dry_run=params.get("dry_run", False),
+        )
+        self._json(
+            200 if result.success else 500,
+            {
+                "success": result.success,
+                "version": result.version,
+                "error": result.error,
+            },
+        )
+
+    def _trigger_rollback(self) -> None:
+        from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
+        from anolis_workbench.core.rollback import rollback
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else b"{}"
+        params = json.loads(body) if body else {}
+
+        project = params.get("project", "bioreactor-v1")
+        binaries = ["anolis-runtime", "anolis-provider-bread", "anolis-provider-ezo"]
+        result = rollback(
+            binary_names=binaries,
+            prefix=DEFAULT_INSTALL_PREFIX,
+            project_name=project,
+            systemd=params.get("restart", True),
+        )
+        self._json(
+            200 if not result.failed else 500,
+            {
+                "rolled_back": result.rolled_back,
+                "failed": result.failed,
+                "service_restarted": result.service_restarted,
+                "error": result.error,
+            },
+        )
+
+    def _get_fleet(self) -> None:
+        from anolis_workbench.core.fleet import _FLEET_REGISTRY_PATH
+
+        if not _FLEET_REGISTRY_PATH.is_file():
+            self._json(200, {"targets": []})
+            return
+
+        import yaml
+
+        raw = yaml.safe_load(_FLEET_REGISTRY_PATH.read_text(encoding="utf-8")) or {}
+        targets = raw.get("targets", []) if isinstance(raw, dict) else []
+        self._json(200, {"targets": targets})
 
 
 def main() -> None:
