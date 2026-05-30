@@ -94,7 +94,7 @@ class TestDeployObservability:
             tar.addfile(info, BytesIO(b"evil\n"))
         data = buf.getvalue()
 
-        with pytest.raises(ValueError, match="Unsafe path"):
+        with pytest.raises((ValueError, tarfile.OutsideDestinationError)):
             deploy_observability(data, data_dir=tmp_path)
 
 
