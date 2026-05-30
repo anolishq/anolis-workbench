@@ -57,10 +57,7 @@ def _validate_command(cmd: list[str]) -> list[str]:
         raise ValueError("Empty command")
     binary = cmd[0].rsplit("/", 1)[-1]  # basename
     if binary not in _ALLOWED_COMMANDS:
-        raise ValueError(
-            f"Command '{binary}' is not in the executor allowlist. "
-            f"Allowed: {sorted(_ALLOWED_COMMANDS)}"
-        )
+        raise ValueError(f"Command '{binary}' is not in the executor allowlist. Allowed: {sorted(_ALLOWED_COMMANDS)}")
     # Rebuild command with the verified binary from _ALLOWED_COMMANDS.
     # This severs taint propagation: the binary value originates from the
     # frozen allowlist, not from caller-supplied data.
