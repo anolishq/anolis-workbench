@@ -17,7 +17,7 @@ providers:
     version: "0.2.3"
   anolis-provider-bread:
     repo: anolishq/anolis-provider-bread
-    version: "0.2.8"
+    version: "0.2.9"
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
     version: "0.2.5"
