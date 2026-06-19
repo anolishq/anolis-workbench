@@ -102,7 +102,7 @@ jobs:
   metrics:
     name: Collect metrics
     needs: validate
-    uses: anolishq/.github/.github/workflows/metrics.yml@fe0a8fce045364cb2e3552a7fbca59263395c8d6 # v2
+    uses: anolishq/.github/.github/workflows/metrics.yml@0f4d8cd3c04dcb17fe128248a147b237c1465e0c # v2
     with:
       tag: ${{ needs.validate.outputs.tag }}
 
@@ -558,7 +558,7 @@ jobs:
           git push origin "$TAG"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ needs.validate.outputs.tag }}
           name: Release ${{ inputs.version }}
