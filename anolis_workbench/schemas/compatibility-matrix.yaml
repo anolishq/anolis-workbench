@@ -9,18 +9,18 @@ workbench_version: "0.11.7"
 
 runtime:
   repo: anolishq/anolis
-  version: "0.1.22"
+  version: "0.1.23"
 
 providers:
   anolis-provider-sim:
     repo: anolishq/anolis-provider-sim
-    version: "0.2.3"
+    version: "0.2.5"
   anolis-provider-bread:
     repo: anolishq/anolis-provider-bread
-    version: "0.2.9"
+    version: "0.2.11"
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
-    version: "0.2.5"
+    version: "0.2.7"
 
 optional_components:
   telemetry_export:
