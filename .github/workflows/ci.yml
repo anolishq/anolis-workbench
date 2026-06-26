@@ -304,6 +304,18 @@ jobs:
             libayatana-appindicator3-dev \
             patchelf
 
+      # tauri-build's build script validates that every `externalBin`
+      # (the frozen Python sidecar) exists for the host target triple, even
+      # under `cargo check`/`clippy`. The real sidecar is only produced by the
+      # release pipeline, so stage an empty placeholder to satisfy the
+      # existence check in this lint-only lane (it is never bundled or run).
+      - name: Stage placeholder sidecar for tauri-build
+        run: |
+          set -euo pipefail
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          touch "binaries/anolis-workbench-sidecar-${triple}"
+        working-directory: desktop/src-tauri
+
       - name: Check formatting
         run: cargo fmt --check
         working-directory: desktop/src-tauri
