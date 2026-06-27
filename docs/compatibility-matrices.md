@@ -35,8 +35,9 @@ today links "versions workbench provisions" to "pairs 0F verified as ✅".
 
 Wiring 0F's verdict into the workbench bump (so a ❌ pair warns/blocks) would
 require 0F to publish its verdict to a **stable** location first — today it's
-only an ephemeral workflow artifact. Per anolishq/anolis-workbench#113, this is
-deferred until after the 0G provider-SDK readiness review
-(anolishq/anolis-protocol#29), which may relocate version ownership and make a
-premature integration here churn. Until then the two matrices stay separate and
+only an ephemeral workflow artifact. The original gates for this work
+(anolishq/anolis-workbench#113 and the 0G provider-SDK readiness review
+anolishq/anolis-protocol#29) are now both **closed** and the provider-SDK
+extraction is complete, so this is unblocked; it is tracked in
+anolishq/anolis-workbench#137. Until it lands the two matrices stay separate and
 this document is the source of truth for their relationship.
