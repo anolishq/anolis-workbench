@@ -11,7 +11,6 @@ declare module "*.svelte" {
 declare global {
   interface Window {
     __ANOLIS_COMPOSER__?: {
-      operatorUiBase?: string;
       telemetryUrl?: string;
     };
   }

@@ -10,12 +10,11 @@ from anolis_workbench.core import launcher as launcher_module
 from anolis_workbench.core import projects as projects_module
 
 
-def status(handler, *, host: str, port: int, operator_ui_base: str) -> None:
+def status(handler, *, host: str, port: int) -> None:
     payload = launcher_module.get_status()
     payload["composer"] = {
         "host": host,
         "port": port,
-        "operator_ui_base": operator_ui_base,
     }
     payload["workbench"] = {
         "version": 1,

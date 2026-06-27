@@ -47,7 +47,6 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
    - `ANOLIS_WORKBENCH_HOST`
    - `ANOLIS_WORKBENCH_PORT`
-   - `ANOLIS_OPERATOR_UI_BASE`
    - `ANOLIS_TELEMETRY_URL`
    - `ANOLIS_WORKBENCH_OPEN_BROWSER`
 

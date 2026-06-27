@@ -67,7 +67,6 @@ test.beforeEach(async ({ page }) => {
           runtime: {
             http_bind: '127.0.0.1',
             http_port: 8080,
-            operator_ui_base: 'http://localhost:3000',
           },
           providers: [],
         },
@@ -82,7 +81,7 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify({
         running: true,
         active_project: 'alpha',
-        composer: { operator_ui_base: 'http://localhost:3000' },
+        composer: { host: '127.0.0.1', port: 8080 },
       }),
     });
   });

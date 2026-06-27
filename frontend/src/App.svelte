@@ -68,17 +68,8 @@
     return { path: `/projects/${encodeURIComponent(project)}/${ws}`, project, workspace: ws };
   }
 
-  function updateWindowComposerConfig({
-    operatorUiBase,
-    telemetryUrl,
-  }: {
-    operatorUiBase?: string;
-    telemetryUrl?: string;
-  }): void {
+  function updateWindowComposerConfig({ telemetryUrl }: { telemetryUrl?: string }): void {
     const next = { ...(window.__ANOLIS_COMPOSER__ ?? {}) };
-    if (typeof operatorUiBase === "string" && operatorUiBase.trim()) {
-      next.operatorUiBase = operatorUiBase.trim().replace(/\/$/, "");
-    }
     if (typeof telemetryUrl === "string" && telemetryUrl.trim()) {
       next.telemetryUrl = telemetryUrl.trim().replace(/\/$/, "");
     }
@@ -190,7 +181,6 @@
     try {
       const status = await fetchJson<RuntimeStatus>("/api/status");
       runtimeStatus = status;
-      updateWindowComposerConfig({ operatorUiBase: status?.composer?.operator_ui_base });
       const nowRunningForCurrent =
         Boolean(status?.running) && status?.active_project === projectName;
       if (workspace === "commission" && nowRunningForCurrent !== commissionRunningForCurrent) {
@@ -205,7 +195,6 @@
     try {
       const config = await fetchJson<WorkbenchConfig>("/api/config");
       updateWindowComposerConfig({
-        operatorUiBase: config.operator_ui_base,
         telemetryUrl: config.telemetry_url,
       });
     } catch {

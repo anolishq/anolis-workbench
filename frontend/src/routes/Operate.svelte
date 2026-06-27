@@ -166,9 +166,6 @@
       const config = await fetchJson<WorkbenchConfig>("/api/config");
       workbenchConfig = config;
       const next = { ...(window.__ANOLIS_COMPOSER__ ?? {}) };
-      if (typeof config.operator_ui_base === "string" && config.operator_ui_base.trim()) {
-        next.operatorUiBase = config.operator_ui_base.trim().replace(/\/$/, "");
-      }
       if (typeof config.telemetry_url === "string" && config.telemetry_url.trim()) {
         next.telemetryUrl = config.telemetry_url.trim().replace(/\/$/, "");
       }
