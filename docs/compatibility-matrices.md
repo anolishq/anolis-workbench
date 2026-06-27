@@ -7,7 +7,7 @@ doesn't silently drift. (See anolishq/anolis-workbench#113.)
 ## The two matrices
 
 | | Workbench **provisioning** matrix | Org **ADPP conformance** matrix (0F) |
-|---|---|---|
+| --- | --- | --- |
 | Where | `anolis_workbench/schemas/compatibility-matrix.yaml` | `anolishq/.github` `adpp-compat-matrix.yml` |
 | Bumped by | `.github/workflows/check-compat-matrix.yml` (weekly, Mon 09:00 UTC) | scheduled run (Sun 05:00 UTC), report-only |
 | Question | "What runtime + provider **binary** versions do we ship/install together?" | "Which released (protocol × provider) pairs still **conform**?" |
