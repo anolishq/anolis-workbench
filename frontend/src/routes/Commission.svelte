@@ -71,28 +71,6 @@
   let bundleFeedback = $state<string>("");
   let bundleIsError = $state<boolean>(false);
 
-  // ── Operator UI ──────────────────────────────────────────────────────────
-  const operatorUiBase = $derived(() => {
-    const explicit = system?.topology?.runtime?.operator_ui_base;
-    if (typeof explicit === "string" && explicit.trim()) return explicit.trim().replace(/\/$/, "");
-    const fromGlobal = window.__ANOLIS_COMPOSER__?.operatorUiBase;
-    if (typeof fromGlobal === "string" && fromGlobal.trim())
-      return fromGlobal.trim().replace(/\/$/, "");
-    return "";
-  });
-  const runtimeApiBase = $derived(() => {
-    const bind = system?.topology?.runtime?.http_bind;
-    const port = system?.topology?.runtime?.http_port;
-    if (typeof bind !== "string" || bind.trim() === "") return "";
-    if (!Number.isFinite(Number(port))) return "";
-    return `http://${bind.trim()}:${Number(port)}`;
-  });
-  const operatorUiLink = $derived(() => {
-    if (!operatorUiBase()) return "";
-    if (!runtimeApiBase()) return "";
-    return `${operatorUiBase()}?api=${encodeURIComponent(runtimeApiBase())}`;
-  });
-
   let commissionLiveDataActive = false;
 
   // ── Reactive: sync running state when commissionRunningForCurrent changes ─
@@ -544,21 +522,6 @@
           {restartRunning ? "Restarting…" : "Restart"}
         </button>
       </div>
-
-      {#if healthStatus === "healthy"}
-        <div style="margin-top:8px;font-size:12px;">
-          {#if operatorUiLink()}
-            <a href={operatorUiLink()} target="_blank" rel="noopener noreferrer"
-              >Open in Operator UI →</a
-            >
-            <span class="launch-summary" style="margin-left:8px;"
-              >Operator UI base URL is configurable.</span
-            >
-          {:else}
-            <span class="launch-summary">Operator UI link is unavailable.</span>
-          {/if}
-        </div>
-      {/if}
     {/if}
 
     {#if actionError}

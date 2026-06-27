@@ -102,7 +102,7 @@
     <label>CORS origins (one per line)</label>
     <textarea
       rows="3"
-      placeholder="https://operator-ui.example"
+      placeholder="https://workbench.example"
       value={(rt.cors_origins ?? []).join("\n")}
       oninput={(e: Event) => setCorsOrigins(textAreaTarget(e).value)}></textarea>
   </div>

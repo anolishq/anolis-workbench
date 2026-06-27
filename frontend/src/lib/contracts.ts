@@ -31,7 +31,6 @@ export interface RuntimeStatus extends UnknownRecord {
   composer?: {
     host: string;
     port: number;
-    operator_ui_base: string;
   } & UnknownRecord;
   workbench?: {
     version: number;
@@ -39,7 +38,6 @@ export interface RuntimeStatus extends UnknownRecord {
 }
 
 export interface WorkbenchConfig extends UnknownRecord {
-  operator_ui_base?: string;
   telemetry_url?: string;
 }
 
@@ -112,7 +110,6 @@ export interface RuntimeConfig extends UnknownRecord {
   telemetry?: RuntimeTelemetry;
   automation_enabled?: boolean;
   behavior_tree_path?: string | null;
-  operator_ui_base?: string;
   providers?: ProviderRuntimeEntry[];
 }
 

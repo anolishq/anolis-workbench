@@ -700,15 +700,13 @@ components:
           description: PID of the running runtime process, or null
         composer:
           type: object
-          required: [host, port, operator_ui_base]
+          required: [host, port]
           description: Server connection info (legacy key name preserved in v1)
           properties:
             host:
               type: string
             port:
               type: integer
-            operator_ui_base:
-              type: string
           additionalProperties: true
         workbench:
           type: object
@@ -722,13 +720,10 @@ components:
 
     WorkbenchConfigResponse:
       type: object
-      required: [operator_ui_base, telemetry_url]
+      required: [telemetry_url]
       description: >-
         UI defaults used by Workbench client views.
       properties:
-        operator_ui_base:
-          type: string
-          description: Operator UI base URL (e.g. Grafana/operator shell origin)
         telemetry_url:
           type: string
           description: Telemetry dashboard URL for Operate iframe and external link

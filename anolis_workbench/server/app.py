@@ -44,7 +44,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 HOST = os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()
 PORT = _env_int("ANOLIS_WORKBENCH_PORT", 3010)
-OPERATOR_UI_BASE = os.getenv("ANOLIS_OPERATOR_UI_BASE", "http://localhost:3000").rstrip("/")
 TELEMETRY_URL = os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3001").rstrip("/")
 OPEN_BROWSER = _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", default_open_browser())
 FRONTEND_DIR = paths_module.FRONTEND_DIR
@@ -99,12 +98,11 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._not_found()
         elif path == "/api/status":
-            commission.status(self, host=HOST, port=PORT, operator_ui_base=OPERATOR_UI_BASE)
+            commission.status(self, host=HOST, port=PORT)
         elif path == "/api/config":
             self._json(
                 200,
                 {
-                    "operator_ui_base": OPERATOR_UI_BASE,
                     "telemetry_url": TELEMETRY_URL,
                 },
             )

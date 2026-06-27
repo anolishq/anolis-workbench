@@ -214,22 +214,18 @@ components:
           nullable: true
         composer:
           type: object
-          required: [host, port, operator_ui_base]
+          required: [host, port]
           properties:
             host:
               type: string
             port:
               type: integer
-            operator_ui_base:
-              type: string
           additionalProperties: true
       additionalProperties: true
     WorkbenchConfigResponse:
       type: object
-      required: [operator_ui_base, telemetry_url]
+      required: [telemetry_url]
       properties:
-        operator_ui_base:
-          type: string
         telemetry_url:
           type: string
       additionalProperties: true
