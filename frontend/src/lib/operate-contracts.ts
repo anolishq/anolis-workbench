@@ -2,9 +2,11 @@
 
 import type {
   AutomationStatus,
+  AutomationVersion,
   Device,
   DeviceCapabilities,
   DeviceStateValue,
+  ExecutionStatus,
   FunctionArgSpec,
   FunctionSpec,
   ParameterDefinition,
@@ -12,6 +14,22 @@ import type {
   RuntimeApiStatus,
   UnknownRecord,
 } from "./contracts";
+
+const EXECUTION_STATUSES: ReadonlySet<ExecutionStatus> = new Set<ExecutionStatus>([
+  "idle",
+  "running",
+  "blocked",
+  "failed",
+  "completed",
+  "unknown",
+]);
+
+export function normalizeExecutionStatus(value: unknown): ExecutionStatus {
+  const v = String(value ?? "")
+    .trim()
+    .toLowerCase() as ExecutionStatus;
+  return EXECUTION_STATUSES.has(v) ? v : "unknown";
+}
 
 type ParameterType = "double" | "int64" | "bool" | "string";
 
@@ -146,18 +164,29 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
   };
 }
 
+export function extractAutomationVersion(payload: unknown): AutomationVersion | null {
+  if (payload === null || typeof payload !== "object") return null;
+  const r = payload as UnknownRecord;
+  return {
+    engine_kind: typeof r.engine_kind === "string" ? r.engine_kind : "",
+    id: typeof r.id === "string" ? r.id : "",
+    digest: typeof r.digest === "string" ? r.digest : "",
+    digest_scope: typeof r.digest_scope === "string" ? r.digest_scope : "",
+  };
+}
+
 export function extractAutomationStatus(payload: unknown): AutomationStatus {
   const r = asObject(payload);
   return {
-    enabled: Boolean(r.enabled),
-    active: Boolean(r.active),
-    bt_status: typeof r.bt_status === "string" ? r.bt_status : "UNKNOWN",
-    last_tick_ms: toFinite(r.last_tick_ms) ?? 0,
-    ticks_since_progress: toFinite(r.ticks_since_progress) ?? 0,
-    total_ticks: toFinite(r.total_ticks) ?? 0,
+    execution_status: normalizeExecutionStatus(r.execution_status),
+    execution_reason:
+      typeof r.execution_reason === "string" && r.execution_reason.trim()
+        ? r.execution_reason
+        : null,
+    automation_version: extractAutomationVersion(r.automation_version),
+    last_evaluation_at_epoch_ms: toFinite(r.last_evaluation_at_epoch_ms) ?? null,
+    run_id: typeof r.run_id === "string" && r.run_id.trim() ? r.run_id : null,
     last_error: typeof r.last_error === "string" && r.last_error.trim() ? r.last_error : null,
-    error_count: toFinite(r.error_count) ?? 0,
-    current_tree: typeof r.current_tree === "string" ? r.current_tree : "",
   };
 }
 

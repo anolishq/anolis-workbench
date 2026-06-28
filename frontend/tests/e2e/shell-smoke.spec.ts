@@ -122,13 +122,26 @@ test.beforeEach(async ({ page }) => {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        // Engine-neutral fields the workbench reads (anolis >= v0.1.24).
+        execution_status: 'running',
+        execution_reason: 'waiting',
+        automation_version: {
+          engine_kind: 'behaviortree',
+          id: 'main',
+          digest: 'abcdef0123456789',
+          digest_scope: 'top_level_file',
+        },
+        last_evaluation_at_epoch_ms: Date.now(),
+        engine_diagnostics: {},
+        run_id: null,
+        last_error: null,
+        // Deprecated behaviour-tree mirrors still emitted by the runtime.
         enabled: true,
         active: true,
         bt_status: 'RUNNING',
         last_tick_ms: Date.now(),
         ticks_since_progress: 0,
         total_ticks: 10,
-        last_error: null,
         error_count: 0,
         current_tree: 'main',
       }),

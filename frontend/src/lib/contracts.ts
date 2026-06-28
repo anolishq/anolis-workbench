@@ -273,16 +273,30 @@ export interface ParameterDefinition extends UnknownRecord {
   allowed_values?: string[];
 }
 
+export type ExecutionStatus = "idle" | "running" | "blocked" | "failed" | "completed" | "unknown";
+
+/** Identity of the loaded automation definition (engine-neutral provenance). */
+export interface AutomationVersion extends UnknownRecord {
+  engine_kind: string;
+  id: string;
+  digest: string;
+  digest_scope: string;
+}
+
+/**
+ * Engine-neutral automation status (anolis >= v0.1.24).
+ *
+ * The runtime still emits deprecated behaviour-tree mirrors (`bt_status`,
+ * `total_ticks`, `current_tree`, …) for one release, but the workbench reads
+ * only the neutral contract — they are intentionally not modelled here.
+ */
 export interface AutomationStatus extends UnknownRecord {
-  enabled: boolean;
-  active: boolean;
-  bt_status: string;
-  last_tick_ms: number;
-  ticks_since_progress: number;
-  total_ticks: number;
+  execution_status: ExecutionStatus;
+  execution_reason: string | null;
+  automation_version: AutomationVersion | null;
+  last_evaluation_at_epoch_ms: number | null;
+  run_id: string | null;
   last_error: string | null;
-  error_count: number;
-  current_tree: string;
 }
 
 export interface ProviderSupervision extends UnknownRecord {
