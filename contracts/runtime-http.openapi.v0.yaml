@@ -41,6 +41,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProvidersHealthResponse'
+  /v0/telemetry/status:
+    get:
+      tags: [telemetry]
+      operationId: getTelemetryStatus
+      summary: Get telemetry (InfluxDB sink) health and throughput counters
+      responses:
+        "200":
+          description: Telemetry sink health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryStatusResponse'
+  /v0/runs:
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: List runs (newest first)
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunsListResponse'
+    post:
+      tags: [runs]
+      operationId: openRun
+      summary: Open a run (at most one open per runtime)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunOpenRequest'
+      responses:
+        "200":
+          description: The opened run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "412":
+          description: A run is already open
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v0/runs/{run_id}:
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: Get a run by id
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v0/runs/{run_id}/close:
+    post:
+      tags: [runs]
+      operationId: closeRun
+      summary: Close a run (idempotent)
+      parameters:
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCloseRequest'
+      responses:
+        "200":
+          description: The closed run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        "404":
+          description: Unknown run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v0/devices:
     get:
       tags: [devices]
@@ -371,10 +467,13 @@ components:
     RuntimeStatusResponse:
       type: object
       additionalProperties: false
-      required: [status, mode, uptime_seconds, polling_interval_ms, providers, device_count]
+      required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count]
       properties:
         status:
           $ref: '#/components/schemas/Status'
+        version:
+          type: string
+          description: Runtime version string (e.g. "0.1.21")
         mode:
           $ref: '#/components/schemas/RuntimeMode'
         uptime_seconds:
@@ -387,6 +486,50 @@ components:
             $ref: '#/components/schemas/RuntimeStatusProvider'
         device_count:
           type: integer
+    TelemetryBackend:
+      type: object
+      additionalProperties: false
+      required: [url, org, bucket]
+      properties:
+        url:
+          type: string
+        org:
+          type: string
+        bucket:
+          type: string
+    TelemetryStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [status, enabled, running, connected, total_written, total_failed, pending_batch, queue_depth, dropped_events]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        enabled:
+          type: boolean
+          description: Telemetry is enabled in config (the sink was configured to run)
+        running:
+          type: boolean
+          description: The sink background thread is running (false if start failed, e.g. no token)
+        connected:
+          type: boolean
+          description: Last InfluxDB write attempt succeeded
+        total_written:
+          type: integer
+        total_failed:
+          type: integer
+        pending_batch:
+          type: integer
+          description: Lines buffered awaiting the next flush
+        queue_depth:
+          type: integer
+          description: Events in the subscriber queue awaiting batching
+        dropped_events:
+          type: integer
+          description: Events dropped on subscriber-queue overflow (flush fell behind)
+        backend:
+          $ref: '#/components/schemas/TelemetryBackend'
+          description: Backend coordinates (omitted when telemetry is disabled); never includes the API token
     DeviceInfo:
       type: object
       additionalProperties: false
@@ -687,6 +830,113 @@ components:
           $ref: '#/components/schemas/Status'
         tree:
           type: string
+    AutomationVersion:
+      type: object
+      additionalProperties: false
+      required: [engine_kind, id, digest, digest_scope]
+      properties:
+        engine_kind:
+          type: string
+          description: Engine implementation, e.g. "behavior_tree".
+        id:
+          type: string
+          description: Human label (e.g. definition basename) — NOT an identity.
+        digest:
+          type: string
+          description: Hex sha256 of the loaded definition bytes.
+        digest_scope:
+          type: string
+          enum: [include_closure, top_level_file]
+          description: >-
+            What the digest covers. "top_level_file" hashes only the top-level
+            definition bytes (a known limitation until include-closure hashing
+            lands) and must not be relied on as full provenance.
+    TagScope:
+      type: object
+      additionalProperties: false
+      required: [provider_ids, device_ids, signal_ids]
+      description: Operator-supplied selector for which series a run owns (auto-capture deferred).
+      properties:
+        provider_ids: { type: array, items: { type: string } }
+        device_ids: { type: array, items: { type: string } }
+        signal_ids: { type: array, items: { type: string } }
+    Run:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - run_id
+        - state
+        - close_reason
+        - started_at_epoch_ms
+        - ended_at_epoch_ms
+        - automation_version
+        - runtime_version
+        - polling_interval_ms
+        - params
+        - tag_scope
+        - experiment_label
+      properties:
+        schema_version: { type: integer }
+        run_id:
+          type: string
+          description: Time-sortable, runtime-name-prefixed id.
+        state:
+          type: string
+          enum: [open, closed]
+        close_reason:
+          oneOf:
+            - { type: string, enum: [operator_stop, completed, failed, superseded, abandoned] }
+            - { type: "null" }
+        started_at_epoch_ms: { type: integer }
+        ended_at_epoch_ms:
+          oneOf:
+            - { type: integer }
+            - { type: "null" }
+        automation_version:
+          oneOf:
+            - $ref: '#/components/schemas/AutomationVersion'
+            - { type: "null" }
+          description: The immutable automation version this run executed, or null for a manual-only run.
+        runtime_version: { type: string }
+        polling_interval_ms:
+          type: integer
+          description: Recorded so a consumer can reason about time-window boundary fuzz.
+        params: { type: object, additionalProperties: true }
+        tag_scope: { $ref: '#/components/schemas/TagScope' }
+        experiment_label:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+    RunResponse:
+      type: object
+      additionalProperties: false
+      required: [status, run]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        run: { $ref: '#/components/schemas/Run' }
+    RunsListResponse:
+      type: object
+      additionalProperties: false
+      required: [status, runs, count]
+      properties:
+        status: { $ref: '#/components/schemas/Status' }
+        runs: { type: array, items: { $ref: '#/components/schemas/Run' } }
+        count: { type: integer }
+    RunOpenRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        experiment_label: { type: string }
+        params: { type: object, additionalProperties: true }
+        tag_scope: { $ref: '#/components/schemas/TagScope' }
+    RunCloseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        close_reason:
+          type: string
+          enum: [operator_stop, completed, failed, superseded]
     AutomationStatusResponse:
       type: object
       additionalProperties: false
@@ -700,30 +950,87 @@ components:
         - total_ticks
         - error_count
         - current_tree
+        - execution_status
+        - automation_version
+        - last_evaluation_at_epoch_ms
+        - engine_diagnostics
+        - run_id
       properties:
         status:
           $ref: '#/components/schemas/Status'
+        # ---- Neutral, engine-agnostic fields (the forward contract) ----
+        execution_status:
+          type: string
+          enum: [idle, running, blocked, failed, completed, unknown]
+          description: >-
+            Engine-neutral execution status. "blocked" means "not advancing"
+            (for behaviour trees this is the >10-tick FAILURE heuristic, NOT
+            necessarily benign waiting). "completed" is emitted ONLY when the
+            engine declares a terminal completed state (a behaviour tree may
+            never emit it until terminal capture lands). Engine faults
+            (exceptions, corrupt definitions) are NOT a status value — they
+            surface as automation_fault events.
+        execution_reason:
+          type: string
+          enum: [mode_gate, waiting, terminal_failure, engine_fault, no_definition, stopped]
+          description: Optional coarse reason qualifying execution_status (enumerated, not free text).
+        automation_version:
+          oneOf:
+            - $ref: '#/components/schemas/AutomationVersion'
+            - type: "null"
+          description: Identity of the loaded definition, or null when none is loaded.
+        last_evaluation_at_epoch_ms:
+          type: integer
+          description: Last engine evaluation time (NOT last observable progress).
+        engine_diagnostics:
+          type: object
+          additionalProperties: true
+          description: >-
+            UNSTABLE / non-contractual engine internals (e.g. BT tick counters).
+            Do not depend on its keys; they may change or disappear.
+        run_id:
+          oneOf:
+            - type: string
+            - type: "null"
+          description: The currently-open run, or null (run registry lands in a later phase).
+        # ---- Deprecated behaviour-tree mirrors (retained one release; removed in the deprecation phase) ----
         enabled:
           type: boolean
+          deprecated: true
+          description: Deprecated — derive from the global mode + execution_status.
         active:
           type: boolean
+          deprecated: true
+          description: Deprecated — use execution_status.
         bt_status:
           type: string
           enum: [IDLE, RUNNING, STALLED, ERROR, UNKNOWN]
+          deprecated: true
+          description: Deprecated — use execution_status.
         last_tick_ms:
           type: integer
+          deprecated: true
+          description: Deprecated — use last_evaluation_at_epoch_ms.
         ticks_since_progress:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         total_ticks:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         last_error:
           oneOf:
             - type: string
             - type: "null"
         error_count:
           type: integer
+          deprecated: true
+          description: Deprecated — BT-specific; see engine_diagnostics.
         current_tree:
           type: string
+          deprecated: true
+          description: Deprecated — a filename, not identity; use automation_version.
     ProviderSupervision:
       type: object
       additionalProperties: false

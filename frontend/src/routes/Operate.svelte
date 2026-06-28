@@ -76,6 +76,9 @@
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
+  // Transient automation fault surfaced from an SSE event (a fault is an event,
+  // not an execution_status — the next status poll reflects the engine's truth).
+  let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
   let behaviorTree = $state<string>("");
   let eventTrace = $state<Array<{ type: string; timestamp_ms: number; details: string }>>([]);
 
@@ -144,6 +147,7 @@
     parameters = [];
     runtimeStatusData = null;
     automationStatus = null;
+    automationFault = null;
     behaviorTree = "";
     modeSelectorDirty = false;
     streamStatus = { state: "disconnected", attempts: 0 };
@@ -505,7 +509,9 @@
     else if (eventType === "quality_change") consumeQualityEvent(payload);
     else if (eventType === "mode_change") consumeModeChangeEvent(payload);
     else if (eventType === "parameter_change") void refreshParametersOnly();
-    else if (eventType === "bt_error") consumeBtErrorEvent(payload);
+    // The runtime still names this SSE event "bt_error" (the neutral
+    // "automation_fault" rename lands in a later anolis phase).
+    else if (eventType === "bt_error") consumeAutomationFaultEvent(payload);
     else if (eventType === "provider_health_change") void refreshProviderHealthOnly();
     addTraceEvent(eventType, payload);
   }
@@ -561,34 +567,32 @@
     if (!modeSelectorDirty) modeSelectorValue = m;
   }
 
-  function consumeBtErrorEvent(payload: UnknownRecord): void {
+  function consumeAutomationFaultEvent(payload: UnknownRecord): void {
+    // A fault is an event, not a status. Record it for display but never
+    // fabricate an execution_status — the polled /v0/automation/status is the
+    // single source of truth for the engine's state.
     const errorText =
       typeof payload.error === "string" && payload.error.trim() !== ""
         ? payload.error
-        : "Unknown behavior-tree error";
-    if (!automationStatus) {
-      automationStatus = {
-        enabled: true,
-        active: true,
-        bt_status: "ERROR",
-        last_tick_ms: Number(payload.timestamp_ms) || 0,
-        ticks_since_progress: 0,
-        total_ticks: 0,
-        last_error: errorText,
-        error_count: 1,
-        current_tree: "",
-      };
-    } else {
-      automationStatus = {
-        ...automationStatus,
-        bt_status: "ERROR",
-        last_error: errorText,
-        error_count: (automationStatus.error_count || 0) + 1,
-      };
-    }
+        : "Unknown automation fault";
+    automationFault = {
+      message: errorText,
+      timestamp_ms: Number(payload.timestamp_ms) || Date.now(),
+    };
   }
 
   // ── Formatters ────────────────────────────────────────────────────────────
+  function formatAutomationVersion(version: AutomationStatus["automation_version"]): string {
+    if (!version || !version.engine_kind) return "none loaded";
+    const digest = version.digest ? ` ${version.digest.slice(0, 12)}` : "";
+    return `${version.engine_kind}${digest}`;
+  }
+
+  function formatEpochMs(ms: number | null): string {
+    if (ms === null || !Number.isFinite(ms) || ms <= 0) return "--";
+    return new Date(ms).toLocaleTimeString();
+  }
+
   function formatValue(v: unknown): string {
     if (v === null || v === undefined) return "--";
     if (typeof v === "object") {
@@ -973,24 +977,32 @@
       {#if !automationStatus}
         <p class="placeholder">Automation status unavailable.</p>
       {:else}
-        {@const btStatus = String(automationStatus.bt_status || "UNKNOWN").toUpperCase()}
+        {@const execStatus = automationStatus.execution_status}
         <div class="automation-status-grid">
-          <span>Status: <span class="badge bt-{btStatus.toLowerCase()}">{btStatus}</span></span>
-          <span>Enabled: {automationStatus.enabled ? "true" : "false"}</span>
-          <span>Active: {automationStatus.active ? "true" : "false"}</span>
-          <span>Total ticks: {automationStatus.total_ticks}</span>
-          <span>Stalled ticks: {automationStatus.ticks_since_progress}</span>
-          <span>Error count: {automationStatus.error_count}</span>
-          <span>Current tree: {automationStatus.current_tree || "--"}</span>
+          <span
+            >Status: <span class="badge exec-{execStatus}">{execStatus.toUpperCase()}</span></span
+          >
+          {#if automationStatus.execution_reason}
+            <span>Reason: {automationStatus.execution_reason}</span>
+          {/if}
+          <span>Run: {automationStatus.run_id ?? "--"}</span>
+          <span>Definition: {formatAutomationVersion(automationStatus.automation_version)}</span>
+          <span>Last evaluation: {formatEpochMs(automationStatus.last_evaluation_at_epoch_ms)}</span
+          >
           {#if automationStatus.last_error}
             <span
-              class="error-text {btStatus === 'ERROR'
+              class="error-text {execStatus === 'failed'
                 ? 'alarm'
-                : btStatus === 'STALLED'
+                : execStatus === 'blocked'
                   ? 'warning'
                   : ''}"
             >
               Last error: {automationStatus.last_error}
+            </span>
+          {/if}
+          {#if automationFault}
+            <span class="error-text alarm">
+              Fault ({new Date(automationFault.timestamp_ms).toLocaleTimeString()}): {automationFault.message}
             </span>
           {/if}
         </div>

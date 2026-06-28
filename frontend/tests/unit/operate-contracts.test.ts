@@ -160,21 +160,46 @@ describe("operate-contracts extractors", () => {
 
     expect(
       extractAutomationStatus({
-        enabled: true,
-        active: false,
-        bt_status: "RUNNING",
-        total_ticks: 99,
+        execution_status: "running",
+        execution_reason: "waiting",
+        automation_version: {
+          engine_kind: "behaviortree",
+          id: "main",
+          digest: "abcdef0123456789",
+          digest_scope: "top_level_file",
+        },
+        last_evaluation_at_epoch_ms: 1234,
+        run_id: "01J0RUN",
+        last_error: null,
       }),
     ).toEqual({
-      enabled: true,
-      active: false,
-      bt_status: "RUNNING",
-      last_tick_ms: 0,
-      ticks_since_progress: 0,
-      total_ticks: 99,
+      execution_status: "running",
+      execution_reason: "waiting",
+      automation_version: {
+        engine_kind: "behaviortree",
+        id: "main",
+        digest: "abcdef0123456789",
+        digest_scope: "top_level_file",
+      },
+      last_evaluation_at_epoch_ms: 1234,
+      run_id: "01J0RUN",
       last_error: null,
-      error_count: 0,
-      current_tree: "",
+    });
+
+    // Unknown / missing fields normalize to neutral defaults; a null
+    // automation_version (manual-only run) is preserved, not fabricated.
+    expect(
+      extractAutomationStatus({
+        execution_status: "not-a-real-status",
+        automation_version: null,
+      }),
+    ).toEqual({
+      execution_status: "unknown",
+      execution_reason: null,
+      automation_version: null,
+      last_evaluation_at_epoch_ms: null,
+      run_id: null,
+      last_error: null,
     });
 
     expect(extractAutomationTree({ tree: "<BehaviorTree/>" })).toBe("<BehaviorTree/>");

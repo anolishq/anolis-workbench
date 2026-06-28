@@ -882,6 +882,36 @@ body {
   color: var(--text-muted);
 }
 
+/* Engine-neutral execution_status badges (anolis >= v0.1.24). */
+.badge.exec-running,
+.badge.exec-completed {
+  background: var(--state-nominal-bg);
+  color: var(--state-nominal);
+  border-color: #9ca3af;
+}
+
+.badge.exec-idle {
+  background: #e5e7eb;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+.badge.exec-blocked {
+  background: var(--state-warning-bg);
+  color: var(--state-warning);
+  border-color: #fde68a;
+}
+
+.badge.exec-failed {
+  background: var(--state-fault-bg);
+  color: var(--state-fault);
+  border-color: #fca5a5;
+}
+
+.badge.exec-unknown {
+  color: var(--text-muted);
+}
+
 .operate-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr));
