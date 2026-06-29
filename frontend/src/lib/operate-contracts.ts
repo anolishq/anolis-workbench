@@ -15,6 +15,15 @@ import type {
   UnknownRecord,
 } from "./contracts";
 
+/**
+ * Runtime modes accepted by `POST /v0/mode` and reported by `GET /v0/mode`.
+ * MUST stay in sync with the `RuntimeMode` enum in the vendored runtime-http
+ * OpenAPI contract — a unit test guards against drift.
+ */
+export const RUNTIME_MODES = ["MANUAL", "AUTO", "IDLE", "FAULT"] as const;
+
+export type RuntimeMode = (typeof RUNTIME_MODES)[number];
+
 const EXECUTION_STATUSES: ReadonlySet<ExecutionStatus> = new Set<ExecutionStatus>([
   "idle",
   "running",

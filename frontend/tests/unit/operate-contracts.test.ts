@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -18,6 +21,7 @@ import {
   normalizeParameterType,
   normalizeProviderHealthQuality,
   renderBtOutline,
+  RUNTIME_MODES,
 } from "../../src/lib/operate-contracts";
 
 type FakeTreeNode = {
@@ -408,6 +412,23 @@ describe("renderBtOutline", () => {
     expect(outline).toContain("|- Sequence");
     expect(outline).toContain("\\- Fallback");
     expect(outline).toContain('"SetMode"');
+  });
+});
+
+describe("RUNTIME_MODES contract", () => {
+  it("matches the RuntimeMode enum in the vendored runtime-http OpenAPI contract", () => {
+    // Guards against the Operate mode selector drifting from the runtime enum
+    // (e.g. the old ACTIVE/SAFE options that /v0/mode rejects). No YAML parser
+    // is vendored, so read the single-line enum directly from the contract.
+    const contractPath = fileURLToPath(
+      new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url),
+    );
+    const contract = readFileSync(contractPath, "utf8");
+    const match = contract.match(/RuntimeMode:\s*\n\s*type:\s*string\s*\n\s*enum:\s*\[([^\]]+)\]/);
+    expect(match, "RuntimeMode enum not found in contract").not.toBeNull();
+
+    const contractModes = (match as RegExpMatchArray)[1].split(",").map((m) => m.trim());
+    expect([...RUNTIME_MODES]).toEqual(contractModes);
   });
 });
 
