@@ -509,9 +509,7 @@
     else if (eventType === "quality_change") consumeQualityEvent(payload);
     else if (eventType === "mode_change") consumeModeChangeEvent(payload);
     else if (eventType === "parameter_change") void refreshParametersOnly();
-    // The runtime still names this SSE event "bt_error" (the neutral
-    // "automation_fault" rename lands in a later anolis phase).
-    else if (eventType === "bt_error") consumeAutomationFaultEvent(payload);
+    else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
     else if (eventType === "provider_health_change") void refreshProviderHealthOnly();
     addTraceEvent(eventType, payload);
   }
