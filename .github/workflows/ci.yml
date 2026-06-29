@@ -265,6 +265,12 @@ jobs:
           timeout 10 dist/anolis-workbench --version
           timeout 10 dist/anolis-workbench --help
 
+      - name: Health-check the frozen sidecar
+        run: |
+          set -euo pipefail
+          ANOLIS_WORKBENCH_SIDECAR_BIN="$PWD/dist/anolis-workbench" \
+            python -m pytest tests/integration/test_sidecar_health.py -v
+
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
