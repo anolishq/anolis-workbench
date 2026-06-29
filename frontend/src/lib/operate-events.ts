@@ -7,7 +7,7 @@ export const DEFAULT_SSE_EVENT_TYPES = [
   "quality_change",
   "mode_change",
   "parameter_change",
-  "bt_error",
+  "automation_fault",
   "provider_health_change",
 ] as const;
 
@@ -59,9 +59,10 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     const name = payload.parameter_name ?? payload.name ?? "parameter";
     return `${name}: ${payload.old_value ?? "?"} -> ${payload.new_value ?? "?"}`;
   }
-  if (eventType === "bt_error") {
-    const node = typeof payload.node === "string" && payload.node !== "" ? `${payload.node}: ` : "";
-    return `${node}${payload.error ?? "Unknown behavior-tree error"}`;
+  if (eventType === "automation_fault") {
+    const locusRaw = payload.locus ?? payload.node;
+    const locus = typeof locusRaw === "string" && locusRaw !== "" ? `${locusRaw}: ` : "";
+    return `${locus}${payload.error ?? "Unknown automation fault"}`;
   }
   if (eventType === "provider_health_change") {
     return `${payload.provider_id ?? "provider"}: ${payload.state ?? payload.new_state ?? "UNKNOWN"}`;

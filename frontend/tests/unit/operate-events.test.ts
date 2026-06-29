@@ -69,7 +69,7 @@ describe("operate-events helpers", () => {
       "quality_change",
       "mode_change",
       "parameter_change",
-      "bt_error",
+      "automation_fault",
       "provider_health_change",
     ]);
   });
@@ -94,7 +94,7 @@ describe("operate-events helpers", () => {
         new_value: 21,
       }),
     ).toBe("target_temp: 20 -> 21");
-    expect(describeEvent("bt_error", { node: "ActionA", error: "boom" })).toBe("ActionA: boom");
+    expect(describeEvent("automation_fault", { locus: "tick", error: "boom" })).toBe("tick: boom");
     expect(describeEvent("provider_health_change", { provider_id: "sim0", state: "FAULT" })).toBe(
       "sim0: FAULT",
     );

@@ -286,9 +286,9 @@ export interface AutomationVersion extends UnknownRecord {
 /**
  * Engine-neutral automation status (anolis >= v0.1.24).
  *
- * The runtime still emits deprecated behaviour-tree mirrors (`bt_status`,
- * `total_ticks`, `current_tree`, …) for one release, but the workbench reads
- * only the neutral contract — they are intentionally not modelled here.
+ * The workbench reads only the neutral contract. The deprecated behaviour-tree
+ * mirrors (`bt_status`, `total_ticks`, `current_tree`, …) are intentionally not
+ * modelled here and are removed from the runtime in anolis >= v0.1.26.
  */
 export interface AutomationStatus extends UnknownRecord {
   execution_status: ExecutionStatus;

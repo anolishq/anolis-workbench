@@ -135,15 +135,6 @@ test.beforeEach(async ({ page }) => {
         engine_diagnostics: {},
         run_id: null,
         last_error: null,
-        // Deprecated behaviour-tree mirrors still emitted by the runtime.
-        enabled: true,
-        active: true,
-        bt_status: 'RUNNING',
-        last_tick_ms: Date.now(),
-        ticks_since_progress: 0,
-        total_ticks: 10,
-        error_count: 0,
-        current_tree: 'main',
       }),
     });
   });
