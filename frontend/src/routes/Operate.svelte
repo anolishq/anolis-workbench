@@ -30,6 +30,7 @@
     normalizeParameterType,
     normalizeProviderHealthQuality,
     renderBtOutline,
+    RUNTIME_MODES,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -672,9 +673,9 @@
             modeSelectorDirty = true;
           }}
         >
-          <option value="ACTIVE">ACTIVE</option>
-          <option value="IDLE">IDLE</option>
-          <option value="SAFE">SAFE</option>
+          {#each RUNTIME_MODES as runtimeMode (runtimeMode)}
+            <option value={runtimeMode}>{runtimeMode}</option>
+          {/each}
         </select>
         <button
           type="button"
