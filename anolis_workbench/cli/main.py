@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
-import os
 
 from anolis_workbench.server.app import main as run_server
 
@@ -38,14 +37,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.host is not None:
-        os.environ["ANOLIS_WORKBENCH_HOST"] = args.host
-    if args.port is not None:
-        os.environ["ANOLIS_WORKBENCH_PORT"] = str(args.port)
-    if args.no_browser:
-        os.environ["ANOLIS_WORKBENCH_OPEN_BROWSER"] = "0"
-
-    run_server()
+    # Pass flags straight through; run_server resolves env/defaults for any None.
+    # (Flags absent -> None -> env var or default still applies.)
+    run_server(
+        host=args.host,
+        port=args.port,
+        open_browser=False if args.no_browser else None,
+    )
 
 
 if __name__ == "__main__":
