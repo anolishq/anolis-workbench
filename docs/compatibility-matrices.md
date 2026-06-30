@@ -31,13 +31,32 @@ today links "versions workbench provisions" to "pairs 0F verified as ✅".
   need a bump.
 - A 0F **❌** for a pair workbench pins → should eventually warn/block that pin.
 
-## Why there's no automation yet (deferred)
+## How the matrices are linked (warn-first)
 
-Wiring 0F's verdict into the workbench bump (so a ❌ pair warns/blocks) would
-require 0F to publish its verdict to a **stable** location first — today it's
-only an ephemeral workflow artifact. The original gates for this work
-(anolishq/anolis-workbench#113 and the 0G provider-SDK readiness review
-anolishq/anolis-protocol#29) are now both **closed** and the provider-SDK
-extraction is complete, so this is unblocked; it is tracked in
-anolishq/anolis-workbench#137. Until it lands the two matrices stay separate and
-this document is the source of truth for their relationship.
+The link from 0F's verdict to the workbench bump is implemented (epic
+anolishq/anolis-workbench#137), in two parts:
+
+- **Durable publish (anolishq/.github#101).** The 0F ADPP matrix commits its
+  verdict to the `adpp-compat-data` branch of `anolishq/.github` as
+  `data/adpp-compat/latest.json` on every run — a stable location, replacing the
+  ephemeral 90-day artifact.
+- **Consume in the bump (#155).** When `check-compat-matrix.yml` opens a bump PR,
+  it fetches `latest.json` and **warns** if the bump pins a `(provider, version)`
+  pair 0F marks **❌ `fail`**: it adds the `0f-incompat` label and a PR comment
+  listing the failing protocol(s). This is a **warning, not a block** — the bump
+  PR is already human-reviewed, and the reviewer decides.
+
+Matching rules:
+
+- A workbench provider id equals 0F's provider short-name; versions compare with
+  the leading `v` stripped (0F tags are `v`-prefixed).
+- Only `fail` is flagged. `error`/⚠️ (the harness produced no verdict — e.g. a
+  version predates a protocol) and unmeasured pairs are **not** flagged.
+- The fetch is best-effort: if `latest.json` is unreachable, the bump proceeds
+  without a warning.
+
+**Not yet mapped:** workbench pins a `runtime` (anolis), while 0F's other axis is
+the `protocol` harness version (runtime ≠ protocol). Until that mapping is
+defined, the warning fires for **any** protocol a pinned provider version fails,
+naming the protocol so the reviewer can judge relevance. Tightening this (and an
+optional escalation from warn to block) can come later.
