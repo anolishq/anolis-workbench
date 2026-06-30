@@ -10,7 +10,9 @@ import threading
 import time
 import urllib.parse
 import webbrowser
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import cast
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
@@ -42,10 +44,39 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
-HOST = os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()
-PORT = _env_int("ANOLIS_WORKBENCH_PORT", 3010)
-TELEMETRY_URL = os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3001").rstrip("/")
-OPEN_BROWSER = _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", default_open_browser())
+@dataclass(frozen=True)
+class ServerConfig:
+    """Resolved server configuration. Built at call time, never at import."""
+
+    host: str
+    port: int
+    open_browser: bool
+    telemetry_url: str
+
+
+def resolve_config(
+    host: str | None = None,
+    port: int | None = None,
+    open_browser: bool | None = None,
+) -> ServerConfig:
+    """Resolve config with precedence: explicit arg > env var > default.
+
+    Resolving here (not in module-level globals) is what makes the CLI flags
+    take effect — the previous import-time globals froze before cli.main could
+    apply --host/--port/--no-browser (anolis-workbench#152).
+    """
+    return ServerConfig(
+        host=host if host is not None else (os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()),
+        port=port if port is not None else _env_int("ANOLIS_WORKBENCH_PORT", 3010),
+        open_browser=(
+            open_browser
+            if open_browser is not None
+            else _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", default_open_browser())
+        ),
+        telemetry_url=os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3001").rstrip("/"),
+    )
+
+
 FRONTEND_DIR = paths_module.FRONTEND_DIR
 
 _WORKSPACE_ROUTE_RE = re.compile(r"^/projects/[^/]+(?:/(?:compose|commission|operate))?/?$")
@@ -78,6 +109,10 @@ def _open_browser(url: str) -> None:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    @property
+    def config(self) -> ServerConfig:
+        return cast("_WorkbenchServer", self.server).config
+
     def log_message(self, fmt, *args):  # suppress noisy per-request logs
         pass
 
@@ -98,12 +133,12 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._not_found()
         elif path == "/api/status":
-            commission.status(self, host=HOST, port=PORT)
+            commission.status(self, host=self.config.host, port=self.config.port)
         elif path == "/api/config":
             self._json(
                 200,
                 {
-                    "telemetry_url": TELEMETRY_URL,
+                    "telemetry_url": self.config.telemetry_url,
                 },
             )
         elif path == "/api/update-check":
@@ -348,14 +383,26 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(200, {"targets": targets})
 
 
-def main() -> None:
+class _WorkbenchServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that carries the resolved config for handlers."""
+
+    config: ServerConfig
+
+
+def main(
+    host: str | None = None,
+    port: int | None = None,
+    open_browser: bool | None = None,
+) -> None:
     verify_environment()
     projects_module.cleanup_stale_running_files()
-    server = ThreadingHTTPServer((HOST, PORT), _Handler)
-    url = f"http://{HOST}:{PORT}"
+    config = resolve_config(host, port, open_browser)
+    server = _WorkbenchServer((config.host, config.port), _Handler)
+    server.config = config
+    url = f"http://{config.host}:{config.port}"
     print(f"Anolis Workbench is running at {url}")
     print("Close this window to stop.")
-    if OPEN_BROWSER:
+    if config.open_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
     try:
         server.serve_forever()
