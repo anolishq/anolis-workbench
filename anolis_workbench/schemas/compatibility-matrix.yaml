@@ -20,7 +20,7 @@ providers:
     version: "0.2.11"
   anolis-provider-ezo:
     repo: anolishq/anolis-provider-ezo
-    version: "0.2.6"
+    version: "0.2.7"
 
 optional_components:
   telemetry_export:
