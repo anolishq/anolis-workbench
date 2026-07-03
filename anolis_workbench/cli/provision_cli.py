@@ -247,20 +247,10 @@ def _parse_args() -> argparse.Namespace:
         help="SSH target in user@host format (omit for local rollback).",
     )
     rollback_parser.add_argument(
-        "--project",
-        default="bioreactor-v1",
-        help="Project name (default: bioreactor-v1).",
-    )
-    rollback_parser.add_argument(
         "--install-prefix",
         type=Path,
         default=DEFAULT_INSTALL_PREFIX,
         help="Binary install prefix (default: /opt/anolis).",
-    )
-    rollback_parser.add_argument(
-        "--systemd",
-        action="store_true",
-        help="Restart the systemd service after rollback.",
     )
     rollback_parser.add_argument(
         "--key",
@@ -273,12 +263,6 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=22,
         help="SSH port (default: 22).",
-    )
-    rollback_parser.add_argument(
-        "--file",
-        type=Path,
-        default=None,
-        help="Fleet file for fleet-wide rollback.",
     )
 
     # --- check-update subcommand ---
@@ -808,45 +792,27 @@ def _run_rollback(args: argparse.Namespace) -> int:
     else:
         executor = LocalExecutor()
 
-    # Default binary set (matches server/app.py); proper fix is delegating to
-    # install.sh --rollback (anolishq/anolis#136, #162).
-    binary_names = ["anolis-runtime", "anolis-provider-bread", "anolis-provider-ezo"]
-
     target_label = args.target or "localhost"
     print("Anolis Provision — Rollback")
     print(f"  Target:   {target_label}")
-    print(f"  Project:  {args.project}")
     print(f"  Prefix:   {args.install_prefix}")
-    print(f"  Binaries: {', '.join(binary_names)}")
     print()
 
     result = rollback_module.rollback(
-        binary_names,
         args.install_prefix,
-        project_name=args.project,
-        systemd=args.systemd,
         executor=executor,
     )
 
-    if result.error and not result.rolled_back:
+    if not result.success:
         print(f"ERROR: {result.error}", file=sys.stderr)
         return 1
 
     print("─" * 60)
-    if result.rolled_back:
-        print("Rollback complete:")
-        for name in result.rolled_back:
-            print(f"  ✓ {name} restored from .prev")
-    if result.failed:
-        print("Failed (no .prev backup):")
-        for name in result.failed:
-            print(f"  ✗ {name}")
-    if result.service_restarted:
-        print(f"  ✓ Service anolis-{args.project} restarted")
-    if result.error:
-        print(f"\n  ⚠️  {result.error}")
+    print("Rollback complete (via install.sh --rollback):")
+    for line in result.output.strip().splitlines()[-6:]:
+        print(f"  {line}")
     print("─" * 60)
-    return 0 if not result.failed else 1
+    return 0
 
 
 def _run_check_update() -> int:
