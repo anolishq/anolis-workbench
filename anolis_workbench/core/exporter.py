@@ -325,10 +325,6 @@ def _build_machine_profile(
         "validation": {
             "expected_providers": provider_ids,
         },
-        "contracts": {
-            "runtime_config_baseline": "docs/contracts/runtime-config-baseline.md",
-            "runtime_http_baseline": "docs/contracts/runtime-http-baseline.md",
-        },
         "compatibility": {
             "runtime": {
                 "config_contract": "01-runtime-config",

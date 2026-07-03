@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://anolishq.github.io/schemas/anolis/machine/machine-profile.schema.json",
   "title": "Anolis Machine Profile Manifest",
-  "description": "Contract for machine package manifests under config/<machine_id>/machine-profile.yaml.",
+  "description": "Contract for machine profile manifests.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,6 @@
     "display_name",
     "runtime_profiles",
     "providers",
-    "contracts",
     "compatibility"
   ],
   "properties": {
@@ -96,22 +95,6 @@
         }
       }
     },
-    "contracts": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "runtime_config_baseline",
-        "runtime_http_baseline"
-      ],
-      "properties": {
-        "runtime_config_baseline": {
-          "$ref": "#/definitions/relativePath"
-        },
-        "runtime_http_baseline": {
-          "$ref": "#/definitions/relativePath"
-        }
-      }
-    },
     "compatibility": {
       "type": "object",
       "additionalProperties": false,
@@ -174,7 +157,7 @@
       }
     },
     "components": {
-      "description": "Pinned artifact versions read by install.sh (anolis repo) to build/install a deployment. Renovate auto-bumps repo/version pairs.",
+      "description": "Pinned artifact versions read by tools/install.sh to build/install a deployment. Renovate auto-bumps repo/version pairs.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -203,6 +186,9 @@
         "providers": {
           "type": "object",
           "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
@@ -224,6 +210,9 @@
         },
         "optional": {
           "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
