@@ -12,13 +12,14 @@ import requests
 import yaml
 
 from anolis_workbench.core import exporter
+from anolis_workbench.core import releases
 
 
 @pytest.fixture(autouse=True)
 def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Seed the release cache and block network so tests never hit GitHub."""
     monkeypatch.setattr(
-        exporter,
+        releases,
         "_RELEASE_CACHE",
         {"anolishq/anolis": "0.1.26", "anolishq/anolis-provider-sim": "0.2.1"},
     )
@@ -26,7 +27,7 @@ def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     def _no_network(*args: object, **kwargs: object) -> None:
         raise requests.RequestException("network disabled in tests")
 
-    monkeypatch.setattr(exporter.requests, "get", _no_network)
+    monkeypatch.setattr(releases.requests, "get", _no_network)
 
 
 def test_build_package_is_deterministic_and_rewrites_runtime_paths(tmp_path: pathlib.Path) -> None:
@@ -213,34 +214,34 @@ class _FakeResponse:
 
 
 def test_latest_release_version_strips_v_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
-    monkeypatch.setattr(exporter.requests, "get", lambda *a, **k: _FakeResponse(200, {"tag_name": "v1.2.3"}))
-    assert exporter._latest_release_version("anolishq/some-repo") == "1.2.3"
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(releases.requests, "get", lambda *a, **k: _FakeResponse(200, {"tag_name": "v1.2.3"}))
+    assert releases.latest_release_version("anolishq/some-repo") == "1.2.3"
 
 
 def test_latest_release_version_none_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
-    monkeypatch.setattr(exporter.requests, "get", lambda *a, **k: _FakeResponse(404, {}))
-    assert exporter._latest_release_version("anolishq/no-releases") is None
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(releases.requests, "get", lambda *a, **k: _FakeResponse(404, {}))
+    assert releases.latest_release_version("anolishq/no-releases") is None
 
 
 def test_latest_release_version_none_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {})
     # The autouse fixture already makes requests.get raise RequestException.
-    assert exporter._latest_release_version("anolishq/offline") is None
+    assert releases.latest_release_version("anolishq/offline") is None
 
 
 def test_latest_release_version_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {})
     calls: list[str] = []
 
     def _get(url: str, **kwargs: object) -> _FakeResponse:
         calls.append(url)
         return _FakeResponse(200, {"tag_name": "v2.0.0"})
 
-    monkeypatch.setattr(exporter.requests, "get", _get)
-    assert exporter._latest_release_version("anolishq/cached") == "2.0.0"
-    assert exporter._latest_release_version("anolishq/cached") == "2.0.0"
+    monkeypatch.setattr(releases.requests, "get", _get)
+    assert releases.latest_release_version("anolishq/cached") == "2.0.0"
+    assert releases.latest_release_version("anolishq/cached") == "2.0.0"
     assert len(calls) == 1
 
 
@@ -276,7 +277,7 @@ def test_build_machine_profile_pins_released_provider() -> None:
 
 def test_build_machine_profile_falls_back_for_unreleased_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        exporter,
+        releases,
         "_RELEASE_CACHE",
         {"anolishq/anolis": "0.1.26", "anolishq/anolis-provider-custom": None},
     )
@@ -306,7 +307,7 @@ def test_build_machine_profile_falls_back_when_kind_unknown() -> None:
 
 def test_build_machine_profile_mixes_released_and_unreleased_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        exporter,
+        releases,
         "_RELEASE_CACHE",
         {
             "anolishq/anolis": "0.1.26",
@@ -327,7 +328,7 @@ def test_build_machine_profile_mixes_released_and_unreleased_kinds(monkeypatch: 
 
 def test_build_machine_profile_omits_components_when_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        exporter,
+        releases,
         "_RELEASE_CACHE",
         {"anolishq/anolis": None, "anolishq/anolis-provider-sim": None},
     )
