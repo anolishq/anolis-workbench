@@ -129,18 +129,16 @@
     rollbackIsError = false;
     try {
       const res = await fetchJson<{
-        rolled_back: string[];
-        failed: string[];
-        service_restarted: boolean;
+        success: boolean;
+        output: string;
         error: string | null;
       }>("/api/rollback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restart: true }),
+        body: JSON.stringify({}),
       });
-      if (res.rolled_back.length > 0) {
-        rollbackFeedback = `Rolled back: ${res.rolled_back.join(", ")}`;
-        if (res.service_restarted) rollbackFeedback += " (service restarted)";
+      if (res.success) {
+        rollbackFeedback = "Rolled back to previous binaries (service restarted)";
       } else {
         rollbackFeedback = res.error ?? "Nothing to rollback";
         rollbackIsError = true;

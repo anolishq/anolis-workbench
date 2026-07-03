@@ -311,6 +311,43 @@ def test_deploy_remote_pushes_config_and_runs(tmp_path: pathlib.Path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
+# run_rollback
+# ---------------------------------------------------------------------------
+
+
+def test_run_rollback_stages_and_invokes_install_sh(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    output = deploy.run_rollback(executor)
+    assert output == "ok"
+    assert "/tmp/anolis-deploy/install.sh" in executor.files
+    call = executor.commands[-1]
+    assert call["sudo"] is True
+    assert call["cmd"] == ["bash", "/tmp/anolis-deploy/install.sh", "--rollback"]
+
+
+def test_run_rollback_passes_custom_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.run_rollback(executor, prefix=pathlib.Path("/srv/anolis"))
+    cmd = executor.commands[-1]["cmd"]
+    assert cmd[cmd.index("--prefix") + 1] == "/srv/anolis"
+
+
+def test_run_rollback_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor(returncode=1)
+    with pytest.raises(deploy.DeployError, match="--rollback failed"):
+        deploy.run_rollback(executor)
+
+
+def test_run_rollback_raises_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {"anolishq/anolis": None})
+    with pytest.raises(deploy.DeployError, match="latest anolis release"):
+        deploy.run_rollback(RecordingExecutor())
+
+
+# ---------------------------------------------------------------------------
 # stage_bundle
 # ---------------------------------------------------------------------------
 

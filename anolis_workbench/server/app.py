@@ -347,24 +347,12 @@ class _Handler(BaseHTTPRequestHandler):
         from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
         from anolis_workbench.core.rollback import rollback
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length) if content_length else b"{}"
-        params = json.loads(body) if body else {}
-
-        project = params.get("project", "bioreactor-v1")
-        binaries = ["anolis-runtime", "anolis-provider-bread", "anolis-provider-ezo"]
-        result = rollback(
-            binary_names=binaries,
-            prefix=DEFAULT_INSTALL_PREFIX,
-            project_name=project,
-            systemd=params.get("restart", True),
-        )
+        result = rollback(DEFAULT_INSTALL_PREFIX)
         self._json(
-            200 if not result.failed else 500,
+            200 if result.success else 500,
             {
-                "rolled_back": result.rolled_back,
-                "failed": result.failed,
-                "service_restarted": result.service_restarted,
+                "success": result.success,
+                "output": result.output,
                 "error": result.error,
             },
         )

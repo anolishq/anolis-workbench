@@ -188,6 +188,41 @@ def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
     return path
 
 
+def run_rollback(
+    executor: Executor | None = None,
+    *,
+    prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
+    staging: str = "/tmp/anolis-deploy",
+) -> str:
+    """Restore the previous binaries via `install.sh --rollback` on the target.
+
+    Rollback is version-independent (it swaps <prefix>/.prev back), so the
+    latest released install.sh is used. The script is staged via the executor,
+    which makes the same path work locally and over SSH.
+    """
+    if executor is None:
+        executor = LocalExecutor()
+
+    version = releases.latest_release_version(releases.RUNTIME_REPO)
+    if version is None:
+        raise DeployError("could not resolve the latest anolis release (offline?)")
+
+    with tempfile.TemporaryDirectory(prefix="anolis-rollback-") as td:
+        install_sh = fetch_install_sh(version, pathlib.Path(td))
+        target_path = f"{staging}/install.sh"
+        executor.mkdir(staging)
+        executor.write_file(target_path, install_sh.read_bytes())
+
+    args = ["--rollback"]
+    if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
+        args += ["--prefix", str(prefix)]
+    result = executor.run(["bash", target_path, *args], sudo=True, timeout=300)
+    if result.returncode != 0:
+        tail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-10:])
+        raise DeployError(f"install.sh --rollback failed (exit {result.returncode}):\n{tail}")
+    return result.stdout
+
+
 def _install_args(project_dir: str, *, prefix: pathlib.Path, no_start: bool, dry_run: bool) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:

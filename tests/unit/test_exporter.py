@@ -339,3 +339,12 @@ def test_build_machine_profile_omits_components_when_offline(monkeypatch: pytest
     )
     assert profile["compatibility"]["providers"]["sim0"]["strategy"] == "local-build"
     assert "components" not in profile
+
+
+def test_release_pins_env_seeds_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANOLIS_WB_RELEASE_PINS", '{"anolishq/anolis": "1.2.3", "anolishq/x": null}')
+    assert releases._seed_from_env() == {"anolishq/anolis": "1.2.3", "anolishq/x": None}
+    monkeypatch.setenv("ANOLIS_WB_RELEASE_PINS", "not-json")
+    assert releases._seed_from_env() == {}
+    monkeypatch.delenv("ANOLIS_WB_RELEASE_PINS")
+    assert releases._seed_from_env() == {}
