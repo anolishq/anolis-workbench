@@ -50,11 +50,16 @@ def latest_release_version(repo: str) -> "str | None":
     """
     if repo in _RELEASE_CACHE:
         return _RELEASE_CACHE[repo]
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        # Unauthenticated API calls share a tiny per-IP budget (CI runners).
+        headers["Authorization"] = f"Bearer {token}"
     version: str | None = None
     try:
         resp = requests.get(
             f"{GITHUB_API}/repos/{repo}/releases/latest",
-            headers={"Accept": "application/vnd.github+json"},
+            headers=headers,
             timeout=10,
         )
         if resp.status_code == 200:
