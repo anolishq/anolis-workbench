@@ -8,9 +8,25 @@ import pathlib
 import zipfile
 
 import pytest
+import requests
 import yaml
 
 from anolis_workbench.core import exporter
+
+
+@pytest.fixture(autouse=True)
+def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seed the release cache and block network so tests never hit GitHub."""
+    monkeypatch.setattr(
+        exporter,
+        "_RELEASE_CACHE",
+        {"anolishq/anolis": "0.1.26", "anolishq/anolis-provider-sim": "0.2.1"},
+    )
+
+    def _no_network(*args: object, **kwargs: object) -> None:
+        raise requests.RequestException("network disabled in tests")
+
+    monkeypatch.setattr(exporter.requests, "get", _no_network)
 
 
 def test_build_package_is_deterministic_and_rewrites_runtime_paths(tmp_path: pathlib.Path) -> None:
@@ -48,6 +64,11 @@ def test_build_package_is_deterministic_and_rewrites_runtime_paths(tmp_path: pat
         assert machine_profile["runtime_profiles"]["manual"] == "runtime/anolis-runtime.yaml"
         assert machine_profile["providers"]["sim0"]["config"] == "providers/sim0.yaml"
         assert machine_profile["behaviors"] == ["runtime/behaviors/local.xml"]
+        assert machine_profile["components"]["runtime"] == {"repo": "anolishq/anolis", "version": "0.1.26"}
+        assert machine_profile["components"]["providers"]["sim"] == {
+            "repo": "anolishq/anolis-provider-sim",
+            "version": "0.2.1",
+        }
 
         provenance = json.loads(archive.read("meta/provenance.json").decode("utf-8"))
         assert provenance["exported_at"] == "2026-04-16T19:01:02Z"
@@ -178,62 +199,66 @@ def test_secret_leak_raises_export_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Compatibility matrix loader
+# _latest_release_version
 # ---------------------------------------------------------------------------
 
 
-def test_load_compat_matrix_returns_data_from_explicit_path(tmp_path: pathlib.Path) -> None:
-    matrix_file = tmp_path / "compat.yaml"
-    matrix_file.write_text(
-        yaml.dump(
-            {
-                "workbench_version": "0.3.1",
-                "runtime": {"repo": "anolishq/anolis", "version": "0.1.7"},
-                "providers": {
-                    "anolis-provider-sim": {"repo": "anolishq/anolis-provider-sim", "version": "0.2.1"},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    result = exporter._load_compat_matrix(matrix_path=matrix_file)
-    assert result["workbench_version"] == "0.3.1"
-    assert result["providers"]["anolis-provider-sim"]["version"] == "0.2.1"
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
 
 
-def test_load_compat_matrix_fallback_on_empty_file(tmp_path: pathlib.Path) -> None:
-    matrix_file = tmp_path / "compat.yaml"
-    matrix_file.write_text("{}", encoding="utf-8")
-    result = exporter._load_compat_matrix(matrix_path=matrix_file)
-    assert result.get("providers", {}) == {}
+def test_latest_release_version_strips_v_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(exporter.requests, "get", lambda *a, **k: _FakeResponse(200, {"tag_name": "v1.2.3"}))
+    assert exporter._latest_release_version("anolishq/some-repo") == "1.2.3"
 
 
-def test_load_compat_matrix_explicit_path_bypasses_cache(tmp_path: pathlib.Path) -> None:
-    a = tmp_path / "a.yaml"
-    b = tmp_path / "b.yaml"
-    a.write_text(yaml.dump({"providers": {"p1": {"version": "1.0.0"}}}), encoding="utf-8")
-    b.write_text(yaml.dump({"providers": {"p1": {"version": "2.0.0"}}}), encoding="utf-8")
-    assert exporter._load_compat_matrix(matrix_path=a)["providers"]["p1"]["version"] == "1.0.0"
-    assert exporter._load_compat_matrix(matrix_path=b)["providers"]["p1"]["version"] == "2.0.0"
+def test_latest_release_version_none_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    monkeypatch.setattr(exporter.requests, "get", lambda *a, **k: _FakeResponse(404, {}))
+    assert exporter._latest_release_version("anolishq/no-releases") is None
+
+
+def test_latest_release_version_none_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    # The autouse fixture already makes requests.get raise RequestException.
+    assert exporter._latest_release_version("anolishq/offline") is None
+
+
+def test_latest_release_version_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(exporter, "_RELEASE_CACHE", {})
+    calls: list[str] = []
+
+    def _get(url: str, **kwargs: object) -> _FakeResponse:
+        calls.append(url)
+        return _FakeResponse(200, {"tag_name": "v2.0.0"})
+
+    monkeypatch.setattr(exporter.requests, "get", _get)
+    assert exporter._latest_release_version("anolishq/cached") == "2.0.0"
+    assert exporter._latest_release_version("anolishq/cached") == "2.0.0"
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------------------
-# _build_machine_profile — matrix integration
+# _build_machine_profile — component pin resolution
 # ---------------------------------------------------------------------------
 
 
-def test_build_machine_profile_uses_pinned_ref_when_provider_in_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        exporter,
-        "_load_compat_matrix",
-        lambda matrix_path=None: {
-            "providers": {
-                "sim0": {"repo": "anolishq/anolis-provider-sim", "version": "0.2.1"},
-            }
-        },
-    )
+def _system_with_kinds(kinds: dict[str, str]) -> dict:
+    return {
+        "meta": {"name": "Test Machine"},
+        "topology": {"providers": {pid: {"kind": kind} for pid, kind in kinds.items()}},
+    }
+
+
+def test_build_machine_profile_pins_released_provider() -> None:
     profile = exporter._build_machine_profile(
-        system={"meta": {"name": "Test Machine"}},
+        system=_system_with_kinds({"sim0": "sim"}),
         project_name="test-machine",
         provider_ids=["sim0"],
         behavior_rel_paths={},
@@ -241,43 +266,79 @@ def test_build_machine_profile_uses_pinned_ref_when_provider_in_matrix(monkeypat
     compat = profile["compatibility"]["providers"]["sim0"]
     assert compat["strategy"] == "pinned-ref"
     assert compat["version"] == "0.2.1"
+    assert profile["components"]["runtime"] == {"repo": "anolishq/anolis", "version": "0.1.26"}
+    # components are keyed by kind, not instance id
+    assert profile["components"]["providers"]["sim"] == {
+        "repo": "anolishq/anolis-provider-sim",
+        "version": "0.2.1",
+    }
 
 
-def test_build_machine_profile_falls_back_for_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_machine_profile_falls_back_for_unreleased_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         exporter,
-        "_load_compat_matrix",
-        lambda matrix_path=None: {"providers": {}},
+        "_RELEASE_CACHE",
+        {"anolishq/anolis": "0.1.26", "anolishq/anolis-provider-custom": None},
     )
     profile = exporter._build_machine_profile(
-        system={},
+        system=_system_with_kinds({"custom0": "custom"}),
         project_name="test-machine",
-        provider_ids=["custom-provider"],
+        provider_ids=["custom0"],
         behavior_rel_paths={},
     )
-    compat = profile["compatibility"]["providers"]["custom-provider"]
+    compat = profile["compatibility"]["providers"]["custom0"]
     assert compat["strategy"] == "local-build"
     assert compat["version"] == "unspecified"
+    # No downloadable provider → no components section at all.
+    assert "components" not in profile
 
 
-def test_build_machine_profile_mixes_known_and_unknown_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_machine_profile_falls_back_when_kind_unknown() -> None:
+    profile = exporter._build_machine_profile(
+        system={},  # no topology → no kind for the instance
+        project_name="test-machine",
+        provider_ids=["mystery0"],
+        behavior_rel_paths={},
+    )
+    assert profile["compatibility"]["providers"]["mystery0"]["strategy"] == "local-build"
+    assert "components" not in profile
+
+
+def test_build_machine_profile_mixes_released_and_unreleased_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         exporter,
-        "_load_compat_matrix",
-        lambda matrix_path=None: {
-            "providers": {
-                "sim0": {"repo": "anolishq/anolis-provider-sim", "version": "0.2.1"},
-            }
+        "_RELEASE_CACHE",
+        {
+            "anolishq/anolis": "0.1.26",
+            "anolishq/anolis-provider-sim": "0.2.1",
+            "anolishq/anolis-provider-custom": None,
         },
     )
     profile = exporter._build_machine_profile(
-        system={},
+        system=_system_with_kinds({"sim0": "sim", "custom0": "custom"}),
         project_name="test-machine",
-        provider_ids=["sim0", "custom-provider"],
+        provider_ids=["sim0", "custom0"],
         behavior_rel_paths={},
     )
     assert profile["compatibility"]["providers"]["sim0"]["strategy"] == "pinned-ref"
-    assert profile["compatibility"]["providers"]["custom-provider"]["strategy"] == "local-build"
+    assert profile["compatibility"]["providers"]["custom0"]["strategy"] == "local-build"
+    assert sorted(profile["components"]["providers"]) == ["sim"]
+
+
+def test_build_machine_profile_omits_components_when_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        exporter,
+        "_RELEASE_CACHE",
+        {"anolishq/anolis": None, "anolishq/anolis-provider-sim": None},
+    )
+    profile = exporter._build_machine_profile(
+        system=_system_with_kinds({"sim0": "sim"}),
+        project_name="test-machine",
+        provider_ids=["sim0"],
+        behavior_rel_paths={},
+    )
+    assert profile["compatibility"]["providers"]["sim0"]["strategy"] == "local-build"
+    assert "components" not in profile
 
 
 # ---------------------------------------------------------------------------
