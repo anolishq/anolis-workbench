@@ -1,0 +1,57 @@
+name: Deploy parity
+
+# Acceptance gate for the install.sh delegation (#163, Stage 1 criterion #6):
+# a workbench deploy and a direct install.sh --stage/--local install of the
+# same config must be byte-identical. Runs the real installs on the runner
+# (sudo + systemd, sim provider — no hardware).
+
+on:
+  pull_request:
+    paths:
+      - "anolis_workbench/core/deploy.py"
+      - "anolis_workbench/core/releases.py"
+      - "anolis_workbench/core/renderer.py"
+      - "anolis_workbench/cli/provision_cli.py"
+      - "tests/e2e/deploy_parity.sh"
+      - ".github/workflows/deploy-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "anolis_workbench/core/deploy.py"
+      - "anolis_workbench/core/releases.py"
+      - "anolis_workbench/core/renderer.py"
+      - "anolis_workbench/cli/provision_cli.py"
+      - "tests/e2e/deploy_parity.sh"
+      - ".github/workflows/deploy-parity.yml"
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC — catch upstream release drift
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: workbench deploy == install.sh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install workbench
+        run: uv sync --frozen
+
+      - name: Install pyyaml for install.sh
+        run: sudo apt-get update -q && sudo apt-get install -y -q python3-yaml
+
+      - name: Run parity check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash tests/e2e/deploy_parity.sh
