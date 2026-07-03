@@ -36,10 +36,11 @@ It's a full-stack monorepo:
   release freeze, so the lint lane **stages a zero-byte placeholder** to
   satisfy the existence check. Keep that placeholder step when touching the
   desktop lane; it is never bundled or run.
-- `anolis_workbench/schemas/compatibility-matrix.yaml` is **auto-bumped weekly
-  (Mondays)** and gates the workbench release — don't hand-edit it to dodge a
-  failing gate. See `docs/compatibility-matrices.md` for how it relates to the
-  org 0F (ADPP) conformance matrix; the two answer different questions.
+- `anolis_workbench/schemas/compatibility-matrix.yaml` is **being retired**
+  (#166) — the deployment config's `components:` section is the version source,
+  and the weekly bump poller is gone. It still gates the workbench release
+  (`workbench_version` must match `pyproject.toml`) until the install.sh
+  delegation (#161) deletes it; don't hand-edit versions in the meantime.
 - Shared `.github` actions/workflows are SHA-pinned with a `# <tag>` comment so
   Renovate can track them — keep the comment when bumping.
 
