@@ -15,6 +15,7 @@ from pathlib import Path
 # Allowlist of binaries that executors are permitted to invoke.
 # Commands not in this set are rejected to prevent command injection.
 _ALLOWED_COMMANDS: set[str] = {
+    "bash",
     "cat",
     "chmod",
     "cp",
@@ -78,8 +79,15 @@ class Executor(ABC):
     """Abstract base for command execution on a target machine."""
 
     @abstractmethod
-    def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
-        """Run a command on the target. Returns RunResult."""
+    def run(
+        self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
+    ) -> RunResult:
+        """Run a command on the target. Returns RunResult.
+
+        timeout: seconds before the command is killed; None uses the
+        implementation default (short — pass an explicit value for
+        long-running commands like installs).
+        """
 
     @abstractmethod
     def write_file(self, path: str, data: bytes) -> None:
@@ -97,10 +105,12 @@ class Executor(ABC):
 class LocalExecutor(Executor):
     """Executes operations on the local machine via subprocess + pathlib."""
 
-    def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+    def run(
+        self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
+    ) -> RunResult:
         safe_cmd = _validate_command(cmd)
         full_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
-        result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=30)
+        result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=timeout if timeout else 30)
         return RunResult(
             returncode=result.returncode,
             stdout=result.stdout.decode(errors="replace"),
@@ -137,7 +147,9 @@ class SubprocessSSHExecutor(Executor):
         args.append(f"{self.user}@{self.host}")
         return args
 
-    def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+    def run(
+        self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
+    ) -> RunResult:
         safe_cmd = _validate_command(cmd)
         remote_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
         ssh_cmd = self._ssh_base(allocate_pty=sudo) + [shlex.join(remote_cmd)]
@@ -145,7 +157,7 @@ class SubprocessSSHExecutor(Executor):
             ssh_cmd,
             input=input,
             capture_output=True,
-            timeout=60,
+            timeout=timeout if timeout else 60,
         )
         return RunResult(
             returncode=result.returncode,
@@ -208,12 +220,14 @@ class ParamikoSSHExecutor(Executor):
         self._client.connect(**connect_kwargs)  # type: ignore[arg-type]
         self._sftp = self._client.open_sftp()
 
-    def run(self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False) -> RunResult:
+    def run(
+        self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
+    ) -> RunResult:
         safe_cmd = _validate_command(cmd)
         remote_cmd = shlex.join(safe_cmd)
         if sudo:
             remote_cmd = f"sudo {remote_cmd}"
-        stdin, stdout, stderr = self._client.exec_command(remote_cmd)
+        stdin, stdout, stderr = self._client.exec_command(remote_cmd, timeout=timeout)
         if input:
             stdin.write(input)
             stdin.flush()

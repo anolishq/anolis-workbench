@@ -17,10 +17,10 @@ from importlib import resources
 from typing import Any
 
 import jsonschema
-import requests
 import yaml
 
 from anolis_workbench.core import paths as paths_module
+from anolis_workbench.core import releases
 from anolis_workbench.core import renderer as renderer_module
 
 
@@ -32,36 +32,7 @@ _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 _MACHINE_ID_RE = re.compile(r"[^a-z0-9-]+")
 _MACHINE_PROFILE_SCHEMA_CACHE: "dict[str, Any] | None" = None
 
-_GITHUB_API = "https://api.github.com"
-_RUNTIME_REPO = "anolishq/anolis"
-_PROVIDER_ORG = "anolishq"
-_RELEASE_CACHE: "dict[str, str | None]" = {}
-
 logger = logging.getLogger(__name__)
-
-
-def _latest_release_version(repo: str) -> "str | None":
-    """Latest release tag of ``repo`` (without the ``v`` prefix), or None.
-
-    None means offline / no release — the caller degrades gracefully. Cached
-    per process so an export makes at most one API call per repo.
-    """
-    if repo in _RELEASE_CACHE:
-        return _RELEASE_CACHE[repo]
-    version: str | None = None
-    try:
-        resp = requests.get(
-            f"{_GITHUB_API}/repos/{repo}/releases/latest",
-            headers={"Accept": "application/vnd.github+json"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            tag = resp.json().get("tag_name", "")
-            version = str(tag).lstrip("v") or None
-    except requests.RequestException:
-        version = None
-    _RELEASE_CACHE[repo] = version
-    return version
 
 
 def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
@@ -299,8 +270,8 @@ def _build_machine_profile(
         kind = entry.get("kind") if isinstance(entry, dict) else None
         version: str | None = None
         if isinstance(kind, str) and kind != "":
-            repo = f"{_PROVIDER_ORG}/anolis-provider-{kind}"
-            version = _latest_release_version(repo)
+            repo = releases.provider_repo(kind)
+            version = releases.latest_release_version(repo)
             if version is not None:
                 compatibility_providers[provider_id] = {"strategy": "pinned-ref", "version": version}
                 components_providers[kind] = {"repo": repo, "version": version}
@@ -312,7 +283,7 @@ def _build_machine_profile(
                 provider_id,
                 kind,
             )
-    runtime_version = _latest_release_version(_RUNTIME_REPO)
+    runtime_version = releases.latest_release_version(releases.RUNTIME_REPO)
 
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -337,7 +308,7 @@ def _build_machine_profile(
         payload["behaviors"] = sorted(behavior_rel_paths.keys())
     if runtime_version is not None and components_providers:
         payload["components"] = {
-            "runtime": {"repo": _RUNTIME_REPO, "version": runtime_version},
+            "runtime": {"repo": releases.RUNTIME_REPO, "version": runtime_version},
             "providers": components_providers,
         }
     else:

@@ -9,15 +9,12 @@ we install together?") and the org **ADPP conformance** matrix (0F, in
 
 ## Status
 
-The provisioning matrix is **being retired** (#166): the platform is
-config-driven, and a deployment's `machine-profile.yaml` `components:` section
-is the version source — Renovate bumps versions there directly. Accordingly:
-
-- The weekly bump poller (`check-compat-matrix.yml`) and its 0F warn step
-  (#155) are **gone**.
-- The matrix file itself is deleted by the install.sh delegation work (#161);
-  until then it only gates the release version sync (`workbench_version` ==
-  `pyproject.toml`).
+The provisioning matrix is **retired** (#166): the platform is config-driven,
+and a deployment's `machine-profile.yaml` `components:` section is the version
+source — Renovate bumps versions there directly. The weekly bump poller
+(`check-compat-matrix.yml`, incl. its 0F warn step, #155) and the matrix file
+itself are gone; deployment is delegated to the anolis repo's `install.sh`
+(#161, `core/deploy.py`).
 
 ## What remains
 

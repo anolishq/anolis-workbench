@@ -36,7 +36,7 @@ class TestParamikoSSHExecutor:
 
         assert result.returncode == 0
         assert result.stdout == "0.1.21\n"
-        mock_client.exec_command.assert_called_once_with("anolis-runtime --version")
+        mock_client.exec_command.assert_called_once_with("anolis-runtime --version", timeout=None)
 
     @patch("anolis_workbench.core.executor.ParamikoSSHExecutor.__init__", return_value=None)
     def test_run_with_sudo(self, mock_init: MagicMock) -> None:
@@ -56,7 +56,7 @@ class TestParamikoSSHExecutor:
 
         executor.run(["tar", "-xz", "-C", "/usr/local"], sudo=True)
 
-        executor._client.exec_command.assert_called_once_with("sudo tar -xz -C /usr/local")
+        executor._client.exec_command.assert_called_once_with("sudo tar -xz -C /usr/local", timeout=None)
 
     @patch("anolis_workbench.core.executor.ParamikoSSHExecutor.__init__", return_value=None)
     def test_run_with_input(self, mock_init: MagicMock) -> None:
