@@ -137,6 +137,9 @@ def workbench_server(tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, 
     env["ANOLIS_DATA_DIR"] = str(systems_root)
     env["ANOLIS_FRONTEND_DIR"] = str(frontend_dir)
     env["PYTHONPATH"] = f"{_REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    # Pin component-release lookups so exports are deterministic across the
+    # server and CLI subprocesses without touching the GitHub API.
+    env["ANOLIS_WB_RELEASE_PINS"] = json.dumps({"anolishq/anolis": "0.1.27", "anolishq/anolis-provider-sim": "0.2.5"})
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "anolis_workbench.server.app"],
