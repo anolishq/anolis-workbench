@@ -62,7 +62,6 @@ jobs:
           FRONTEND_PACKAGE_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('frontend/package.json').read_text())['version'])")
           TAURI_CONF_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version'])")
           CARGO_VERSION=$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('desktop/src-tauri/Cargo.toml').read_text())['package']['version'])")
-          MATRIX_VERSION=$(python3 -c "import pathlib,yaml; print(yaml.safe_load(pathlib.Path('anolis_workbench/schemas/compatibility-matrix.yaml').read_text())['workbench_version'])")
 
           ERRORS=""
           for pair in \
@@ -70,8 +69,7 @@ jobs:
             "desktop/package.json:$DESKTOP_PACKAGE_VERSION" \
             "frontend/package.json:$FRONTEND_PACKAGE_VERSION" \
             "desktop/src-tauri/tauri.conf.json:$TAURI_CONF_VERSION" \
-            "desktop/src-tauri/Cargo.toml:$CARGO_VERSION" \
-            "compatibility-matrix.yaml:$MATRIX_VERSION"; do
+            "desktop/src-tauri/Cargo.toml:$CARGO_VERSION"; do
             FILE="${pair%%:*}"
             FOUND="${pair#*:}"
             if [[ "$FOUND" != "$VERSION" ]]; then

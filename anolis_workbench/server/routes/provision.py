@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import installer
+from anolis_workbench.core import deploy, installer
+from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
@@ -54,6 +55,20 @@ def _create_job() -> ProvisionJob:
 # ---------------------------------------------------------------------------
 
 
+def _prepare_workspace(params: dict[str, Any], progress: Any) -> tuple[dict[str, Any], Path]:
+    """Authoring: ensure the local workspace project exists; return (system, project_dir)."""
+    project = params.get("project", "bioreactor-v1")
+    template = params.get("template", "bioreactor-manual")
+    prefix = Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
+
+    project_dir = paths_module.SYSTEMS_ROOT / project
+    if not project_dir.exists() or params.get("force", False):
+        progress("project", f"Creating workspace project {project} from {template}")
+        installer.provision_project(template, project, prefix, force=params.get("force", False))
+    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+    return system, project_dir
+
+
 def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
     """Run install in a background thread, pushing events to the job."""
 
@@ -62,19 +77,18 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.events.append(event)
 
     try:
-        result = installer.install(
+        system, project_dir = _prepare_workspace(params, _progress)
+        result = deploy.deploy_local(
+            system=system,
             project_name=params.get("project", "bioreactor-v1"),
-            template_name=params.get("template", "bioreactor-manual"),
-            install_prefix=installer.Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-            github_token=params.get("github_token"),
-            force=params.get("force", False),
-            skip_preflight=params.get("skip_preflight", False),
+            workspace_dir=project_dir,
+            prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             progress_callback=_progress,
         )
         job.events.append(
             {
                 "stage": "done",
-                "summary": {"versions": result.verified_versions},
+                "summary": {"runtime_version": result.runtime_version},
             }
         )
         job.status = "done"
@@ -102,21 +116,15 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             port=params.get("port", 22),
         )
 
-        # Determine remote systems root
-        home_result = executor.run(["sh", "-c", "echo $HOME"])
-        remote_home = home_result.stdout.strip() or f"/home/{user}"
-        systems_root = installer.Path(f"{remote_home}/.anolis/systems")
-
-        result = installer.install(
-            project_name=params.get("project", "bioreactor-v1"),
-            template_name=params.get("template", "bioreactor-manual"),
-            install_prefix=installer.Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-            github_token=params.get("github_token"),
-            force=params.get("force", False),
-            skip_preflight=params.get("skip_preflight", False),
-            progress_callback=_progress,
+        # Authoring stays local; the target only receives the deployment.
+        system, project_dir = _prepare_workspace(params, _progress)
+        result = deploy.deploy_remote(
             executor=executor,
-            systems_root=systems_root,
+            system=system,
+            project_name=params.get("project", "bioreactor-v1"),
+            workspace_dir=project_dir,
+            prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
+            progress_callback=_progress,
         )
         # Auto-add host to fleet registry
         from anolis_workbench.core.fleet import auto_register_host
@@ -129,7 +137,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.events.append(
             {
                 "stage": "done",
-                "summary": {"versions": result.verified_versions},
+                "summary": {"runtime_version": result.runtime_version},
             }
         )
         job.status = "done"
@@ -237,72 +245,37 @@ _bundle_artifacts_lock = threading.Lock()
 
 
 def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
-    """Run bundle creation in a background thread."""
-    import os
+    """Run bundle creation in a background thread via install.sh --stage."""
     import platform
-    import tarfile
     import tempfile
-
-    import requests
 
     def _progress(step: str, detail: str = "") -> None:
         job.events.append({"stage": step, "detail": detail})
 
     try:
         arch = params.get("arch") or ("arm64" if platform.machine() in ("aarch64", "arm64") else "x86_64")
+        if arch == "aarch64":
+            arch = "arm64"
         project = params.get("project", "bioreactor-v1")
         template = params.get("template", "bioreactor-manual")
 
         _progress("resolve", f"Building bundle for {project} ({arch})")
 
-        token = params.get("github_token") or os.environ.get("GITHUB_TOKEN")
         tmp_dir = Path(tempfile.mkdtemp(prefix="anolis-bundle-"))
+        tpl_dir = paths_module.TEMPLATES_ROOT / template
+        tpl_path = tpl_dir / "system.json"
+        if not tpl_path.exists():
+            raise RuntimeError(f"Template '{template}' not found at {tpl_path}")
+        system = json.loads(tpl_path.read_text(encoding="utf-8"))
 
-        from anolis_workbench.core import bundler
-
-        arch_map = {
-            "arm64": "linux-arm64",
-            "aarch64": "linux-arm64",
-            "x86_64": "linux-x86_64",
-        }
-        platform_str = arch_map.get(arch, f"linux-{arch}")
-        matrix = installer.load_compat_matrix(None)
-
-        # Resolve components
-        _progress("resolve", "Resolving components")
-        components = installer.resolve_components(matrix)
-        if not components:
-            raise RuntimeError("No components found in compatibility matrix")
-
-        # Download tarballs
-        session = requests.Session()
-        tarballs: list[tuple[installer.ComponentSpec, bytes]] = []
-
-        for comp in components:
-            _progress("manifest", f"Fetching manifest for {comp.name} v{comp.version}")
-            manifest = installer.fetch_manifest(session, comp.repo, comp.version, platform_str, token=token)
-            _progress("download", f"Downloading {manifest.asset_name}")
-            data = installer.download_and_verify(session, manifest.download_url, manifest.sha256, token=token)
-            tarballs.append((comp, data))
-
-        # Build bundle
-        _progress("build", "Assembling bundle")
-        out_dir = tmp_dir / f"anolis-{project}-bundle"
-        workbench_version = matrix.get("workbench_version", "")
-        result = bundler.build_bundle(
-            components=components,
-            tarballs=tarballs,
-            template_name=template,
+        tarball_path = deploy.stage_bundle(
+            system=system,
             project_name=project,
-            platform_str=platform_str,
-            out_dir=out_dir,
-            workbench_version=workbench_version,
+            workspace_dir=tpl_dir,
+            out_dir=tmp_dir,
+            arch=arch,
+            progress_callback=_progress,
         )
-
-        # Create tarball archive
-        tarball_path = tmp_dir / f"anolis-{project}-{arch}.tar.gz"
-        with tarfile.open(str(tarball_path), "w:gz") as tar:
-            tar.add(str(result.bundle_path), arcname=result.bundle_path.name)
 
         with _bundle_artifacts_lock:
             _bundle_artifacts[job.job_id] = tarball_path

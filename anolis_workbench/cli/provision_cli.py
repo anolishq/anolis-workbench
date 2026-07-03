@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import installer
+from anolis_workbench.core import deploy, installer, releases
 from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
@@ -50,35 +51,19 @@ def _parse_args() -> argparse.Namespace:
         help="Binary install prefix (default: /opt/anolis).",
     )
     install_parser.add_argument(
-        "--compat-matrix",
-        type=Path,
-        default=None,
-        help="Override path to compatibility-matrix.yaml (for testing).",
-    )
-    install_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing binaries and project.",
+        help="Overwrite an existing workspace project.",
     )
     install_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Fetch and verify but do not install or write files.",
+        help="Run install.sh in dry-run mode (the workspace project is still created).",
     )
     install_parser.add_argument(
-        "--no-preflight",
+        "--no-start",
         action="store_true",
-        help="Skip preflight checks before install.",
-    )
-    install_parser.add_argument(
-        "--systemd",
-        action="store_true",
-        help="Install and enable a systemd service for the runtime.",
-    )
-    install_parser.add_argument(
-        "--wait-ready",
-        action="store_true",
-        help="After start, poll the runtime health endpoint until ready.",
+        help="Install but do not start the runtime service.",
     )
     install_parser.add_argument(
         "--profile",
@@ -100,12 +85,6 @@ def _parse_args() -> argparse.Namespace:
         "--start-observability",
         action="store_true",
         help="Auto-start the observability stack with docker compose (requires Docker).",
-    )
-    install_parser.add_argument(
-        "--behavior-tree",
-        type=Path,
-        default=None,
-        help="Path to a behavior tree XML file (required for automation/full profiles).",
     )
     install_parser.add_argument(
         "--workbench-service",
@@ -152,17 +131,6 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_INSTALL_PREFIX,
         help="Target install prefix for path patching (default: /opt/anolis).",
     )
-    bundle_parser.add_argument(
-        "--compat-matrix",
-        type=Path,
-        default=None,
-        help="Override path to compatibility-matrix.yaml (for testing).",
-    )
-    bundle_parser.add_argument(
-        "--include-wheels",
-        action="store_true",
-        help="Bundle Python wheels for fully offline install (true air-gap).",
-    )
 
     # --- remote subcommand (pass 5) ---
     remote_parser = subparsers.add_parser(
@@ -197,12 +165,6 @@ def _parse_args() -> argparse.Namespace:
         help="Binary install prefix on the target (default: /opt/anolis).",
     )
     remote_parser.add_argument(
-        "--compat-matrix",
-        type=Path,
-        default=None,
-        help="Override path to compatibility-matrix.yaml (for testing).",
-    )
-    remote_parser.add_argument(
         "--key",
         type=Path,
         default=None,
@@ -217,22 +179,12 @@ def _parse_args() -> argparse.Namespace:
     remote_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing binaries and project on target.",
+        help="Overwrite an existing local workspace project.",
     )
     remote_parser.add_argument(
-        "--no-preflight",
+        "--no-start",
         action="store_true",
-        help="Skip preflight checks before install.",
-    )
-    remote_parser.add_argument(
-        "--systemd",
-        action="store_true",
-        help="Install and enable a systemd service for the runtime.",
-    )
-    remote_parser.add_argument(
-        "--wait-ready",
-        action="store_true",
-        help="After start, poll the runtime health endpoint until ready.",
+        help="Install but do not start the runtime service on the target.",
     )
     remote_parser.add_argument(
         "--profile",
@@ -254,12 +206,6 @@ def _parse_args() -> argparse.Namespace:
         "--start-observability",
         action="store_true",
         help="Auto-start the observability stack with docker compose (requires Docker).",
-    )
-    remote_parser.add_argument(
-        "--behavior-tree",
-        type=Path,
-        default=None,
-        help="Path to a behavior tree XML file (required for automation/full profiles).",
     )
 
     # --- fleet subcommand (pass 9) ---
@@ -287,13 +233,7 @@ def _parse_args() -> argparse.Namespace:
     fleet_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Fetch and verify but do not install.",
-    )
-    fleet_parser.add_argument(
-        "--compat-matrix",
-        type=Path,
-        default=None,
-        help="Override path to compatibility-matrix.yaml (for testing).",
+        help="Run install.sh in dry-run mode on each target.",
     )
 
     # --- rollback subcommand (pass 9) ---
@@ -321,12 +261,6 @@ def _parse_args() -> argparse.Namespace:
         "--systemd",
         action="store_true",
         help="Restart the systemd service after rollback.",
-    )
-    rollback_parser.add_argument(
-        "--compat-matrix",
-        type=Path,
-        default=None,
-        help="Override path to compatibility-matrix.yaml (for testing).",
     )
     rollback_parser.add_argument(
         "--key",
@@ -423,7 +357,7 @@ def _wants_telemetry_export(args: argparse.Namespace) -> bool:
 
 def _run_observability_step(
     args: argparse.Namespace,
-    result: installer.InstallResult,
+    runtime_version: str,
     token: str | None,
 ) -> None:
     """Download and deploy the observability stack."""
@@ -438,10 +372,10 @@ def _run_observability_step(
             print(f"\nWARNING: {detail} — stack will be extracted but not started", file=sys.stderr)
             args.start_observability = False
 
-    # Get runtime version from compat matrix
-    matrix = installer.load_compat_matrix(getattr(args, "compat_matrix", None))
-    rt_version = matrix.get("runtime", {}).get("version", "")
-    rt_repo = matrix.get("runtime", {}).get("repo", "anolishq/anolis")
+    # The observability stack ships with every runtime release — use the
+    # version that was just deployed.
+    rt_version = runtime_version
+    rt_repo = releases.RUNTIME_REPO
 
     # Download the observability tarball from the runtime release
     asset_name = f"anolis-{rt_version}-observability.tar.gz"
@@ -475,18 +409,15 @@ def _run_observability_step(
 
 def _run_telemetry_export_step(
     args: argparse.Namespace,
-    result: installer.InstallResult,
+    systems_root: Path,
 ) -> None:
     """Install and configure the telemetry export service."""
-    import os
-
     from anolis_workbench.core import telemetry_config
 
-    # Get version from compat matrix
-    matrix = installer.load_compat_matrix(getattr(args, "compat_matrix", None))
-    tel_version = matrix.get("optional_components", {}).get("telemetry_export", {}).get("version")
+    # Latest released version (folding this into install.sh is anolishq/anolis#137).
+    tel_version = releases.latest_release_version("anolishq/anolis-telemetry-export")
     if not tel_version:
-        print("\nWARNING: telemetry_export version not found in compat matrix", file=sys.stderr)
+        print("\nWARNING: could not resolve an anolis-telemetry-export release (offline?)", file=sys.stderr)
         return
 
     # Install the package
@@ -500,27 +431,31 @@ def _run_telemetry_export_step(
     _print_progress("project", "Rendering telemetry export config")
     config_path = telemetry_config.render_telemetry_config(
         args.project,
-        systems_root=result.project_path.parent,
+        systems_root=systems_root,
     )
     _print_progress("done", f"Config: {config_path}")
     print("    NOTE: Set INFLUXDB_TOKEN env var before starting the service.")
 
-    # Install systemd unit if --systemd was also passed
-    if getattr(args, "systemd", False):
-        _print_progress("systemd", "Installing telemetry export systemd service")
-        svc_result = telemetry_config.install_telemetry_service(
-            args.project,
-            config_path,
-            user=os.environ.get("USER", "root"),
-        )
-        if svc_result.error:
-            print(f"\nWARNING: telemetry systemd: {svc_result.error}", file=sys.stderr)
-        else:
-            _print_progress("systemd", f"Service {svc_result.service_name} installed")
+
+def _provision_workspace(args: argparse.Namespace) -> Path:
+    """Authoring: ensure the local workspace project exists (source of truth)."""
+    from anolis_workbench.core import paths as paths_module
+
+    project_dir: Path = paths_module.SYSTEMS_ROOT / args.project
+    if project_dir.exists() and not args.force and args.system is None:
+        _print_progress("project", f"Using existing workspace project: {project_dir}")
+        return project_dir
+    return installer.provision_project(
+        args.template,
+        args.project,
+        args.install_prefix,
+        force=args.force,
+        system_path=args.system,
+    )
 
 
 def _run_install(args: argparse.Namespace) -> int:
-    """Execute the install subcommand."""
+    """Execute the install subcommand: author the workspace, deploy via install.sh."""
     import os
 
     if not _validate_system_template(args):
@@ -541,60 +476,39 @@ def _run_install(args: argparse.Namespace) -> int:
         print("  Mode:     DRY RUN")
     print()
 
+    # 1. Authoring — the workspace project (unchanged concern).
     try:
-        result = installer.install(
+        project_dir = _provision_workspace(args)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        return 1
+    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+
+    # 2. Deploy — delegated to the canonical anolis install.sh.
+    try:
+        result = deploy.deploy_local(
+            system=system,
             project_name=args.project,
-            template_name=args.template,
-            system_path=args.system,
-            install_prefix=args.install_prefix,
-            compat_matrix_path=args.compat_matrix,
-            github_token=token,
-            force=args.force,
+            workspace_dir=project_dir,
+            prefix=args.install_prefix,
+            no_start=args.no_start,
             dry_run=args.dry_run,
-            skip_preflight=args.no_preflight,
             progress_callback=_print_progress,
         )
-    except installer.InstallerError as exc:
+    except deploy.DeployError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
 
-    # Systemd service install (if requested and not dry-run)
-    if args.systemd and not args.dry_run:
-        from anolis_workbench.core import systemd
-
-        _print_progress("systemd", f"Installing systemd service: {systemd.service_name(args.project)}")
-        from anolis_workbench.core import paths as paths_module
-
-        svc_result = systemd.install_service(
-            args.project,
-            install_prefix=args.install_prefix,
-            systems_root=paths_module.SYSTEMS_ROOT,
-            user=os.environ.get("USER", "root"),
-        )
-        if svc_result.error:
-            print(f"\nWARNING: systemd: {svc_result.error}", file=sys.stderr)
-        else:
-            _print_progress("systemd", f"Service {svc_result.service_name} started")
-
-        # Health check (if requested)
-        if args.wait_ready:
-            _print_progress("health", "Waiting for runtime to become ready...")
-            ready = systemd.wait_ready()
-            if ready:
-                _print_progress("health", "Runtime is ready")
-            else:
-                print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
-
     # Observability stack (if requested and not dry-run)
-    if _wants_observability(args) and not result.dry_run:
-        _run_observability_step(args, result, token)
+    if _wants_observability(args) and not args.dry_run:
+        _run_observability_step(args, result.runtime_version, token)
 
     # Telemetry export (if requested and not dry-run)
-    if _wants_telemetry_export(args) and not result.dry_run:
-        _run_telemetry_export_step(args, result)
+    if _wants_telemetry_export(args) and not args.dry_run:
+        _run_telemetry_export_step(args, project_dir.parent)
 
     # Workbench systemd service (appliance mode, if requested and not dry-run)
-    if getattr(args, "workbench_service", False) and not result.dry_run:
+    if getattr(args, "workbench_service", False) and not args.dry_run:
         from anolis_workbench.core import workbench_service
 
         _print_progress("systemd", "Installing workbench systemd service")
@@ -609,38 +523,42 @@ def _run_install(args: argparse.Namespace) -> int:
     # Print summary
     print()
     print("─" * 60)
-    if result.dry_run:
-        print("DRY RUN complete — no changes were made.")
+    if args.dry_run:
+        print("DRY RUN complete — no changes were made to the target.")
     else:
         print("Installation complete!")
         print()
-        for binary, version in result.verified_versions.items():
-            print(f"  ✓ {binary:<30} {version}")
-        print()
-        print(f"  ✓ Project: {result.project_path}")
+        print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
+        print(f"  ✓ Project: {project_dir}")
         print()
         print("Next steps:")
-        print("  anolis-workbench")
-        print("  → open http://127.0.0.1:3010 → select project → Launch")
+        print("  systemctl status anolis-runtime")
+        print("  curl http://127.0.0.1:8080/v0/status   # runtime API")
     print("─" * 60)
     return 0
 
 
+def _load_system_for_deploy(template: str, system_path: Path | None) -> tuple[dict, Path]:
+    """Load a system definition + the dir its behavior files resolve against."""
+    from anolis_workbench.core import paths as paths_module
+
+    if system_path is not None:
+        if not system_path.exists():
+            raise FileNotFoundError(f"System file not found: {system_path}")
+        return json.loads(system_path.read_text(encoding="utf-8")), system_path.parent
+    tpl_dir = paths_module.TEMPLATES_ROOT / template
+    tpl_path = tpl_dir / "system.json"
+    if not tpl_path.exists():
+        raise FileNotFoundError(f"Template '{template}' not found at {tpl_path}")
+    return json.loads(tpl_path.read_text(encoding="utf-8")), tpl_dir
+
+
 def _run_bundle(args: argparse.Namespace) -> int:
-    """Execute the bundle subcommand."""
-    import os
-
-    import requests
-
-    from anolis_workbench.core import bundler
-
+    """Execute the bundle subcommand: build a canonical offline bundle via install.sh --stage."""
     if not _validate_system_template(args):
         return 1
 
-    # Map arch flag to platform string
-    arch_map = {"arm64": "linux-arm64", "aarch64": "linux-arm64", "x86_64": "linux-x86_64"}
-    platform_str = arch_map[args.arch]
-    token = os.environ.get("GITHUB_TOKEN")
+    arch = "arm64" if args.arch in ("arm64", "aarch64") else "x86_64"
 
     print("Anolis Provision — Bundle")
     print(f"  Project:  {args.project}")
@@ -648,59 +566,23 @@ def _run_bundle(args: argparse.Namespace) -> int:
         print(f"  System:   {args.system}")
     else:
         print(f"  Template: {args.template}")
-    print(f"  Arch:     {args.arch} → {platform_str}")
+    print(f"  Arch:     {arch}")
     print(f"  Output:   {args.out}")
     print(f"  Prefix:   {args.install_prefix}")
     print()
 
-    # 1. Resolve components
-    _print_progress("compat", "Loading compatibility matrix")
-    matrix = installer.load_compat_matrix(args.compat_matrix)
-    _print_progress("resolve", "Resolving components")
-    components = installer.resolve_components(matrix)
-    if not components:
-        print("ERROR: No components found in compatibility matrix", file=sys.stderr)
-        return 1
-
-    # Filter to providers needed by the system or template
-    if args.system:
-        system_providers = installer.get_system_provider_names(args.system)
-        if system_providers is not None:
-            components = [c for c in components if c.name == "anolis" or c.binary_name in system_providers]
-    else:
-        template_providers = installer._get_template_provider_names(args.template)
-        if template_providers is not None:
-            components = [c for c in components if c.name == "anolis" or c.binary_name in template_providers]
-
-    # 2. Fetch manifests + download tarballs
-    session = requests.Session()
-    tarballs: list[tuple[installer.ComponentSpec, bytes]] = []
-
-    for comp in components:
-        _print_progress("manifest", f"Fetching manifest for {comp.name} v{comp.version}")
-        manifest = installer.fetch_manifest(session, comp.repo, comp.version, platform_str, token=token)
-        _print_progress("download", f"Downloading {manifest.asset_name}")
-        data = installer.download_and_verify(session, manifest.download_url, manifest.sha256, token=token)
-        _print_progress("verified", f"SHA256 verified: {manifest.asset_name}")
-        tarballs.append((comp, data))
-
-    # 3. Build bundle
-    _print_progress("project", "Building bundle")
-    workbench_version = matrix.get("workbench_version", "")
     try:
-        result = bundler.build_bundle(
-            components=components,
-            tarballs=tarballs,
-            template_name=args.template,
+        system, workspace_dir = _load_system_for_deploy(args.template, args.system)
+        tarball = deploy.stage_bundle(
+            system=system,
             project_name=args.project,
-            platform_str=platform_str,
+            workspace_dir=workspace_dir,
             out_dir=args.out,
-            install_prefix=args.install_prefix,
-            workbench_version=workbench_version,
-            system_path=args.system,
-            include_wheels=args.include_wheels,
+            arch=arch,
+            prefix=args.install_prefix,
+            progress_callback=_print_progress,
         )
-    except (ValueError, FileNotFoundError) as exc:
+    except (FileNotFoundError, deploy.DeployError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -709,14 +591,10 @@ def _run_bundle(args: argparse.Namespace) -> int:
     print("─" * 60)
     print("Bundle created!")
     print()
-    print(f"  📁 {result.bundle_path}")
-    print(f"  🎯 Platform: {result.platform}")
-    print("  📦 Components:")
-    for comp in result.components:
-        print(f"       {comp.binary_name} v{comp.version}")
+    print(f"  📁 {tarball}")
     print()
-    print("Transfer to RPi and run:")
-    print(f"  cd {result.bundle_path.name} && chmod +x install.sh && ./install.sh")
+    print("Transfer to the device and run:")
+    print(f"  sudo ./install.sh --local {tarball.name}")
     print("─" * 60)
     return 0
 
@@ -780,78 +658,48 @@ def _run_remote(args: argparse.Namespace) -> int:
         print(f"\nERROR: Unsupported remote architecture: {remote_arch}", file=sys.stderr)
         return 1
 
-    # Determine remote systems root
-    home_result = executor.run(["sh", "-c", "echo $HOME"])
-    remote_home = home_result.stdout.strip() or f"/home/{user}"
-    systems_root = Path(f"{remote_home}/.anolis/systems")
-
-    # Run the full install flow using the SSH executor
+    # 1. Authoring — the LOCAL workspace project is the source of truth.
     try:
-        result = installer.install(
-            project_name=args.project,
-            template_name=args.template,
-            system_path=args.system,
-            install_prefix=args.install_prefix,
-            compat_matrix_path=args.compat_matrix,
-            github_token=token,
-            force=args.force,
-            skip_preflight=args.no_preflight,
-            progress_callback=_print_progress,
+        project_dir = _provision_workspace(args)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        return 1
+    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+
+    # 2. Deploy — push the config to the target and run install.sh there.
+    try:
+        result = deploy.deploy_remote(
             executor=executor,
-            systems_root=systems_root,
+            system=system,
+            project_name=args.project,
+            workspace_dir=project_dir,
+            prefix=args.install_prefix,
+            no_start=args.no_start,
+            progress_callback=_print_progress,
         )
-    except installer.InstallerError as exc:
+    except deploy.DeployError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
 
-    # Systemd service install (if requested)
-    if args.systemd:
-        from anolis_workbench.core import systemd
-
-        _print_progress("systemd", f"Installing systemd service: {systemd.service_name(args.project)}")
-        svc_result = systemd.install_service(
-            args.project,
-            executor=executor,
-            install_prefix=args.install_prefix,
-            systems_root=systems_root,
-            user=user,
-        )
-        if svc_result.error:
-            print(f"\nWARNING: systemd: {svc_result.error}", file=sys.stderr)
-        else:
-            _print_progress("systemd", f"Service {svc_result.service_name} started")
-
-        # Health check (if requested)
-        if args.wait_ready:
-            _print_progress("health", "Waiting for runtime to become ready...")
-            ready = systemd.wait_ready(executor)
-            if ready:
-                _print_progress("health", "Runtime is ready")
-            else:
-                print("\nWARNING: Runtime did not become ready within 30s", file=sys.stderr)
-
-    # Observability stack (if requested)
+    # Observability stack (if requested) — runs on THIS machine (docker stack).
     if _wants_observability(args):
-        _run_observability_step(args, result, token)
+        _run_observability_step(args, result.runtime_version, token)
 
-    # Telemetry export (if requested)
+    # Telemetry export (if requested) — local config render; target folding is anolishq/anolis#137.
     if _wants_telemetry_export(args):
-        _run_telemetry_export_step(args, result)
+        _run_telemetry_export_step(args, project_dir.parent)
 
     # Print summary
     print()
     print("─" * 60)
     print(f"Remote provisioning complete! ({user}@{host})")
     print()
-    for binary, version in result.verified_versions.items():
-        print(f"  ✓ {binary:<30} {version}")
+    print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
+    print(f"  ✓ Project: {project_dir}")
     print()
-    print(f"  ✓ Project: {result.project_path}")
-    print()
-    print("Next steps (on the RPi):")
-    print("  pip install anolis-workbench")
-    print("  anolis-workbench")
-    print("  → open http://<rpi-ip>:3010 → select project → Launch")
+    print("Next steps:")
+    print(f"  ssh {user}@{host} systemctl status anolis-runtime")
+    print(f"  curl http://{host}:8080/v0/status   # runtime API")
     print("─" * 60)
     return 0
 
@@ -860,11 +708,8 @@ def _provision_single_target(
     target: "fleet_module.FleetTarget",
     *,
     dry_run: bool = False,
-    compat_matrix_path: Path | None = None,
 ) -> "fleet_module.TargetResult":
     """Provision a single fleet target. Used as the callback for fleet execution."""
-    import os
-
     from anolis_workbench.core import fleet as fleet_module
     from anolis_workbench.core.executor import SubprocessSSHExecutor
 
@@ -875,7 +720,6 @@ def _provision_single_target(
         )
 
     user, host = target.host.split("@", 1)
-    token = os.environ.get("GITHUB_TOKEN")
 
     executor = SubprocessSSHExecutor(
         host=host,
@@ -884,18 +728,16 @@ def _provision_single_target(
     )
 
     try:
-        result = installer.install(
-            project_name=target.project,
-            template_name=target.template,
-            install_prefix=target.install_prefix,
-            compat_matrix_path=compat_matrix_path,
-            github_token=token,
-            force=False,
-            dry_run=dry_run,
-            skip_preflight=False,
+        system, workspace_dir = _load_system_for_deploy(target.template, None)
+        result = deploy.deploy_remote(
             executor=executor,
+            system=system,
+            project_name=target.project,
+            workspace_dir=workspace_dir,
+            prefix=target.install_prefix,
+            dry_run=dry_run,
         )
-        components = [f"{b} {v}" for b, v in result.verified_versions.items()]
+        components = [f"anolis-runtime {result.runtime_version}"]
         return fleet_module.TargetResult(name=target.name, host=target.host, success=True, components=components)
     except Exception as exc:
         return fleet_module.TargetResult(name=target.name, host=target.host, success=False, error=str(exc))
@@ -928,7 +770,7 @@ def _run_fleet(args: argparse.Namespace) -> int:
     print()
 
     def _provision_fn(target: fleet_module.FleetTarget, *, dry_run: bool = False) -> fleet_module.TargetResult:
-        return _provision_single_target(target, dry_run=dry_run, compat_matrix_path=args.compat_matrix)
+        return _provision_single_target(target, dry_run=dry_run)
 
     result = fleet_module.provision_fleet(
         targets,
@@ -966,10 +808,9 @@ def _run_rollback(args: argparse.Namespace) -> int:
     else:
         executor = LocalExecutor()
 
-    # Resolve binary names from compat matrix
-    matrix = installer.load_compat_matrix(args.compat_matrix)
-    components = installer.resolve_components(matrix)
-    binary_names = [c.binary_name for c in components]
+    # Default binary set (matches server/app.py); proper fix is delegating to
+    # install.sh --rollback (anolishq/anolis#136, #162).
+    binary_names = ["anolis-runtime", "anolis-provider-bread", "anolis-provider-ezo"]
 
     target_label = args.target or "localhost"
     print("Anolis Provision — Rollback")

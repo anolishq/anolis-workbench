@@ -188,12 +188,14 @@ def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
     return path
 
 
-def _install_args(project_dir: str, *, prefix: pathlib.Path, no_start: bool) -> list[str]:
+def _install_args(project_dir: str, *, prefix: pathlib.Path, no_start: bool, dry_run: bool) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
         args += ["--prefix", str(prefix)]
     if no_start:
         args.append("--no-start")
+    if dry_run:
+        args.append("--dry-run")
     return args
 
 
@@ -219,6 +221,7 @@ def deploy_local(
     workspace_dir: pathlib.Path,
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
     no_start: bool = False,
+    dry_run: bool = False,
     executor: Executor | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -246,7 +249,7 @@ def deploy_local(
         output = _run_install_sh(
             executor,
             str(install_sh),
-            _install_args(str(mat.project_dir), prefix=prefix, no_start=no_start),
+            _install_args(str(mat.project_dir), prefix=prefix, no_start=no_start, dry_run=dry_run),
             progress_callback,
         )
     return DeployResult(
@@ -265,6 +268,7 @@ def deploy_remote(
     workspace_dir: pathlib.Path,
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
     no_start: bool = False,
+    dry_run: bool = False,
     remote_staging: str = "/tmp/anolis-deploy",
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -304,7 +308,7 @@ def deploy_remote(
         output = _run_install_sh(
             executor,
             remote_install,
-            _install_args(remote_root, prefix=prefix, no_start=no_start),
+            _install_args(remote_root, prefix=prefix, no_start=no_start, dry_run=dry_run),
             progress_callback,
         )
     return DeployResult(
@@ -349,6 +353,8 @@ def stage_bundle(
         )
         install_sh = fetch_install_sh(mat.runtime_version, tmp)
         cmd = ["bash", str(install_sh), "--stage", str(out_dir), "--project", str(mat.project_dir)]
+        if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
+            cmd += ["--prefix", str(prefix)]
         if arch:
             cmd += ["--arch", arch]
         _progress("stage", f"Building offline bundle (runtime v{mat.runtime_version})")

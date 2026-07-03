@@ -9,7 +9,7 @@ import requests
 import yaml
 
 from anolis_workbench.core import deploy, releases
-from anolis_workbench.core.executor import RunResult
+from anolis_workbench.core.executor import Executor, RunResult
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,7 @@ def _make_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
     return ws
 
 
-class RecordingExecutor:
+class RecordingExecutor(Executor):
     """Fake Executor that records calls and succeeds."""
 
     def __init__(self, returncode: int = 0) -> None:

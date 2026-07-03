@@ -11,8 +11,7 @@ import pytest
 import requests
 import yaml
 
-from anolis_workbench.core import exporter
-from anolis_workbench.core import releases
+from anolis_workbench.core import exporter, releases
 
 
 @pytest.fixture(autouse=True)
@@ -340,40 +339,3 @@ def test_build_machine_profile_omits_components_when_offline(monkeypatch: pytest
     )
     assert profile["compatibility"]["providers"]["sim0"]["strategy"] == "local-build"
     assert "components" not in profile
-
-
-# ---------------------------------------------------------------------------
-# Bundled matrix integrity
-# ---------------------------------------------------------------------------
-
-
-def test_bundled_compat_matrix_workbench_version_matches_pyproject() -> None:
-    import tomllib
-
-    repo_root = pathlib.Path(__file__).parent.parent.parent
-    matrix_path = repo_root / "anolis_workbench" / "schemas" / "compatibility-matrix.yaml"
-    pyproject_path = repo_root / "pyproject.toml"
-
-    matrix = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
-    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-
-    assert matrix["workbench_version"] == pyproject["project"]["version"], (
-        f"compatibility-matrix.yaml workbench_version ({matrix['workbench_version']!r}) "
-        f"does not match pyproject.toml version ({pyproject['project']['version']!r})"
-    )
-
-
-def test_bundled_compat_matrix_is_structurally_valid() -> None:
-    repo_root = pathlib.Path(__file__).parent.parent.parent
-    matrix_path = repo_root / "anolis_workbench" / "schemas" / "compatibility-matrix.yaml"
-    matrix = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
-
-    assert isinstance(matrix, dict), "matrix root must be a mapping"
-    assert "workbench_version" in matrix, "matrix must have workbench_version"
-    assert "runtime" in matrix, "matrix must have runtime section"
-    assert "version" in matrix["runtime"], "runtime must have version"
-    assert "repo" in matrix["runtime"], "runtime must have repo"
-    assert "providers" in matrix, "matrix must have providers section"
-    for provider_id, entry in matrix["providers"].items():
-        assert "version" in entry, f"provider {provider_id!r} must have version"
-        assert "repo" in entry, f"provider {provider_id!r} must have repo"
