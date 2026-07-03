@@ -1,12 +1,16 @@
 """Telemetry export configuration for Anolis provisioning.
 
-Generates the telemetry-export config file and optional systemd unit
-for the anolis-telemetry-export service.
+Renders the config file for the anolis-telemetry-export service, matching
+the service's own load_config contract (telemetry_export/export_core/
+config.py in anolishq/anolis-telemetry-export): required `server:`,
+`influxdb:`, and `limits:` sections; secrets come from the
+ANOLIS_EXPORT_AUTH_TOKEN / ANOLIS_EXPORT_INFLUX_TOKEN env vars, never the
+rendered file. Service/unit installation is not handled here — folding
+telemetry provisioning into install.sh is anolishq/anolis#137.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -17,49 +21,20 @@ from anolis_workbench.core.executor import Executor, LocalExecutor
 # Data
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TELEMETRY_CONFIG = {
-    "runtime": {
-        "grpc_endpoint": "127.0.0.1:50051",
-    },
-    "influxdb": {
-        "url": "http://127.0.0.1:8086",
-        "org": "anolis",
-        "bucket": "bioreactor",
-        "token": "${INFLUXDB_TOKEN}",
-    },
+# Reference limits from the service's example config
+# (anolis-telemetry-export/config/bioreactor/telemetry-export.bioreactor.yaml).
+# The section is required by load_config; these are the documented defaults.
+_DEFAULT_LIMITS = {
+    "max_span_seconds": 86400,
+    "max_rows": 50000,
+    "max_response_bytes": 10_000_000,
+    "max_stream_bytes": 10_000_000,
+    "max_selector_items": 128,
+    "request_timeout_seconds": 15,
+    "max_request_bytes": 200_000,
+    "max_manifest_entries": 10_000,
+    "manifest_ttl_seconds": 86400,
 }
-
-_SYSTEMD_UNIT_TEMPLATE = """\
-[Unit]
-Description=Anolis Telemetry Export — {project_name}
-After=anolis-{project_name}.service
-
-[Service]
-Type=simple
-User={user}
-Environment=INFLUXDB_TOKEN=
-ExecStart=anolis-telemetry-export --config {config_path}
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-"""
-
-
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class TelemetryConfigResult:
-    """Result of telemetry export configuration."""
-
-    config_path: Path
-    service_installed: bool
-    service_name: str | None = None
-    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -71,16 +46,23 @@ def render_telemetry_config(
     project_name: str,
     *,
     systems_root: Path | None = None,
-    grpc_endpoint: str = "127.0.0.1:50051",
+    server_host: str = "127.0.0.1",
+    server_port: int = 8091,
     influxdb_url: str = "http://127.0.0.1:8086",
     influxdb_bucket: str | None = None,
 ) -> Path:
     """Render the telemetry-export config file into the project directory.
 
+    The rendered file satisfies the service's load_config contract
+    (`server:` + `influxdb:` + `limits:`). Tokens are intentionally not
+    written — the service resolves ANOLIS_EXPORT_AUTH_TOKEN and
+    ANOLIS_EXPORT_INFLUX_TOKEN from the environment.
+
     Args:
         project_name: Project name (e.g. "bioreactor-v1").
         systems_root: Root for project directories (default: ~/.anolis/systems).
-        grpc_endpoint: Runtime gRPC endpoint.
+        server_host: Export service bind host.
+        server_port: Export service port (service default: 8091).
         influxdb_url: InfluxDB URL.
         influxdb_bucket: InfluxDB bucket name (defaults to project_name without version).
 
@@ -93,96 +75,32 @@ def render_telemetry_config(
     project_dir = systems_root / project_name
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    config = dict(_DEFAULT_TELEMETRY_CONFIG)
-    config["runtime"] = {"grpc_endpoint": grpc_endpoint}
-
     # Derive bucket name from project (strip version suffix)
     bucket = influxdb_bucket or project_name.rsplit("-", 1)[0]
-    config["influxdb"] = {
-        "url": influxdb_url,
-        "org": "anolis",
-        "bucket": bucket,
-        "token": "${INFLUXDB_TOKEN}",
+    config = {
+        "server": {
+            "host": server_host,
+            "port": server_port,
+        },
+        "influxdb": {
+            "url": influxdb_url,
+            "org": "anolis",
+            "bucket": bucket,
+        },
+        "limits": dict(_DEFAULT_LIMITS),
     }
 
     config_path = project_dir / "telemetry-export.yaml"
     config_path.write_text(
         "# Anolis Telemetry Export configuration\n"
-        "# Set INFLUXDB_TOKEN environment variable before starting the service.\n"
+        "# Secrets are read from the environment, not this file:\n"
+        "#   ANOLIS_EXPORT_AUTH_TOKEN   - export API auth token (required)\n"
+        "#   ANOLIS_EXPORT_INFLUX_TOKEN - InfluxDB token (required)\n"
         + yaml.dump(config, default_flow_style=False, sort_keys=False),
         encoding="utf-8",
     )
 
     return config_path
-
-
-def install_telemetry_service(
-    project_name: str,
-    config_path: Path,
-    *,
-    user: str | None = None,
-    executor: Executor | None = None,
-) -> TelemetryConfigResult:
-    """Install a systemd unit for the telemetry-export service.
-
-    Args:
-        project_name: Project name for service naming.
-        config_path: Path to the telemetry-export config file.
-        user: User to run the service as (default: current user).
-        executor: Executor for commands.
-
-    Returns:
-        TelemetryConfigResult with status.
-    """
-    if executor is None:
-        executor = LocalExecutor()
-    if user is None:
-        import os
-
-        user = os.environ.get("USER", "root")
-
-    service_name = f"anolis-telemetry-export-{project_name}"
-    unit_content = _SYSTEMD_UNIT_TEMPLATE.format(
-        project_name=project_name,
-        user=user,
-        config_path=str(config_path),
-    )
-
-    unit_path = f"/etc/systemd/system/{service_name}.service"
-
-    # Write unit file
-    result = executor.run(
-        ["tee", unit_path],
-        input=unit_content.encode(),
-        sudo=True,
-    )
-    if result.returncode != 0:
-        return TelemetryConfigResult(
-            config_path=config_path,
-            service_installed=False,
-            error=f"Failed to write unit file: {result.stderr.strip()}",
-        )
-
-    # Reload + enable + start
-    for cmd in [
-        ["systemctl", "daemon-reload"],
-        ["systemctl", "enable", f"{service_name}.service"],
-        ["systemctl", "start", f"{service_name}.service"],
-    ]:
-        result = executor.run(cmd, sudo=True)
-        if result.returncode != 0:
-            return TelemetryConfigResult(
-                config_path=config_path,
-                service_installed=False,
-                service_name=service_name,
-                error=f"Failed: {' '.join(cmd)}: {result.stderr.strip()}",
-            )
-
-    return TelemetryConfigResult(
-        config_path=config_path,
-        service_installed=True,
-        service_name=service_name,
-    )
 
 
 def install_telemetry_export_package(
@@ -206,7 +124,7 @@ def install_telemetry_export_package(
 
     if offline_wheels_dir is not None:
         cmd = [
-            "pip",
+            "pip3",
             "install",
             "--no-index",
             "--find-links",
@@ -214,7 +132,7 @@ def install_telemetry_export_package(
             f"anolis-telemetry-export=={version}",
         ]
     else:
-        cmd = ["pip", "install", f"anolis-telemetry-export=={version}"]
+        cmd = ["pip3", "install", f"anolis-telemetry-export=={version}"]
 
     result = executor.run(cmd)
     return result.returncode == 0

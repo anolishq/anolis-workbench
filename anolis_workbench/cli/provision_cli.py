@@ -418,7 +418,7 @@ def _run_telemetry_export_step(
         systems_root=systems_root,
     )
     _print_progress("done", f"Config: {config_path}")
-    print("    NOTE: Set INFLUXDB_TOKEN env var before starting the service.")
+    print("    NOTE: Set ANOLIS_EXPORT_AUTH_TOKEN and ANOLIS_EXPORT_INFLUX_TOKEN before starting the service.")
 
 
 def _provision_workspace(args: argparse.Namespace) -> Path:
