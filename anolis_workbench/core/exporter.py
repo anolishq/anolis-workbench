@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import pathlib
 import re
 import zipfile
@@ -16,6 +17,7 @@ from importlib import resources
 from typing import Any
 
 import jsonschema
+import requests
 import yaml
 
 from anolis_workbench.core import paths as paths_module
@@ -29,22 +31,37 @@ class ExportError(RuntimeError):
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 _MACHINE_ID_RE = re.compile(r"[^a-z0-9-]+")
 _MACHINE_PROFILE_SCHEMA_CACHE: "dict[str, Any] | None" = None
-_COMPAT_MATRIX_CACHE: "dict[str, Any] | None" = None
+
+_GITHUB_API = "https://api.github.com"
+_RUNTIME_REPO = "anolishq/anolis"
+_PROVIDER_ORG = "anolishq"
+_RELEASE_CACHE: "dict[str, str | None]" = {}
+
+logger = logging.getLogger(__name__)
 
 
-def _load_compat_matrix(matrix_path: "pathlib.Path | None" = None) -> "dict[str, Any]":
-    global _COMPAT_MATRIX_CACHE
-    if matrix_path is not None:
-        # Explicit path — used by tests; bypass cache.
-        raw = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
-    if _COMPAT_MATRIX_CACHE is None:
-        bundled = resources.files("anolis_workbench").joinpath("schemas").joinpath("compatibility-matrix.yaml")
-        try:
-            _COMPAT_MATRIX_CACHE = yaml.safe_load(bundled.read_text(encoding="utf-8")) or {}
-        except FileNotFoundError:
-            _COMPAT_MATRIX_CACHE = {}
-    return _COMPAT_MATRIX_CACHE
+def _latest_release_version(repo: str) -> "str | None":
+    """Latest release tag of ``repo`` (without the ``v`` prefix), or None.
+
+    None means offline / no release — the caller degrades gracefully. Cached
+    per process so an export makes at most one API call per repo.
+    """
+    if repo in _RELEASE_CACHE:
+        return _RELEASE_CACHE[repo]
+    version: str | None = None
+    try:
+        resp = requests.get(
+            f"{_GITHUB_API}/repos/{repo}/releases/latest",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            tag = resp.json().get("tag_name", "")
+            version = str(tag).lstrip("v") or None
+    except requests.RequestException:
+        version = None
+    _RELEASE_CACHE[repo] = version
+    return version
 
 
 def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
@@ -265,16 +282,37 @@ def _build_machine_profile(
 
     machine_id = _machine_id_from_name(project_name)
     providers = {provider_id: {"config": f"providers/{provider_id}.yaml"} for provider_id in provider_ids}
-    _matrix = _load_compat_matrix()
-    _matrix_providers = _matrix.get("providers", {})
-    compatibility_providers = {
-        provider_id: (
-            {"strategy": "pinned-ref", "version": _matrix_providers[provider_id]["version"]}
-            if provider_id in _matrix_providers
-            else {"strategy": "local-build", "version": "unspecified"}
-        )
-        for provider_id in provider_ids
-    }
+
+    # Resolve pinned component versions from the latest GitHub releases so the
+    # exported profile can drive `install.sh --project` directly; Renovate
+    # bumps the pins in the project config afterwards. Provider instances map
+    # to a component by their `kind` (repo anolishq/anolis-provider-<kind>);
+    # offline / unreleased kinds degrade to local-build and are left out of
+    # components.
+    topo_providers = system.get("topology", {}).get("providers", {})
+    if not isinstance(topo_providers, dict):
+        topo_providers = {}
+    compatibility_providers: dict[str, Any] = {}
+    components_providers: dict[str, Any] = {}
+    for provider_id in provider_ids:
+        entry = topo_providers.get(provider_id)
+        kind = entry.get("kind") if isinstance(entry, dict) else None
+        version: str | None = None
+        if isinstance(kind, str) and kind != "":
+            repo = f"{_PROVIDER_ORG}/anolis-provider-{kind}"
+            version = _latest_release_version(repo)
+            if version is not None:
+                compatibility_providers[provider_id] = {"strategy": "pinned-ref", "version": version}
+                components_providers[kind] = {"repo": repo, "version": version}
+        if version is None:
+            compatibility_providers[provider_id] = {"strategy": "local-build", "version": "unspecified"}
+            logger.warning(
+                "no released component for provider %s (kind %s: offline or unreleased); "
+                "exported machine-profile pins it as local-build and omits it from components",
+                provider_id,
+                kind,
+            )
+    runtime_version = _latest_release_version(_RUNTIME_REPO)
 
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -287,10 +325,6 @@ def _build_machine_profile(
         "validation": {
             "expected_providers": provider_ids,
         },
-        "contracts": {
-            "runtime_config_baseline": "docs/contracts/runtime-config-baseline.md",
-            "runtime_http_baseline": "docs/contracts/runtime-http-baseline.md",
-        },
         "compatibility": {
             "runtime": {
                 "config_contract": "01-runtime-config",
@@ -301,6 +335,16 @@ def _build_machine_profile(
     }
     if behavior_rel_paths:
         payload["behaviors"] = sorted(behavior_rel_paths.keys())
+    if runtime_version is not None and components_providers:
+        payload["components"] = {
+            "runtime": {"repo": _RUNTIME_REPO, "version": runtime_version},
+            "providers": components_providers,
+        }
+    else:
+        logger.warning(
+            "exported machine-profile has no components section (offline or no released "
+            "components); fill in components.runtime/providers before using install.sh --project"
+        )
     return payload
 
 
