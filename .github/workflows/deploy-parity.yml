@@ -32,9 +32,19 @@ permissions:
 
 jobs:
   parity:
-    name: workbench deploy == install.sh
-    runs-on: ubuntu-24.04
+    name: workbench deploy == install.sh (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64 = the Raspberry Pi deployment architecture; free hosted
+          # runners for public repos catch arch/filesystem quirks x86 misses.
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 

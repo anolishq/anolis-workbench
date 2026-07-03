@@ -12,6 +12,11 @@ set -euo pipefail
 
 PROJECT="parity-check"
 PREFIX="/opt/anolis"
+case "$(uname -m)" in
+    aarch64|arm64) ARCH="arm64" ;;
+    x86_64)        ARCH="x86_64" ;;
+    *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+esac
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
 
@@ -51,7 +56,7 @@ sudo "${INSTALL_SH}" --uninstall
 # --- Side B: stage an offline bundle from the same config, install it -------
 log "Side B: anolis-provision bundle (install.sh --stage) + install.sh --local"
 uv run anolis-provision bundle --project "${PROJECT}" --system "${SYSTEM_JSON}" \
-    --arch x86_64 --out "${WORK}/bundles"
+    --arch "${ARCH}" --out "${WORK}/bundles"
 TARBALL=$(ls "${WORK}/bundles/anolis-${PROJECT}-"*.tar.gz)
 sudo "${INSTALL_SH}" --local "${TARBALL}" --no-start
 snapshot b
