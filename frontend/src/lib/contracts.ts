@@ -162,10 +162,7 @@ export interface EzoProviderConfig extends UnknownRecord {
 }
 
 export type ProviderTopologyConfig =
-  | SimProviderConfig
-  | BreadProviderConfig
-  | EzoProviderConfig
-  | UnknownRecord;
+  SimProviderConfig | BreadProviderConfig | EzoProviderConfig | UnknownRecord;
 
 export interface TopologyConfig extends UnknownRecord {
   runtime: RuntimeConfig;
