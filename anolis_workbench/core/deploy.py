@@ -223,7 +223,14 @@ def run_rollback(
     return result.stdout
 
 
-def _install_args(project_dir: str, *, prefix: pathlib.Path, no_start: bool, dry_run: bool) -> list[str]:
+def _install_args(
+    project_dir: str,
+    *,
+    prefix: pathlib.Path,
+    no_start: bool,
+    dry_run: bool,
+    with_telemetry_export: bool = False,
+) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
         args += ["--prefix", str(prefix)]
@@ -231,6 +238,11 @@ def _install_args(project_dir: str, *, prefix: pathlib.Path, no_start: bool, dry
         args.append("--no-start")
     if dry_run:
         args.append("--dry-run")
+    # Telemetry-export provisioning is owned by install.sh (anolishq/anolis#137);
+    # workbench just requests it — the service is installed on the target, not
+    # on the operator's host.
+    if with_telemetry_export:
+        args.append("--with-telemetry-export")
     return args
 
 
@@ -257,6 +269,7 @@ def deploy_local(
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
     no_start: bool = False,
     dry_run: bool = False,
+    with_telemetry_export: bool = False,
     executor: Executor | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -284,7 +297,13 @@ def deploy_local(
         output = _run_install_sh(
             executor,
             str(install_sh),
-            _install_args(str(mat.project_dir), prefix=prefix, no_start=no_start, dry_run=dry_run),
+            _install_args(
+                str(mat.project_dir),
+                prefix=prefix,
+                no_start=no_start,
+                dry_run=dry_run,
+                with_telemetry_export=with_telemetry_export,
+            ),
             progress_callback,
         )
     return DeployResult(
@@ -304,6 +323,7 @@ def deploy_remote(
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
     no_start: bool = False,
     dry_run: bool = False,
+    with_telemetry_export: bool = False,
     remote_staging: str = "/tmp/anolis-deploy",
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -343,7 +363,13 @@ def deploy_remote(
         output = _run_install_sh(
             executor,
             remote_install,
-            _install_args(remote_root, prefix=prefix, no_start=no_start, dry_run=dry_run),
+            _install_args(
+                remote_root,
+                prefix=prefix,
+                no_start=no_start,
+                dry_run=dry_run,
+                with_telemetry_export=with_telemetry_export,
+            ),
             progress_callback,
         )
     return DeployResult(
