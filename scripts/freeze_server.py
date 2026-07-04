@@ -42,7 +42,6 @@ DEFAULT_HIDDEN_IMPORTS = [
     "anolis_workbench.core.renderer",
     "anolis_workbench.core.rollback",
     "anolis_workbench.core.systemd",
-    "anolis_workbench.core.telemetry_config",
     "anolis_workbench.core.validator",
 ]
 

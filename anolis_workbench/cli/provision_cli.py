@@ -391,36 +391,6 @@ def _run_observability_step(
         print(f"    To start: cd {obs_result.stack_path} && docker compose up -d")
 
 
-def _run_telemetry_export_step(
-    args: argparse.Namespace,
-    systems_root: Path,
-) -> None:
-    """Install and configure the telemetry export service."""
-    from anolis_workbench.core import telemetry_config
-
-    # Latest released version (folding this into install.sh is anolishq/anolis#137).
-    tel_version = releases.latest_release_version("anolishq/anolis-telemetry-export")
-    if not tel_version:
-        print("\nWARNING: could not resolve an anolis-telemetry-export release (offline?)", file=sys.stderr)
-        return
-
-    # Install the package
-    _print_progress("install", f"Installing anolis-telemetry-export v{tel_version}")
-    success = telemetry_config.install_telemetry_export_package(tel_version)
-    if not success:
-        print("\nWARNING: Failed to install anolis-telemetry-export", file=sys.stderr)
-        return
-
-    # Render config
-    _print_progress("project", "Rendering telemetry export config")
-    config_path = telemetry_config.render_telemetry_config(
-        args.project,
-        systems_root=systems_root,
-    )
-    _print_progress("done", f"Config: {config_path}")
-    print("    NOTE: Set ANOLIS_EXPORT_AUTH_TOKEN and ANOLIS_EXPORT_INFLUX_TOKEN before starting the service.")
-
-
 def _provision_workspace(args: argparse.Namespace) -> Path:
     """Authoring: ensure the local workspace project exists (source of truth)."""
     from anolis_workbench.core import paths as paths_module
@@ -477,19 +447,17 @@ def _run_install(args: argparse.Namespace) -> int:
             prefix=args.install_prefix,
             no_start=args.no_start,
             dry_run=args.dry_run,
+            with_telemetry_export=_wants_telemetry_export(args),
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
 
-    # Observability stack (if requested and not dry-run)
+    # Observability stack (if requested and not dry-run). Still workbench-owned
+    # until install.sh gains --with-observability (anolishq/anolis#162).
     if _wants_observability(args) and not args.dry_run:
         _run_observability_step(args, result.runtime_version, token)
-
-    # Telemetry export (if requested and not dry-run)
-    if _wants_telemetry_export(args) and not args.dry_run:
-        _run_telemetry_export_step(args, project_dir.parent)
 
     # Workbench systemd service (appliance mode, if requested and not dry-run)
     if getattr(args, "workbench_service", False) and not args.dry_run:
@@ -659,6 +627,7 @@ def _run_remote(args: argparse.Namespace) -> int:
             workspace_dir=project_dir,
             prefix=args.install_prefix,
             no_start=args.no_start,
+            with_telemetry_export=_wants_telemetry_export(args),
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
@@ -666,12 +635,9 @@ def _run_remote(args: argparse.Namespace) -> int:
         return 1
 
     # Observability stack (if requested) — runs on THIS machine (docker stack).
+    # Still workbench-owned until install.sh gains --with-observability (#162).
     if _wants_observability(args):
         _run_observability_step(args, result.runtime_version, token)
-
-    # Telemetry export (if requested) — local config render; target folding is anolishq/anolis#137.
-    if _wants_telemetry_export(args):
-        _run_telemetry_export_step(args, project_dir.parent)
 
     # Print summary
     print()

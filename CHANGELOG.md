@@ -13,6 +13,16 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- Telemetry-export provisioning is now delegated to `install.sh`
+  (`--with-telemetry-export`) instead of a workbench-side step. Deploys request
+  it via the flag/profile and install.sh provisions the service **on the target**
+  (venv + config + inert-until-secrets unit) — fixing the previous behavior where
+  the interim step ran on the operator's host and never configured the deployed
+  service. Removed `core/telemetry_config.py`. Observability provisioning is
+  unchanged (still workbench-side until anolishq/anolis#162).
+
 ### CI
 
 - Add CI OK aggregator gate: removed `paths-ignore`, added `dorny/paths-filter`

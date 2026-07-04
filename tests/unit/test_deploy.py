@@ -272,6 +272,33 @@ def test_deploy_local_passes_custom_prefix(tmp_path: pathlib.Path, monkeypatch: 
     assert cmd[cmd.index("--prefix") + 1] == "/srv/anolis"
 
 
+def test_deploy_local_threads_with_telemetry_export(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Telemetry-export provisioning is delegated to install.sh (anolishq/anolis#137);
+    # workbench requests it via the flag, and only when asked.
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_local(
+        system=_make_system(),
+        project_name="deploy-fixture",
+        workspace_dir=_make_workspace(tmp_path),
+        with_telemetry_export=True,
+        executor=executor,
+    )
+    assert "--with-telemetry-export" in executor.commands[0]["cmd"]
+
+
+def test_deploy_local_omits_telemetry_flag_by_default(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_local(
+        system=_make_system(),
+        project_name="deploy-fixture",
+        workspace_dir=_make_workspace(tmp_path),
+        executor=executor,
+    )
+    assert "--with-telemetry-export" not in executor.commands[0]["cmd"]
+
+
 def test_deploy_local_raises_on_install_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor(returncode=1)
