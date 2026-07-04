@@ -80,6 +80,15 @@ testpaths = [
     "tests",
 ]
 addopts = "--strict-markers -ra"
+# Deprecations are errors: the suite is deprecation-clean (audited #129), so keep
+# it that way — a new DeprecationWarning (first-party or from a dependency bump)
+# fails CI at PR time instead of accumulating silently. If a third-party
+# deprecation is genuinely unavoidable, add a targeted escape hatch below, e.g.
+# "ignore::DeprecationWarning:some_dependency".
+filterwarnings = [
+    "error::DeprecationWarning",
+    "error::PendingDeprecationWarning",
+]
 markers = [
     "integration: integration tests that run against runtime/provider processes",
     "slow: long-running tests not required in default CI lane",
