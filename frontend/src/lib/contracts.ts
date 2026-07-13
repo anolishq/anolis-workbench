@@ -141,7 +141,6 @@ export interface SimProviderConfig extends UnknownRecord {
 export interface BreadProviderConfig extends UnknownRecord {
   kind: "bread";
   provider_name?: string;
-  require_live_session?: boolean;
   query_delay_us?: number;
   timeout_ms?: number;
   retry_count?: number;

@@ -221,9 +221,11 @@ def _render_bread(pdata: dict, path_data: dict) -> dict:
     if "provider_name" in pdata:
         doc["provider"] = {"name": pdata["provider_name"]}
 
+    # No require_live_session: bread 0.3.0 removed the field and rejects it as an
+    # unknown key. The intent now rides on bus_path — a real path opens a live
+    # CRUMBS session and startup throws if the bus cannot be opened, while a
+    # mock:// path seeds an inventory instead.
     hardware: dict = {"bus_path": path_data.get("bus_path", "")}
-    if "require_live_session" in pdata:
-        hardware["require_live_session"] = pdata["require_live_session"]
     if "query_delay_us" in pdata:
         hardware["query_delay_us"] = pdata["query_delay_us"]
     if "timeout_ms" in pdata:

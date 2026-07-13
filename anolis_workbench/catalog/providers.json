@@ -48,7 +48,6 @@
       "check_config_flag": "--check-config",
       "topology_fields": [
         { "key": "provider_name",       "type": "string", "required": false, "default": "bread0" },
-        { "key": "require_live_session","type": "bool",   "default": false },
         { "key": "query_delay_us",      "type": "int",    "default": 10000 },
         { "key": "timeout_ms",          "type": "int",    "default": 100 },
         { "key": "retry_count",         "type": "int",    "default": 2 }
