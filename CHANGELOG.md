@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- Operate can target a remote, auth-enabled device: `ANOLIS_WORKBENCH_RUNTIME_URL`
+  points the `/v0/*` proxy at an already-provisioned runtime instead of the
+  locally-launched one, and `ANOLIS_WORKBENCH_RUNTIME_TOKEN` attaches the
+  `Authorization: Bearer` header auth-by-default installs require. Interim
+  surface until the device-registry UX (anolishq/anolis#164); previously a
+  laptop-hosted workbench always received 401 from a provisioned device.
+
 ### Changed
 
 - Telemetry-export provisioning is now delegated to `install.sh`

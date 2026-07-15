@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import urllib.error
 import urllib.request
 
@@ -21,6 +22,15 @@ _HOP_BY_HOP_HEADERS = {
 
 
 def _runtime_base() -> tuple[str | None, str | None, int]:
+    # Remote override: point the operate proxy at an already-provisioned
+    # device instead of the locally-launched runtime. Pairs with
+    # ANOLIS_WORKBENCH_RUNTIME_TOKEN for devices that require a Bearer token
+    # (auth-by-default installs bind 0.0.0.0 with auth enabled). Interim
+    # surface until the device-registry UX (anolishq/anolis#164).
+    override = os.environ.get("ANOLIS_WORKBENCH_RUNTIME_URL", "").strip()
+    if override:
+        return override.rstrip("/"), None, 200
+
     status = launcher_module.get_status()
     active_project = status.get("active_project")
     if not status.get("running") or not isinstance(active_project, str) or active_project == "":
@@ -60,6 +70,13 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
         value = handler.headers.get(key)
         if value:
             headers[key] = value
+
+    # Bearer auth for remote runtimes; never logged. Loopback runtimes are
+    # auth-exempt by default, so this is a no-op for the local-launch path
+    # unless the operator sets a token explicitly.
+    token = os.environ.get("ANOLIS_WORKBENCH_RUNTIME_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     req = urllib.request.Request(target_url, data=body, headers=headers, method=method)
     wants_stream = raw_path.split("?")[0] == "/v0/events"
