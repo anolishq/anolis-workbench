@@ -13,6 +13,22 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-23
+
+### Changed
+
+- **BREAKING:** deployment is delegated entirely to `install.sh`; the workbench's
+  second, in-process deploy engine was removed (#170). Rollback likewise
+  delegates to `install.sh --rollback` (#171). Provisioning is now a single
+  engine (`deploy.py` → `install.sh --project`).
+- Telemetry-export provisioning is now delegated to `install.sh`
+  (`--with-telemetry-export`) instead of a workbench-side step. Deploys request
+  it via the flag/profile and install.sh provisions the service **on the target**
+  (venv + config + inert-until-secrets unit) — fixing the previous behavior where
+  the interim step ran on the operator's host and never configured the deployed
+  service. Removed `core/telemetry_config.py`. Observability provisioning is
+  unchanged (still workbench-side until anolishq/anolis#162).
+
 ### Added
 
 - Operate can target a remote, auth-enabled device: `ANOLIS_WORKBENCH_RUNTIME_URL`
@@ -22,15 +38,16 @@ Historical note:
   surface until the device-registry UX (anolishq/anolis#164); previously a
   laptop-hosted workbench always received 401 from a provisioned device.
 
-### Changed
+### Fixed
 
-- Telemetry-export provisioning is now delegated to `install.sh`
-  (`--with-telemetry-export`) instead of a workbench-side step. Deploys request
-  it via the flag/profile and install.sh provisions the service **on the target**
-  (venv + config + inert-until-secrets unit) — fixing the previous behavior where
-  the interim step ran on the operator's host and never configured the deployed
-  service. Removed `core/telemetry_config.py`. Observability provisioning is
-  unchanged (still workbench-side until anolishq/anolis#162).
+- Operate mode selector now offers the runtime-accepted modes
+  (`MANUAL`/`AUTO`/`IDLE`/`FAULT`) instead of stale execution-state labels
+  (`ACTIVE`/`SAFE`/…) that the runtime rejected with HTTP 400, so operators can
+  actually climb the IDLE→MANUAL→AUTO ladder from the UI (#145).
+- Operate recognizes an externally-running runtime — e.g. one installed by
+  `install.sh` as a systemd service — by probing the active project's loopback
+  runtime port, so a machine that is set up and running is operable even though
+  the workbench did not launch it (#224, #233).
 
 ### CI
 
