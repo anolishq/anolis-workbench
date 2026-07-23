@@ -7,6 +7,13 @@
       "matchManagers": ["cargo"],
       "groupName": "tauri",
       "matchPackageNames": ["/^tauri/"]
+    },
+    {
+      "description": "Hold the TypeScript major: v7 is the native (Go) compiler, and the type-check toolchain (@typescript-eslint, svelte-check) still peers at typescript <6.1.0, so the major cannot install/type-check yet. Minor/patch keep flowing. Re-enable once that toolchain declares TS7 support. See anolishq/anolis-workbench#197.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
