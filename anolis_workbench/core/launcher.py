@@ -209,6 +209,73 @@ def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
     return None
 
 
+def _runtime_alive(bind: str, port: int, timeout_s: float = 0.5) -> bool:
+    """True if an anolis-runtime answers /v0/runtime/status on bind:port."""
+    import json as _json
+    import urllib.request
+
+    url = f"http://{bind}:{port}/v0/runtime/status"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:  # noqa: S310 — caller restricts bind to loopback
+            if resp.status != 200:
+                return False
+            return "version" in _json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return False
+
+
+def _discover_external_runtime() -> dict | None:
+    """Detect a runtime the workbench did not launch (e.g. one installed as a
+    systemd service by install.sh) by probing each known project's configured
+    runtime HTTP port.
+
+    This keeps the install and operate paths coherent: a machine that has been
+    set up and is running is operable from the workbench regardless of who
+    started its runtime. Such a runtime is reported managed=False/external=True,
+    so stop()/restart() (which only act on workbench-launched processes) leave
+    it untouched — it is owned by systemd, not the workbench.
+    """
+    systems_dir = paths_module.SYSTEMS_ROOT
+    if not systems_dir.exists():
+        return None
+
+    from anolis_workbench.core import projects as projects_module
+
+    for project_dir in sorted(systems_dir.iterdir()):
+        if not project_dir.is_dir() or not (project_dir / "system.json").exists():
+            continue
+        try:
+            system = projects_module.get_project(project_dir.name)
+            topology = system.get("topology")
+            rt = topology.get("runtime") if isinstance(topology, dict) else None
+        except (FileNotFoundError, ValueError, OSError, AttributeError, TypeError):
+            # AttributeError/TypeError guard a system.json that parsed to a
+            # non-object (get_project is annotated -> dict but json.loads is not).
+            continue
+        if not isinstance(rt, dict):
+            continue
+        bind = rt.get("http_bind") or "127.0.0.1"
+        if bind in ("0.0.0.0", ""):
+            bind = "127.0.0.1"
+        # Only auto-detect a loopback-bound runtime. A non-loopback bind is a
+        # remote/LAN target, reached explicitly via ANOLIS_WORKBENCH_RUNTIME_URL
+        # (operate.py) — not something to probe automatically on every status poll.
+        if bind not in ("127.0.0.1", "localhost", "::1"):
+            continue
+        port = rt.get("http_port")
+        if not isinstance(port, int):
+            continue
+        if _runtime_alive(bind, port):
+            return {
+                "running": True,
+                "project": project_dir.name,
+                "pid": None,
+                "managed": False,
+                "external": True,
+            }
+    return None
+
+
 def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
     with _state_lock:
         proc = _state["process"]
@@ -223,6 +290,10 @@ def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
     discovered = _discover_running_runtime(clean_stale=clean_stale)
     if discovered is not None:
         return discovered
+
+    external = _discover_external_runtime()
+    if external is not None:
+        return external
 
     return {"running": False, "project": None, "pid": None, "managed": False}
 
@@ -562,6 +633,11 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
         raise RuntimeError(f"Cannot restart '{name}' because no project is running.")
+    if current.get("external"):
+        raise RuntimeError(
+            f"'{name}' is running as an external service (e.g. systemd) that the workbench "
+            "does not manage — restart it on the device (e.g. systemctl restart anolis-runtime)."
+        )
     if current["project"] != name:
         raise RuntimeError(
             f"Cannot restart '{name}' while '{current['project']}' is running. Stop '{current['project']}' first."
