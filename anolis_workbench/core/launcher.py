@@ -246,12 +246,12 @@ def _discover_external_runtime() -> dict | None:
             continue
         try:
             system = projects_module.get_project(project_dir.name)
-        except (FileNotFoundError, ValueError, OSError):
+            topology = system.get("topology")
+            rt = topology.get("runtime") if isinstance(topology, dict) else None
+        except (FileNotFoundError, ValueError, OSError, AttributeError, TypeError):
+            # AttributeError/TypeError guard a system.json that parsed to a
+            # non-object (get_project is annotated -> dict but json.loads is not).
             continue
-        if not isinstance(system, dict):
-            continue
-        topology = system.get("topology")
-        rt = topology.get("runtime") if isinstance(topology, dict) else None
         if not isinstance(rt, dict):
             continue
         bind = rt.get("http_bind") or "127.0.0.1"
