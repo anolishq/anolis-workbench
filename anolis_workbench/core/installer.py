@@ -29,25 +29,6 @@ class InstallerError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# Profile definitions
-# ---------------------------------------------------------------------------
-
-PROFILES: dict[str, dict[str, bool]] = {
-    "manual": {"observability": False, "telemetry_export": False},
-    "telemetry": {"observability": True, "telemetry_export": True},
-    "automation": {"observability": False, "telemetry_export": False},
-    "full": {"observability": True, "telemetry_export": True},
-}
-
-VALID_PROFILES = list(PROFILES.keys())
-
-
-def profile_includes(profile: str, feature: str) -> bool:
-    """Check if a profile includes a given feature."""
-    return PROFILES.get(profile, {}).get(feature, False)
-
-
-# ---------------------------------------------------------------------------
 # Project provisioning
 # ---------------------------------------------------------------------------
 

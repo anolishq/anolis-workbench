@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from anolis_workbench.core import deploy, installer, releases
-from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
@@ -64,12 +63,6 @@ def _parse_args() -> argparse.Namespace:
         "--no-start",
         action="store_true",
         help="Install but do not start the runtime service.",
-    )
-    install_parser.add_argument(
-        "--profile",
-        choices=VALID_PROFILES,
-        default="manual",
-        help="Provisioning profile: manual, telemetry, automation, full (default: manual).",
     )
     install_parser.add_argument(
         "--with-observability",
@@ -185,12 +178,6 @@ def _parse_args() -> argparse.Namespace:
         "--no-start",
         action="store_true",
         help="Install but do not start the runtime service on the target.",
-    )
-    remote_parser.add_argument(
-        "--profile",
-        choices=VALID_PROFILES,
-        default="manual",
-        help="Provisioning profile: manual, telemetry, automation, full (default: manual).",
     )
     remote_parser.add_argument(
         "--with-observability",
@@ -330,13 +317,13 @@ def _validate_system_template(args: argparse.Namespace) -> bool:
 
 
 def _wants_observability(args: argparse.Namespace) -> bool:
-    """Check if observability should be deployed (profile or explicit flag)."""
-    return args.with_observability or profile_includes(args.profile, "observability")
+    """Check if observability should be deployed (explicit --with-observability flag)."""
+    return bool(args.with_observability)
 
 
 def _wants_telemetry_export(args: argparse.Namespace) -> bool:
-    """Check if telemetry export should be installed (profile or explicit flag)."""
-    return args.with_telemetry_export or profile_includes(args.profile, "telemetry_export")
+    """Check if telemetry export should be installed (explicit --with-telemetry-export flag)."""
+    return bool(args.with_telemetry_export)
 
 
 def _run_observability_step(
@@ -424,8 +411,6 @@ def _run_install(args: argparse.Namespace) -> int:
     else:
         print(f"  Template: {args.template}")
     print(f"  Prefix:   {args.install_prefix}")
-    if args.profile != "manual":
-        print(f"  Profile:  {args.profile}")
     if args.dry_run:
         print("  Mode:     DRY RUN")
     print()

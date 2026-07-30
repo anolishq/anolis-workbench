@@ -13,6 +13,16 @@ Historical note:
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING:** the collapsed `--profile {manual,telemetry,automation,full}`
+  provisioning taxonomy (#235). It reduced to two behaviors
+  (`manual`≡`automation`, `telemetry`≡`full`) and only gated auxiliary services —
+  use the orthogonal `--with-observability` / `--with-telemetry-export` flags
+  (and `--variant` for the runtime variant, anolishq/anolis#225). The vestigial,
+  never-consumed `FleetTarget.profile` field is removed too; a `profile:` key in
+  `fleet.yaml` is now ignored.
+
 ## [0.12.0] - 2026-07-23
 
 ### Changed
