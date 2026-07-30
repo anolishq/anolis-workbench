@@ -5,17 +5,36 @@ info:
   description: |
     Normative contract for the currently shipped `/v0` runtime HTTP surface.
     This contract is compatibility-first and reflects implementation behavior.
+
+    Security: every endpoint is guarded by an optional Bearer token
+    (`bearerAuth`). Auth is opt-in via `http.auth_enabled`; the token comes
+    from `http.auth_token` or, when that is empty, the `ANOLIS_API_TOKEN`
+    environment variable (the env var supplies the token only — it does not
+    enable auth). Loopback clients are exempt by default
+    (`http.auth_exempt_loopback: true`). When enabled, unauthorized requests
+    receive `401` with `WWW-Authenticate: Bearer`. TLS is available via
+    `http.tls_cert_path` + `http.tls_key_path` (the server then speaks
+    https); the runtime refuses non-loopback binds without auth unless
+    `http.allow_insecure_bind` is set. Operator guidance: docs/security.md.
 servers:
   - url: http://127.0.0.1:8080
     description: Default local runtime bind
 tags:
   - name: runtime
   - name: providers
+  - name: telemetry
+  - name: runs
   - name: devices
   - name: state
   - name: control
   - name: automation
   - name: events
+# Auth is deploy-time optional: the empty requirement ({}) documents that
+# anonymous access is permitted when auth is disabled or the client is
+# loopback-exempt; bearerAuth applies whenever http.auth_enabled is set.
+security:
+  - {}
+  - bearerAuth: []
 paths:
   /v0/runtime/status:
     get:
@@ -23,6 +42,8 @@ paths:
       operationId: getRuntimeStatus
       summary: Get runtime health and provider availability summary
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Runtime status
           content:
@@ -35,6 +56,8 @@ paths:
       operationId: getProvidersHealth
       summary: Get provider health, supervision, and per-device freshness
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Provider health summary
           content:
@@ -47,6 +70,8 @@ paths:
       operationId: getTelemetryStatus
       summary: Get telemetry (InfluxDB sink) health and throughput counters
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Telemetry sink health
           content:
@@ -62,6 +87,8 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200 } }
         - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: A page of runs
           content:
@@ -79,6 +106,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunOpenRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The opened run
           content:
@@ -99,6 +128,8 @@ paths:
       parameters:
         - { name: run_id, in: path, required: true, schema: { type: string } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The run
           content:
@@ -125,6 +156,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunCloseRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The closed run
           content:
@@ -153,6 +186,8 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, default: 200, maximum: 1000 } }
         - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: A page of run events
           content:
@@ -183,6 +218,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RunMarkerRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: The persisted event
           content:
@@ -213,6 +250,8 @@ paths:
       operationId: getDevices
       summary: List discovered devices
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device inventory
           content:
@@ -228,6 +267,8 @@ paths:
         - $ref: '#/components/parameters/provider_id'
         - $ref: '#/components/parameters/device_id'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device capabilities
           content:
@@ -244,6 +285,8 @@ paths:
       operationId: getAllState
       summary: Get cached state for all devices with available state
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Aggregated device state
           content:
@@ -269,6 +312,8 @@ paths:
             items:
               type: string
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Device state snapshot
           content:
@@ -293,6 +338,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CallRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Call accepted/executed
           content:
@@ -317,6 +364,8 @@ paths:
       operationId: getMode
       summary: Get current runtime mode
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Current mode
           content:
@@ -336,6 +385,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetModeRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Mode set
           content:
@@ -348,12 +399,53 @@ paths:
           $ref: '#/components/responses/FailedPrecondition'
         "503":
           $ref: '#/components/responses/Unavailable'
+  /v0/estop:
+    post:
+      tags: [system]
+      operationId: postEstop
+      summary: Engage the software safe-state (latching e-stop)
+      description: >-
+        Run the declared safe-state ladder and latch actuation. While latched,
+        actuating calls to POST /v0/call are refused until POST /v0/estop/clear.
+        A software stop, not a substitute for the hardware backplane cut.
+      responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "200":
+          description: Safe-state engaged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstopResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
+  /v0/estop/clear:
+    post:
+      tags: [system]
+      operationId: postEstopClear
+      summary: Release the e-stop latch
+      description: >-
+        Clear the actuation latch. Does not change the runtime mode; on an
+        automation machine the operator still recovers FAULT separately.
+      responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "200":
+          description: Latch released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstopClearResponse'
+        "503":
+          $ref: '#/components/responses/Unavailable'
   /v0/parameters:
     get:
       tags: [automation]
       operationId: getParameters
       summary: Get runtime automation parameters
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Parameter inventory
           content:
@@ -373,6 +465,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetParameterRequest'
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Parameter updated
           content:
@@ -391,6 +485,8 @@ paths:
       operationId: getAutomationTree
       summary: Get loaded behavior tree XML
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Behavior tree content
           content:
@@ -409,6 +505,8 @@ paths:
       operationId: getAutomationStatus
       summary: Get automation runtime status
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: Automation status
           content:
@@ -450,6 +548,8 @@ paths:
           schema:
             type: string
       responses:
+        "401":
+          $ref: '#/components/responses/Unauthorized'
         "200":
           description: SSE stream
           content:
@@ -459,6 +559,17 @@ paths:
         "503":
           $ref: '#/components/responses/Unavailable'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Static token compared in constant time (`Authorization: Bearer <token>`).
+        Configured via `http.auth_token` or the `ANOLIS_API_TOKEN` environment
+        variable; enforced for every endpoint by a global pre-routing check
+        when `http.auth_enabled` is true. Loopback clients (textual
+        `127.*`, `::1`, `::ffff:127.0.0.1`) are exempt unless
+        `http.auth_exempt_loopback` is false.
   parameters:
     provider_id:
       name: provider_id
@@ -473,6 +584,27 @@ components:
       schema:
         type: string
   responses:
+    Unauthorized:
+      description: |
+        Missing or invalid Bearer token while auth is enabled (and the client
+        is not loopback-exempt). Carries `WWW-Authenticate: Bearer`. The body
+        is a flat error string, not the Status-shaped ErrorResponse — the
+        auth gate runs before routing.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error]
+            properties:
+              error:
+                type: string
+                const: unauthorized
     BadRequest:
       description: Invalid argument or malformed payload
       content:
@@ -544,6 +676,9 @@ components:
     RuntimeStatusResponse:
       type: object
       additionalProperties: false
+      # estop is present whenever the safe-state controller is wired (always, in
+      # the shipped runtime), but kept optional so an embedding without it stays
+      # contract-valid.
       required: [status, version, mode, uptime_seconds, polling_interval_ms, providers, device_count]
       properties:
         status:
@@ -563,6 +698,73 @@ components:
             $ref: '#/components/schemas/RuntimeStatusProvider'
         device_count:
           type: integer
+        estop:
+          $ref: '#/components/schemas/EstopStatus'
+    SoftwareSafeState:
+      type: string
+      description: >-
+        Which rung of the safe-state ladder a POST /v0/estop would run now.
+        "none" means no software safe-state is declared (hardware cut only).
+      enum: [none, hooks, setpoints, zero]
+    EstopStatus:
+      type: object
+      additionalProperties: false
+      required: [latched, software_safe_state, latched_at_epoch_ms, uncovered_actuating_functions]
+      properties:
+        latched:
+          type: boolean
+          description: True while actuation is latched by a software e-stop.
+        software_safe_state:
+          $ref: '#/components/schemas/SoftwareSafeState'
+        latched_at_epoch_ms:
+          type: [integer, "null"]
+          description: Epoch milliseconds when the latch engaged, or null if not latched.
+        uncovered_actuating_functions:
+          type: integer
+          description: Count of actuating outputs with no declared safe setpoint.
+    EstopAction:
+      type: object
+      additionalProperties: false
+      required: [device_handle, function, success]
+      properties:
+        device_handle:
+          type: string
+        function:
+          type: string
+        success:
+          type: boolean
+        error:
+          type: string
+    EstopResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latched, software_safe_state, actions]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        latched:
+          type: boolean
+        software_safe_state:
+          $ref: '#/components/schemas/SoftwareSafeState'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EstopAction'
+        warning:
+          type: string
+          description: Present when software_safe_state is "none".
+        fault_engaged:
+          type: boolean
+          description: Present on automation machines; whether the FAULT transition succeeded.
+    EstopClearResponse:
+      type: object
+      additionalProperties: false
+      required: [status, latched]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+        latched:
+          type: boolean
     TelemetryBackend:
       type: object
       additionalProperties: false
@@ -654,7 +856,7 @@ components:
     FunctionSpec:
       type: object
       additionalProperties: false
-      required: [function_id, name, label, args]
+      required: [function_id, name, label, args, category, actuating]
       properties:
         function_id:
           type: integer
@@ -666,6 +868,20 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/ArgSpec'
+        category:
+          type: string
+          description: >-
+            Actuation classification from the provider's FunctionPolicy.
+            UNSPECIFIED means the provider did not tag the function (or tagged
+            it with a category this runtime does not recognize); either way it
+            fails closed to actuating.
+          enum: [UNSPECIFIED, READ, CONFIG, ACTUATE]
+        actuating:
+          type: boolean
+          description: >-
+            Fail-closed actuation flag: true unless the function explicitly
+            declares category READ. UNSPECIFIED and CONFIG both fail closed to
+            true. Safety gates use this to enumerate actuating outputs.
     SignalSpec:
       type: object
       additionalProperties: false
@@ -1145,20 +1361,79 @@ components:
           oneOf:
             - type: integer
             - type: "null"
+    ReportedDeviceHealth:
+      description: >-
+        Provider-reported ADPP DeviceHealth for one device: the provider's own
+        view, carrying its diagnostic metrics and the timestamp of the last
+        successful communication with the device.
+      type: object
+      additionalProperties: false
+      required: [state, message, metrics, last_seen_epoch_ms]
+      properties:
+        state:
+          type: string
+          enum: [STATE_UNSPECIFIED, STATE_OK, STATE_STALE, STATE_UNREACHABLE, STATE_FAULT]
+        message:
+          type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: string
+        last_seen_epoch_ms:
+          oneOf:
+            - type: integer
+            - type: "null"
+    ReportedProviderHealth:
+      description: Provider-reported ADPP ProviderHealth (the provider's own state and metrics).
+      type: object
+      additionalProperties: false
+      required: [state, message, metrics]
+      properties:
+        state:
+          type: string
+          enum: [STATE_UNSPECIFIED, STATE_OK, STATE_DEGRADED, STATE_FAULT]
+        message:
+          type: string
+        metrics:
+          type: object
+          additionalProperties:
+            type: string
     ProviderDeviceHealth:
       type: object
       additionalProperties: false
-      required: [device_id, health, last_poll_ms, staleness_ms]
+      required: [device_id, health, last_poll_ms, staleness_ms, registered, stale_signal_count, fault_signal_count, reported]
       properties:
         device_id:
           type: string
         health:
           type: string
-          enum: [OK, WARNING, STALE, UNAVAILABLE, UNKNOWN]
+          enum: [OK, WARNING, STALE, FAULT, UNAVAILABLE, UNKNOWN]
         last_poll_ms:
           type: integer
         staleness_ms:
           type: integer
+        registered:
+          description: >-
+            False for devices the provider reports (e.g. expected devices that
+            failed their startup probe) but the runtime registry does not carry.
+          type: boolean
+        stale_signal_count:
+          description: >-
+            Cached signals of degraded quality (STALE/UNKNOWN) or older than
+            their effective stale_after_ms bound. A non-zero count with a fresh
+            poll is why a device reads STALE (#220).
+          type: integer
+          minimum: 0
+        fault_signal_count:
+          description: >-
+            Cached signals reporting QUALITY_FAULT. A non-zero count drives the
+            device health to FAULT (#220).
+          type: integer
+          minimum: 0
+        reported:
+          oneOf:
+            - $ref: '#/components/schemas/ReportedDeviceHealth'
+            - type: "null"
     ProviderHealth:
       type: object
       additionalProperties: false
@@ -1169,6 +1444,9 @@ components:
         - last_seen_ago_ms
         - uptime_seconds
         - device_count
+        - degraded
+        - failed_device_count
+        - reported
         - supervision
         - devices
       properties:
@@ -1188,6 +1466,19 @@ components:
           type: integer
         device_count:
           type: integer
+        degraded:
+          description: >-
+            True when the provider is available but its own health report shows
+            trouble - an unreachable/faulted device or a self-reported
+            DEGRADED/FAULT state.
+          type: boolean
+        failed_device_count:
+          description: Number of provider-reported devices in UNREACHABLE or FAULT state.
+          type: integer
+        reported:
+          oneOf:
+            - $ref: '#/components/schemas/ReportedProviderHealth'
+            - type: "null"
         supervision:
           $ref: '#/components/schemas/ProviderSupervision'
         devices:
