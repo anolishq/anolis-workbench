@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-30
+
 ### Added
 
 - Software E-stop button in Operate (#236): a prominent one-click control that
