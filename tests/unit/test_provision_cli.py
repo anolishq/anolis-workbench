@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import sys
+
+import pytest
 
 from anolis_workbench.cli.provision_cli import (
+    _parse_args,
     _validate_system_template,
     _wants_observability,
     _wants_telemetry_export,
 )
-from anolis_workbench.core.installer import VALID_PROFILES, profile_includes
 
 
 class TestValidateSystemTemplate:
@@ -30,50 +33,44 @@ class TestValidateSystemTemplate:
         assert _validate_system_template(args) is True
 
 
-class TestProfiles:
-    def test_valid_profiles_list(self) -> None:
-        assert "manual" in VALID_PROFILES
-        assert "telemetry" in VALID_PROFILES
-        assert "automation" in VALID_PROFILES
-        assert "full" in VALID_PROFILES
-
-    def test_manual_profile_has_no_extras(self) -> None:
-        assert not profile_includes("manual", "observability")
-        assert not profile_includes("manual", "telemetry_export")
-
-    def test_telemetry_profile_includes_both(self) -> None:
-        assert profile_includes("telemetry", "observability")
-        assert profile_includes("telemetry", "telemetry_export")
-
-    def test_full_profile_includes_both(self) -> None:
-        assert profile_includes("full", "observability")
-        assert profile_includes("full", "telemetry_export")
-
-    def test_automation_profile_no_telemetry(self) -> None:
-        assert not profile_includes("automation", "observability")
-        assert not profile_includes("automation", "telemetry_export")
-
-    def test_unknown_profile_returns_false(self) -> None:
-        assert not profile_includes("nonexistent", "observability")
-
-
 class TestWantsHelpers:
-    def test_wants_observability_from_profile(self) -> None:
-        args = argparse.Namespace(profile="telemetry", with_observability=False, with_telemetry_export=False)
+    # Namespaces intentionally omit any `profile` attr — its presence would mean
+    # the helper still reads the removed taxonomy (would raise AttributeError).
+    def test_wants_observability_when_flag_set(self) -> None:
+        args = argparse.Namespace(with_observability=True, with_telemetry_export=False)
         assert _wants_observability(args) is True
 
-    def test_wants_observability_from_flag(self) -> None:
-        args = argparse.Namespace(profile="manual", with_observability=True, with_telemetry_export=False)
-        assert _wants_observability(args) is True
-
-    def test_no_observability_manual(self) -> None:
-        args = argparse.Namespace(profile="manual", with_observability=False, with_telemetry_export=False)
+    def test_no_observability_by_default(self) -> None:
+        args = argparse.Namespace(with_observability=False, with_telemetry_export=False)
         assert _wants_observability(args) is False
 
-    def test_wants_telemetry_from_profile(self) -> None:
-        args = argparse.Namespace(profile="full", with_observability=False, with_telemetry_export=False)
+    def test_wants_telemetry_export_when_flag_set(self) -> None:
+        args = argparse.Namespace(with_observability=False, with_telemetry_export=True)
         assert _wants_telemetry_export(args) is True
 
-    def test_wants_telemetry_from_flag(self) -> None:
-        args = argparse.Namespace(profile="manual", with_observability=False, with_telemetry_export=True)
-        assert _wants_telemetry_export(args) is True
+    def test_no_telemetry_export_by_default(self) -> None:
+        args = argparse.Namespace(with_observability=False, with_telemetry_export=False)
+        assert _wants_telemetry_export(args) is False
+
+    def test_flags_are_independent(self) -> None:
+        args = argparse.Namespace(with_observability=True, with_telemetry_export=False)
+        assert _wants_observability(args) is True
+        assert _wants_telemetry_export(args) is False
+
+
+class TestProfileFlagRemoved:
+    # The collapsed --profile taxonomy was removed (#235); argparse must reject
+    # it with exit code 2 on every subcommand that used to define it. Each argv
+    # supplies that subcommand's required args so --profile is the only error.
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["anolis-provision", "install", "--profile", "manual"],
+            ["anolis-provision", "remote", "--target", "pi@host", "--profile", "manual"],
+        ],
+    )
+    def test_profile_flag_rejected(self, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exc:
+            _parse_args()
+        assert exc.value.code == 2

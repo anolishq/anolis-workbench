@@ -31,7 +31,6 @@ class FleetTarget:
     install_prefix: Path = field(default_factory=lambda: DEFAULT_INSTALL_PREFIX)
     systemd: bool = False
     key: str | None = None
-    profile: str = "manual"
 
 
 @dataclass
@@ -122,7 +121,6 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
                 ),
                 systemd=entry.get("systemd", defaults.get("systemd", False)),
                 key=entry.get("key", defaults.get("key")),
-                profile=entry.get("profile", defaults.get("profile", "manual")),
             )
         )
 
