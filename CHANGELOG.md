@@ -13,6 +13,24 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- Software E-stop button in Operate (#236): a prominent one-click control that
+  engages the runtime's latching software safe-state via `POST /v0/estop`,
+  independent of runtime mode. Bound to the `estop{}` block on
+  `/v0/runtime/status` — shows which safe-state ladder rung a press will run, an
+  honest "latch only — outputs NOT driven" warning when no software safe-state
+  is declared, a latched banner with a two-step Clear, and clear labeling that
+  it is **not** a substitute for the hardware backplane-cut e-stop.
+
+### Changed
+
+- Re-synced the vendored runtime-http OpenAPI contract to anolis v0.1.39 (#262);
+  it was pinned to v0.1.30. Device health now carries `FAULT` plus
+  `stale_signal_count` / `fault_signal_count` (anolishq/anolis#220) and the
+  `registered` / `reported` fields (anolishq/anolis#185), so the workbench no
+  longer rejects a current-runtime `/v0/providers/health` response.
+
 ### Removed
 
 - **BREAKING:** the collapsed `--profile {manual,telemetry,automation,full}`
