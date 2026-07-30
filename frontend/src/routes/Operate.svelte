@@ -6,6 +6,7 @@
     Device,
     DeviceCapabilities,
     DeviceStateValue,
+    EstopStatus,
     FunctionSpec,
     ParameterDefinition,
     ProviderHealth,
@@ -23,6 +24,7 @@
     extractCapabilities,
     extractDeviceStateValues,
     extractDevices,
+    extractEstopStatus,
     extractMode,
     extractParameters,
     extractProvidersHealth,
@@ -31,6 +33,7 @@
     normalizeProviderHealthQuality,
     renderBtOutline,
     RUNTIME_MODES,
+    summarizeEstopResponse,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -68,6 +71,14 @@
   let modeFeedback = $state<string>("");
   let modeFeedbackClass = $state<string>("field-note");
   let setModeRunning = $state<boolean>(false);
+
+  // ── E-stop state (wb#236) ───────────────────────────────────────────────────
+  let estop = $state<EstopStatus | null>(null);
+  let estopRunning = $state<boolean>(false);
+  let clearRunning = $state<boolean>(false);
+  let clearArmed = $state<boolean>(false);
+  let estopFeedback = $state<string>("");
+  let estopFeedbackClass = $state<string>("field-note");
 
   let providerHealth = $state<ProviderHealth[]>([]);
   let devices = $state<Device[]>([]);
@@ -119,6 +130,14 @@
     }
   });
 
+  // The "confirm clear" arm is scoped to a single latched episode: any time the
+  // latch is not engaged (cleared here, by another client, or before a fresh
+  // e-stop), disarm so a new latch can never reappear already in the confirm
+  // state and be released by a single click (wb#236 two-step safety).
+  $effect(() => {
+    if (!estop?.latched) clearArmed = false;
+  });
+
   onDestroy(() => stopOperate());
 
   // ── Core activate/deactivate ──────────────────────────────────────────────
@@ -154,6 +173,10 @@
     streamStatus = { state: "disconnected", attempts: 0 };
     mode = "--";
     modeBadgeClass = "unknown";
+    estop = null;
+    estopFeedback = "";
+    estopFeedbackClass = "field-note";
+    clearArmed = false;
     providerHealth = [];
     eventTrace = [];
     telemetryLoaded = false;
@@ -237,6 +260,9 @@
     }
 
     runtimeStatusData = rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value) : null;
+    // Keep the last-known estop state on a transient status-poll failure so the
+    // safety control never disappears mid-session (wb#236).
+    estop = rtRes.status === "fulfilled" ? extractEstopStatus(rtRes.value) : estop;
     parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
@@ -328,6 +354,63 @@
       modeFeedbackClass = "field-error";
     } finally {
       setModeRunning = false;
+    }
+  }
+
+  // ── Software e-stop (wb#236) — thin trigger over POST /v0/estop ─────────────
+  async function refreshEstopOnly(): Promise<void> {
+    try {
+      const p = await fetchJson<UnknownRecord>("/v0/runtime/status");
+      estop = extractEstopStatus(p);
+    } catch {
+      // Best-effort; the 5s status poll corrects the display shortly.
+    }
+  }
+
+  async function triggerEstop(): Promise<void> {
+    estopRunning = true;
+    estopFeedback = "";
+    estopFeedbackClass = "field-note";
+    try {
+      const res = await fetchJson<UnknownRecord>("/v0/estop", { method: "POST" });
+      const summary = summarizeEstopResponse(res);
+      estopFeedback = summary.text;
+      estopFeedbackClass = summary.ok ? "field-note" : "field-error";
+      await refreshEstopOnly();
+    } catch (err) {
+      estopFeedback = `Failed to engage software stop: ${err instanceof Error ? err.message : String(err)}. If the machine is not safe, use the hardware e-stop now.`;
+      estopFeedbackClass = "field-error";
+    } finally {
+      estopRunning = false;
+    }
+  }
+
+  async function clearEstop(): Promise<void> {
+    // First click arms; second click actually clears (re-enables actuation).
+    if (!clearArmed) {
+      clearArmed = true;
+      return;
+    }
+    clearRunning = true;
+    estopFeedback = "";
+    estopFeedbackClass = "field-note";
+    try {
+      const res = await fetchJson<UnknownRecord>("/v0/estop/clear", { method: "POST" });
+      // Only claim success if the response confirms the latch actually released.
+      if (res && (res as UnknownRecord).latched === true) {
+        estopFeedback = "Clear requested, but the runtime still reports the latch engaged.";
+        estopFeedbackClass = "field-error";
+      } else {
+        estopFeedback = "Latch cleared. Actuation re-enabled.";
+        estopFeedbackClass = "field-note";
+      }
+      await refreshEstopOnly();
+    } catch (err) {
+      estopFeedback = `Failed to clear latch: ${err instanceof Error ? err.message : String(err)}`;
+      estopFeedbackClass = "field-error";
+    } finally {
+      clearRunning = false;
+      clearArmed = false;
     }
   }
 
@@ -661,6 +744,90 @@
       {/if}
     </div>
   {:else}
+    <!-- Software e-stop (wb#236) — thin trigger over POST /v0/estop -->
+    <div class="operate-section operate-estop-section">
+      <h3>Emergency Stop (Software)</h3>
+      {#if !estop}
+        <p class="placeholder">Safe-state status unavailable.</p>
+      {:else if estop.latched}
+        <div class="estop-latched-banner">
+          <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+          <span class="estop-latched-meta">
+            Latched at {formatEpochMs(estop.latched_at_epoch_ms)}. Actuating commands are refused
+            until cleared.
+          </span>
+          <div class="estop-clear-row">
+            {#if clearArmed}
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                disabled={clearRunning}
+                onclick={clearEstop}
+              >
+                {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
+              </button>
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                disabled={clearRunning}
+                onclick={() => (clearArmed = false)}
+              >
+                Cancel
+              </button>
+            {:else}
+              <button type="button" class="btn-secondary btn-sm" onclick={clearEstop}>
+                Clear latch…
+              </button>
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <div class="estop-row">
+          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+            {estopRunning
+              ? "ENGAGING…"
+              : estop.software_safe_state === "none"
+                ? "E-STOP (latch only)"
+                : "E-STOP"}
+          </button>
+          <div class="estop-info">
+            {#if estop.software_safe_state === "hooks"}
+              <span class="field-note"
+                >Runs the declared safe-state hooks, then latches actuation.</span
+              >
+            {:else if estop.software_safe_state === "setpoints"}
+              <span class="field-note"
+                >Drives declared safe setpoints on actuators, then latches actuation.</span
+              >
+            {:else if estop.software_safe_state === "zero"}
+              <span class="field-note"
+                >Zeroes actuators that declare zero-is-safe, then latches actuation.</span
+              >
+            {:else}
+              <span class="field-error">
+                No software safe-state is declared for this machine. Pressing only latches actuation
+                (blocks new commands) — it does NOT drive outputs to a safe state. Use the hardware
+                e-stop to make the machine safe.
+              </span>
+            {/if}
+            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+              <span class="field-error">
+                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint
+                and will not be driven.
+              </span>
+            {/if}
+          </div>
+        </div>
+      {/if}
+      {#if estopFeedback}
+        <div class={estopFeedbackClass}>{estopFeedback}</div>
+      {/if}
+      <div class="estop-disclaimer">
+        Software stop only — not a substitute for the hardware e-stop (backplane power cut). If in
+        doubt, cut power at the backplane.
+      </div>
+    </div>
+
     <!-- Mode control -->
     <div class="operate-section operate-mode-section">
       <h3>Mode</h3>

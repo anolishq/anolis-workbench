@@ -6,12 +6,14 @@ import type {
   Device,
   DeviceCapabilities,
   DeviceStateValue,
+  EstopStatus,
   ExecutionStatus,
   FunctionArgSpec,
   FunctionSpec,
   ParameterDefinition,
   ProviderHealth,
   RuntimeApiStatus,
+  SoftwareSafeState,
   UnknownRecord,
 } from "./contracts";
 
@@ -232,6 +234,98 @@ export function normalizeProviderHealthQuality(
   if (v === "FAULT") return "FAULT";
   if (v === "UNAVAILABLE" || v === "STALE") return "UNAVAILABLE";
   return "UNKNOWN";
+}
+
+/**
+ * Software safe-state ladder rungs, mirroring the `SoftwareSafeState` enum in
+ * the vendored runtime-http OpenAPI contract. A unit test guards against drift.
+ */
+export const SOFTWARE_SAFE_STATES = ["none", "hooks", "setpoints", "zero"] as const;
+
+/**
+ * Normalize a software-safe-state value. An unrecognized value degrades to the
+ * *weakest* claim ("none") — the UI must never advertise a stop rung the runtime
+ * did not declare.
+ */
+export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
+  const v = String(value ?? "")
+    .trim()
+    .toLowerCase() as SoftwareSafeState;
+  return (SOFTWARE_SAFE_STATES as readonly string[]).includes(v) ? v : "none";
+}
+
+/**
+ * Extract the `estop` block from a `GET /v0/runtime/status` body. Returns null
+ * when the block is absent or not an object (the contract keeps it optional) —
+ * the UI must not render a stop control it cannot describe.
+ */
+export function extractEstopStatus(payload: unknown): EstopStatus | null {
+  const root = asObject(payload);
+  if (!root.estop || typeof root.estop !== "object" || Array.isArray(root.estop)) {
+    return null;
+  }
+  const r = asObject(root.estop);
+  return {
+    latched: r.latched === true,
+    software_safe_state: normalizeSoftwareSafeState(r.software_safe_state),
+    // toFinite(null) is 0, but an absent latch time must stay null.
+    latched_at_epoch_ms: r.latched_at_epoch_ms == null ? null : toFinite(r.latched_at_epoch_ms),
+    uncovered_actuating_functions: toFinite(r.uncovered_actuating_functions) ?? 0,
+  };
+}
+
+/**
+ * Format a `POST /v0/estop` response (EstopResponse) into operator-facing text.
+ * `ok` is false whenever the operator should not trust that the machine is safe
+ * (an action failed, the latch did not engage, or a FAULT transition failed).
+ */
+export function summarizeEstopResponse(payload: unknown): { text: string; ok: boolean } {
+  const r = asObject(payload);
+  const latched = r.latched === true;
+  const rung = normalizeSoftwareSafeState(r.software_safe_state);
+  const actions = asArray(r.actions).map(asObject);
+  const failures = actions.filter((a) => a.success === false);
+  const parts: string[] = [];
+  let ok = true;
+
+  // Never assert "engaged"/"latched" when the latch did not actually engage —
+  // this defensive branch exists precisely to be honest about a failed stop.
+  if (latched) {
+    parts.push(`Software stop engaged (${rung}).`);
+  } else {
+    parts.push("WARNING: the latch did not engage — the machine may not be safe.");
+    ok = false;
+  }
+
+  if (actions.length === 0 && rung === "none") {
+    if (latched) {
+      const warning = typeof r.warning === "string" && r.warning.trim() ? r.warning.trim() : "";
+      parts.push(
+        warning ||
+          "Actuation is latched, but no software safe-state is declared — outputs were NOT driven.",
+      );
+    }
+    // When the latch failed, the leading warning already conveys nothing is safe.
+  } else if (failures.length > 0) {
+    ok = false;
+    const detail = failures
+      .map((a) => `${a.device_handle ?? "?"}/${a.function ?? "?"}: ${a.error ?? "failed"}`)
+      .join("; ");
+    parts.push(`${failures.length} of ${actions.length} action(s) FAILED: ${detail}`);
+  } else if (actions.length > 0) {
+    parts.push(`${actions.length} safe-state action(s) succeeded.`);
+  }
+
+  if (r.fault_engaged === false) {
+    parts.push("FAULT transition did not engage.");
+    ok = false;
+  }
+
+  if (!ok) {
+    parts.push("Use the hardware e-stop to make the machine safe.");
+  }
+
+  return { text: parts.join(" "), ok };
 }
 
 export function deriveOperateAvailability(
