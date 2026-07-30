@@ -11,6 +11,7 @@ import {
   extractCapabilities,
   extractDeviceStateValues,
   extractDevices,
+  extractEstopStatus,
   extractMode,
   extractParameters,
   extractProvidersHealth,
@@ -20,8 +21,11 @@ import {
   normalizeFunctionSpecs,
   normalizeParameterType,
   normalizeProviderHealthQuality,
+  normalizeSoftwareSafeState,
   renderBtOutline,
   RUNTIME_MODES,
+  SOFTWARE_SAFE_STATES,
+  summarizeEstopResponse,
 } from "../../src/lib/operate-contracts";
 
 type FakeTreeNode = {
@@ -308,27 +312,23 @@ describe("coerceParameterValue", () => {
   });
 
   it("rejects unsupported types and invalid values", () => {
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "bytes",
-          rawValue: "AAAA",
-          min: undefined,
-          max: undefined,
-          allowedValues: undefined,
-        }),
-    ).toThrow(
-      /unsupported parameter type/i,
-    );
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "double",
-          rawValue: "nanx",
-          min: undefined,
-          max: undefined,
-          allowedValues: undefined,
-        }),
+    expect(() =>
+      coerceParameterValue({
+        type: "bytes",
+        rawValue: "AAAA",
+        min: undefined,
+        max: undefined,
+        allowedValues: undefined,
+      }),
+    ).toThrow(/unsupported parameter type/i);
+    expect(() =>
+      coerceParameterValue({
+        type: "double",
+        rawValue: "nanx",
+        min: undefined,
+        max: undefined,
+        allowedValues: undefined,
+      }),
     ).toThrow(/invalid number/i);
     expect(() => coerceParameterValue({ type: "double", rawValue: "1.0", min: "2.0" })).toThrow(
       /below minimum/i,
@@ -336,51 +336,41 @@ describe("coerceParameterValue", () => {
     expect(() => coerceParameterValue({ type: "double", rawValue: "9.0", max: "5.0" })).toThrow(
       /above maximum/i,
     );
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "int64",
-          rawValue: "not-int",
-          min: undefined,
-          max: undefined,
-          allowedValues: undefined,
-        }),
-    ).toThrow(
-      /invalid integer/i,
-    );
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "int64",
-          rawValue: "9223372036854775808",
-          min: undefined,
-          max: undefined,
-          allowedValues: undefined,
-        }),
-    ).toThrow(
-      /out-of-range int64/i,
-    );
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "int64",
-          rawValue: "9007199254740992",
-          min: undefined,
-          max: undefined,
-          allowedValues: undefined,
-        }),
-    ).toThrow(
-      /browser-safe range/i,
-    );
-    expect(
-      () =>
-        coerceParameterValue({
-          type: "string",
-          rawValue: "UNKNOWN",
-          min: undefined,
-          max: undefined,
-          allowedValues: ["MANUAL", "AUTO"],
-        }),
+    expect(() =>
+      coerceParameterValue({
+        type: "int64",
+        rawValue: "not-int",
+        min: undefined,
+        max: undefined,
+        allowedValues: undefined,
+      }),
+    ).toThrow(/invalid integer/i);
+    expect(() =>
+      coerceParameterValue({
+        type: "int64",
+        rawValue: "9223372036854775808",
+        min: undefined,
+        max: undefined,
+        allowedValues: undefined,
+      }),
+    ).toThrow(/out-of-range int64/i);
+    expect(() =>
+      coerceParameterValue({
+        type: "int64",
+        rawValue: "9007199254740992",
+        min: undefined,
+        max: undefined,
+        allowedValues: undefined,
+      }),
+    ).toThrow(/browser-safe range/i);
+    expect(() =>
+      coerceParameterValue({
+        type: "string",
+        rawValue: "UNKNOWN",
+        min: undefined,
+        max: undefined,
+        allowedValues: ["MANUAL", "AUTO"],
+      }),
     ).toThrow(/must be one of/i);
   });
 });
@@ -429,6 +419,188 @@ describe("RUNTIME_MODES contract", () => {
 
     const contractModes = (match as RegExpMatchArray)[1].split(",").map((m) => m.trim());
     expect([...RUNTIME_MODES]).toEqual(contractModes);
+  });
+});
+
+describe("estop contract", () => {
+  const contractPath = fileURLToPath(
+    new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url),
+  );
+  const contract = readFileSync(contractPath, "utf8");
+
+  it("exposes the POST /v0/estop and /v0/estop/clear paths", () => {
+    expect(contract).toMatch(/^ {2}\/v0\/estop:$/m);
+    expect(contract).toMatch(/^ {2}\/v0\/estop\/clear:$/m);
+  });
+
+  it("matches the SoftwareSafeState enum in the vendored contract", () => {
+    // enum sits below a multi-line description, so skip intervening lines.
+    const match = contract.match(/SoftwareSafeState:\s*\n(?:.*\n)*?\s*enum:\s*\[([^\]]+)\]/);
+    expect(match, "SoftwareSafeState enum not found in contract").not.toBeNull();
+    const contractStates = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
+    expect([...SOFTWARE_SAFE_STATES]).toEqual(contractStates);
+  });
+});
+
+describe("normalizeSoftwareSafeState", () => {
+  it("passes through the declared rungs (case/space-insensitive)", () => {
+    expect(normalizeSoftwareSafeState("zero")).toBe("zero");
+    expect(normalizeSoftwareSafeState(" HOOKS ")).toBe("hooks");
+    expect(normalizeSoftwareSafeState("setpoints")).toBe("setpoints");
+  });
+  it("degrades any unrecognized value to the weakest claim 'none'", () => {
+    expect(normalizeSoftwareSafeState("FULL_STOP")).toBe("none");
+    expect(normalizeSoftwareSafeState(undefined)).toBe("none");
+    expect(normalizeSoftwareSafeState(null)).toBe("none");
+  });
+});
+
+describe("extractEstopStatus", () => {
+  it("normalizes a full estop block", () => {
+    const out = extractEstopStatus({
+      estop: {
+        latched: true,
+        software_safe_state: "setpoints",
+        latched_at_epoch_ms: 1234,
+        uncovered_actuating_functions: 2,
+      },
+    });
+    expect(out).toEqual({
+      latched: true,
+      software_safe_state: "setpoints",
+      latched_at_epoch_ms: 1234,
+      uncovered_actuating_functions: 2,
+    });
+  });
+
+  it("returns null when the block is absent or not an object", () => {
+    expect(extractEstopStatus({})).toBeNull();
+    expect(extractEstopStatus({ estop: "yes" })).toBeNull();
+    expect(extractEstopStatus(null)).toBeNull();
+  });
+
+  it("applies safe defaults and weakest-claim normalization", () => {
+    expect(
+      extractEstopStatus({
+        estop: { latched: "nope", software_safe_state: "FULL_STOP", latched_at_epoch_ms: "x" },
+      }),
+    ).toEqual({
+      latched: false,
+      software_safe_state: "none",
+      latched_at_epoch_ms: null,
+      uncovered_actuating_functions: 0,
+    });
+  });
+
+  it("keeps an explicit null latch time as null (not coerced to 0)", () => {
+    const out = extractEstopStatus({
+      estop: {
+        latched: false,
+        software_safe_state: "hooks",
+        latched_at_epoch_ms: null,
+        uncovered_actuating_functions: 0,
+      },
+    });
+    expect(out?.latched_at_epoch_ms).toBeNull();
+  });
+});
+
+describe("summarizeEstopResponse", () => {
+  it("reports success when all safe-state actions succeed", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "setpoints",
+      actions: [
+        { device_handle: "bread0/pump0", function: "set_flow", success: true },
+        { device_handle: "bread0/pump1", function: "set_flow", success: true },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    expect(out.text).toMatch(/engaged \(setpoints\)/);
+    expect(out.text).toMatch(/2 safe-state action\(s\) succeeded/);
+  });
+
+  it("reports failure and names the failed action", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "setpoints",
+      actions: [
+        { device_handle: "bread0/pump1", function: "set_flow", success: false, error: "timeout" },
+      ],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain("bread0/pump1/set_flow: timeout");
+  });
+
+  it("is honest about the 'none' rung (latch only, no outputs driven)", () => {
+    const withWarning = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "none",
+      actions: [],
+      warning: "no software safe-state declared",
+    });
+    expect(withWarning.ok).toBe(true);
+    expect(withWarning.text).toContain("no software safe-state declared");
+
+    const noWarning = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "none",
+      actions: [],
+    });
+    expect(noWarning.ok).toBe(true);
+    expect(noWarning.text).toMatch(/outputs were NOT driven/);
+  });
+
+  it("flags a non-engaged latch and a failed FAULT transition", () => {
+    const notLatched = summarizeEstopResponse({
+      latched: false,
+      software_safe_state: "hooks",
+      actions: [{ device_handle: "d/x", function: "f", success: true }],
+    });
+    expect(notLatched.ok).toBe(false);
+    expect(notLatched.text).toMatch(/latch did not engage/i);
+
+    const faultFailed = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "hooks",
+      actions: [{ device_handle: "d/x", function: "f", success: true }],
+      fault_engaged: false,
+    });
+    expect(faultFailed.ok).toBe(false);
+    expect(faultFailed.text).toMatch(/FAULT transition did not engage/);
+  });
+
+  it("never claims 'engaged'/'latched' when the latch did not engage", () => {
+    const out = summarizeEstopResponse({
+      latched: false,
+      software_safe_state: "none",
+      actions: [],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.text).not.toMatch(/Software stop engaged/);
+    expect(out.text).not.toMatch(/Actuation is latched/);
+    expect(out.text).toMatch(/latch did not engage/i);
+  });
+
+  it("directs the operator to the hardware e-stop on any failure", () => {
+    for (const payload of [
+      { latched: false, software_safe_state: "hooks", actions: [] },
+      {
+        latched: true,
+        software_safe_state: "setpoints",
+        actions: [{ device_handle: "d/x", function: "f", success: false, error: "e" }],
+      },
+      {
+        latched: true,
+        software_safe_state: "hooks",
+        actions: [{ device_handle: "d/x", function: "f", success: true }],
+        fault_engaged: false,
+      },
+    ]) {
+      const out = summarizeEstopResponse(payload);
+      expect(out.ok).toBe(false);
+      expect(out.text).toMatch(/hardware e-stop/i);
+    }
   });
 });
 

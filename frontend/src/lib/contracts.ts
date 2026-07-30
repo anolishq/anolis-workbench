@@ -210,6 +210,22 @@ export interface RuntimeApiStatus extends UnknownRecord {
   device_count: number;
 }
 
+/**
+ * Which rung of the safe-state ladder a `POST /v0/estop` would run now.
+ * "none" = no software safe-state declared (hardware backplane cut only).
+ * MUST stay in sync with the `SoftwareSafeState` enum in the vendored
+ * runtime-http OpenAPI contract — a unit test guards against drift.
+ */
+export type SoftwareSafeState = "none" | "hooks" | "setpoints" | "zero";
+
+/** The `estop` block on `GET /v0/runtime/status` (anolis#219). */
+export interface EstopStatus extends UnknownRecord {
+  latched: boolean;
+  software_safe_state: SoftwareSafeState;
+  latched_at_epoch_ms: number | null;
+  uncovered_actuating_functions: number;
+}
+
 export interface TypedValue extends UnknownRecord {
   type: "double" | "int64" | "uint64" | "bool" | "string" | "bytes";
   double?: number;
