@@ -63,9 +63,11 @@ def _resolve_frontend_dir() -> pathlib.Path:
 
 
 FRONTEND_DIR = _resolve_frontend_dir()
-CATALOG_PATH = _select_asset_path(
-    _SOURCE_ASSET_ROOT / "catalog" / "providers.json",
-    _PACKAGED_ASSET_ROOT / "catalog" / "providers.json",
+# Vendored provider config-schema envelopes (#270): the set of files here IS
+# the set of provider kinds the workbench can compose.
+PROVIDER_SCHEMAS_DIR = _select_asset_path(
+    _SOURCE_ASSET_ROOT / "schemas" / "providers",
+    _PACKAGED_ASSET_ROOT / "schemas" / "providers",
 )
 SYSTEM_SCHEMA_PATH = _select_asset_path(
     _SOURCE_ASSET_ROOT / "schemas" / "system.schema.json",

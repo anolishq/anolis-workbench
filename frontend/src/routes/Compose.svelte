@@ -2,7 +2,7 @@
   import { ApiResponseError, fetchJson } from "../lib/api";
   import type {
     ApiErrorResponse,
-    ProviderCatalog,
+    ProviderSchemasResponse,
     RuntimeStatus,
     SystemConfig,
   } from "../lib/contracts";
@@ -12,14 +12,14 @@
   let {
     projectName,
     system,
-    catalog,
+    providerSchemas,
     runtimeStatus,
     onDirty,
     onSaved,
   }: {
     projectName: string | null;
     system: SystemConfig | null;
-    catalog: ProviderCatalog | null;
+    providerSchemas: ProviderSchemasResponse | null;
     runtimeStatus: RuntimeStatus | null;
     onDirty: () => void;
     onSaved: () => void;
@@ -92,7 +92,7 @@
   <div id="compose-form-area">
     {#if system}
       <RuntimeForm {system} onChanged={markDirty} />
-      <ProviderList {system} {catalog} onChanged={markDirty} />
+      <ProviderList {system} {providerSchemas} onChanged={markDirty} />
     {:else}
       <p class="placeholder">Loading…</p>
     {/if}

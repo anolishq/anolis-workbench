@@ -10,7 +10,7 @@
   import { fetchJson } from "./lib/api";
   import type {
     ProjectSummary,
-    ProviderCatalog,
+    ProviderSchemasResponse,
     RuntimeStatus,
     SystemConfig,
     TemplateSummary,
@@ -28,7 +28,7 @@
   const WORKSPACES: WorkspaceName[] = ["compose", "commission", "operate"];
 
   // ── State ────────────────────────────────────────────────────────────────
-  let catalog = $state<ProviderCatalog | null>(null);
+  let providerSchemas = $state<ProviderSchemasResponse | null>(null);
   let templates = $state<TemplateSummary[]>([]);
   let projects = $state<ProjectSummary[]>([]);
   let runtimeStatus = $state<RuntimeStatus | null>(null);
@@ -223,9 +223,9 @@
 
     const init = async (): Promise<void> => {
       await Promise.all([
-        fetchJson<ProviderCatalog>("/api/catalog")
+        fetchJson<ProviderSchemasResponse>("/api/provider-schemas")
           .then((c) => {
-            catalog = c;
+            providerSchemas = c;
           })
           .catch(() => {}),
         fetchJson<TemplateSummary[]>("/api/templates")
@@ -359,7 +359,7 @@
     <Compose
       {projectName}
       {system}
-      {catalog}
+      {providerSchemas}
       {runtimeStatus}
       onDirty={() => {
         dirty = true;

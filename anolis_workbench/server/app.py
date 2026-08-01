@@ -16,6 +16,7 @@ from typing import cast
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core import provider_schemas
 from anolis_workbench.core.appliance import default_host, default_open_browser
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
@@ -97,9 +98,9 @@ def verify_environment() -> None:
         print("ERROR: Workbench frontend directory not found.", file=sys.stderr)
         print(f"  Expected: {FRONTEND_DIR}", file=sys.stderr)
         sys.exit(1)
-    if not paths_module.CATALOG_PATH.is_file():
-        print("ERROR: Workbench provider catalog not found.", file=sys.stderr)
-        print(f"  Expected: {paths_module.CATALOG_PATH}", file=sys.stderr)
+    if not provider_schemas.available_kinds():
+        print("ERROR: No vendored provider config schemas found.", file=sys.stderr)
+        print(f"  Expected envelopes under: {paths_module.PROVIDER_SCHEMAS_DIR}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -145,8 +146,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._check_update()
         elif path == "/api/fleet":
             self._get_fleet()
-        elif path == "/api/catalog":
-            compose.serve_catalog(self)
+        elif path == "/api/provider-schemas":
+            compose.serve_provider_schemas(self)
         elif path == "/api/templates":
             compose.serve_templates(self)
         elif path == "/api/onboarding":

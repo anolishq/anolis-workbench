@@ -1,7 +1,6 @@
 <script lang="ts">
   import type {
-    ProviderCatalog,
-    ProviderCatalogEntry,
+    ProviderSchemasResponse,
     ProviderPaths,
     ProviderRuntimeEntry,
     SystemConfig,
@@ -37,11 +36,11 @@
 
   let {
     system,
-    catalog,
+    providerSchemas,
     onChanged,
   }: {
     system: SystemConfig;
-    catalog: ProviderCatalog | null;
+    providerSchemas: ProviderSchemasResponse | null;
     onChanged: () => void;
   } = $props();
 
@@ -77,11 +76,16 @@
     { type: "hum", display: "Humidity" },
   ];
 
-  const kindMap = $derived(
-    Object.fromEntries((catalog?.providers ?? []).map((p) => [p.kind, p])) as Record<
-      string,
-      ProviderCatalogEntry
-    >,
+  // Display labels come from the provider-owned schema envelopes: the schema
+  // title (minus the " configuration" suffix) or the provider binary name.
+  const kindLabels = $derived(
+    Object.fromEntries(
+      Object.entries(providerSchemas?.providers ?? {}).map(([kind, env]) => {
+        const title = typeof env.schema?.title === "string" ? (env.schema.title as string) : "";
+        const label = title.replace(/ configuration$/i, "") || (env.provider as string) || kind;
+        return [kind, label];
+      }),
+    ) as Record<string, string>,
   );
   const providers = $derived(
     (system?.topology?.runtime?.providers ?? []) as ProviderRuntimeEntry[],
@@ -279,7 +283,7 @@
               <option value={prov.kind}>Unsupported ({prov.kind})</option>
             {/if}
             {#each SUPPORTED_KINDS as kind (kind)}
-              <option value={kind}>{kindMap[kind]?.display_name ?? kind}</option>
+              <option value={kind}>{kindLabels[kind] ?? kind}</option>
             {/each}
           </select>
 

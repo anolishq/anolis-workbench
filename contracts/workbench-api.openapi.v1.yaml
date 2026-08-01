@@ -209,23 +209,24 @@ paths:
                 items:
                   $ref: "#/components/schemas/TemplateSummary"
 
-  /api/catalog:
+  /api/provider-schemas:
     get:
-      summary: Get provider catalog
+      summary: Get provider config-schema envelopes
       description: >-
-        Returns the static provider catalog document (providers.json), passed
-        through verbatim. Content structure is provider-catalog-specific and
-        not schema-validated in this contract (additionalProperties: true).
+        Returns `{schema_version, providers}` where `providers` maps each
+        provider kind to its vendored `--config-schema` envelope (anolis
+        executable profile v1 §2), passed through verbatim. The composer
+        renders provider config forms from these schemas. Envelope content is
+        provider-owned and not schema-validated in this contract
+        (additionalProperties: true).
       responses:
         "200":
-          description: Provider catalog
+          description: Provider config-schema envelope map
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
-        "404":
-          $ref: "#/components/responses/Error404"
 
   # ── Commission track ───────────────────────────────────────────────────────
 
