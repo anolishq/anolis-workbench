@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import deploy, installer, releases
+from anolis_workbench.core import deploy, installer, migrations, releases
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
@@ -422,6 +422,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
     system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — delegated to the canonical anolis install.sh.
     try:
@@ -482,12 +483,12 @@ def _load_system_for_deploy(template: str, system_path: Path | None) -> tuple[di
     if system_path is not None:
         if not system_path.exists():
             raise FileNotFoundError(f"System file not found: {system_path}")
-        return json.loads(system_path.read_text(encoding="utf-8")), system_path.parent
+        return migrations.migrate_system(json.loads(system_path.read_text(encoding="utf-8")))[0], system_path.parent
     tpl_dir = paths_module.TEMPLATES_ROOT / template
     tpl_path = tpl_dir / "system.json"
     if not tpl_path.exists():
         raise FileNotFoundError(f"Template '{template}' not found at {tpl_path}")
-    return json.loads(tpl_path.read_text(encoding="utf-8")), tpl_dir
+    return migrations.migrate_system(json.loads(tpl_path.read_text(encoding="utf-8")))[0], tpl_dir
 
 
 def _run_bundle(args: argparse.Namespace) -> int:
@@ -602,6 +603,7 @@ def _run_remote(args: argparse.Namespace) -> int:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
     system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — push the config to the target and run install.sh there.
     try:

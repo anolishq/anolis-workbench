@@ -1,0 +1,391 @@
+/**
+ * schema.ts — pure JSON-Schema interpreter for provider --config-schema envelopes (#270).
+ *
+ * Understands the subset of Draft 2020-12 the anolis provider SDK emits
+ * (see anolis-provider-sdk docs/config-schema.md): object/array/scalar types,
+ * required, const, default, oneOf-of-consts enums, allOf/if(const)/then
+ * conditionals with `properties: {k: false}` forbids, dependentRequired,
+ * pattern/min-max bounds, and the x-anolis-{unique,placeholder,type}
+ * vocabulary. Backend validation is authoritative; this module only powers
+ * form rendering and inline hints.
+ */
+
+import type { UnknownRecord } from "../contracts";
+
+export type SchemaNode = UnknownRecord;
+
+export interface EnumOption {
+  value: string;
+  title: string;
+}
+
+export type FieldControl =
+  | { control: "readonly"; value: unknown }
+  | { control: "select"; options: EnumOption[] }
+  | { control: "i2c" }
+  | { control: "number"; integer: boolean; min?: number; max?: number }
+  | { control: "checkbox" }
+  | { control: "text"; pattern?: string; minLength?: number };
+
+export interface Conditionals {
+  required: Set<string>;
+  forbidden: Set<string>;
+}
+
+/** Narrow an unknown to a plain object (the shape guard used across the form). */
+export function asObject(value: unknown): UnknownRecord | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : null;
+}
+
+const asRecord = asObject;
+
+export function isObjectSchema(schema: SchemaNode): boolean {
+  return (
+    schema.type === "object" || (schema.type === undefined && asRecord(schema.properties) !== null)
+  );
+}
+
+export function isArraySchema(schema: SchemaNode): boolean {
+  return schema.type === "array";
+}
+
+export function properties(schema: SchemaNode): Array<[string, SchemaNode]> {
+  const props = asRecord(schema.properties);
+  if (!props) return [];
+  return Object.entries(props).flatMap(([key, node]) => {
+    const record = asRecord(node);
+    return record ? [[key, record] as [string, SchemaNode]] : [];
+  });
+}
+
+export function itemsSchema(schema: SchemaNode): SchemaNode | null {
+  return asRecord(schema.items);
+}
+
+/** Human label for a property: schema title, else the key itself. */
+export function labelFor(key: string, schema: SchemaNode): string {
+  return typeof schema.title === "string" && schema.title !== "" ? schema.title : key;
+}
+
+export function descriptionFor(schema: SchemaNode): string | null {
+  return typeof schema.description === "string" && schema.description !== ""
+    ? schema.description
+    : null;
+}
+
+export function placeholderFor(schema: SchemaNode): string | null {
+  const raw = schema["x-anolis-placeholder"];
+  return typeof raw === "string" && raw !== "" ? raw : null;
+}
+
+export function isI2cField(schema: SchemaNode): boolean {
+  return schema["x-anolis-type"] === "i2c_address";
+}
+
+/** oneOf where every branch is {const, title?} — the SDK's titled enum idiom. */
+export function enumOptions(schema: SchemaNode): EnumOption[] | null {
+  const oneOf = schema.oneOf;
+  if (!Array.isArray(oneOf) || oneOf.length === 0) return null;
+  const options: EnumOption[] = [];
+  for (const branch of oneOf) {
+    const record = asRecord(branch);
+    if (!record || typeof record.const !== "string") return null;
+    options.push({
+      value: record.const,
+      title: typeof record.title === "string" && record.title !== "" ? record.title : record.const,
+    });
+  }
+  return options;
+}
+
+/**
+ * Effective required/forbidden property sets for an object schema given its
+ * current value: static `required`, `dependentRequired`, plus every matching
+ * allOf/if(const+required)/then branch (`then.required` adds requirements,
+ * `then.properties: {k: false}` forbids keys).
+ */
+export function resolveConditionals(schema: SchemaNode, value: unknown): Conditionals {
+  const required = new Set<string>();
+  const forbidden = new Set<string>();
+  const record = asRecord(value) ?? {};
+
+  if (Array.isArray(schema.required)) {
+    for (const key of schema.required) if (typeof key === "string") required.add(key);
+  }
+
+  const dependent = asRecord(schema.dependentRequired);
+  if (dependent) {
+    for (const [trigger, needs] of Object.entries(dependent)) {
+      if (record[trigger] === undefined || !Array.isArray(needs)) continue;
+      for (const key of needs) if (typeof key === "string") required.add(key);
+    }
+  }
+
+  const allOf = Array.isArray(schema.allOf) ? schema.allOf : [];
+  for (const entry of allOf) {
+    const branch = asRecord(entry);
+    const condition = branch ? asRecord(branch.if) : null;
+    const consequence = branch ? asRecord(branch.then) : null;
+    if (!condition || !consequence) continue;
+    if (!ifMatches(condition, record)) continue;
+
+    if (Array.isArray(consequence.required)) {
+      for (const key of consequence.required) if (typeof key === "string") required.add(key);
+    }
+    const thenProps = asRecord(consequence.properties);
+    if (thenProps) {
+      for (const [key, sub] of Object.entries(thenProps)) {
+        if (sub === false) forbidden.add(key);
+      }
+    }
+  }
+
+  for (const key of forbidden) required.delete(key);
+  return { required, forbidden };
+}
+
+function ifMatches(condition: UnknownRecord, record: UnknownRecord): boolean {
+  const condProps = asRecord(condition.properties);
+  if (!condProps) return false;
+  for (const [key, sub] of Object.entries(condProps)) {
+    const subRecord = asRecord(sub);
+    if (!subRecord || subRecord.const === undefined) return false;
+    if (record[key] !== subRecord.const) return false;
+  }
+  if (Array.isArray(condition.required)) {
+    for (const key of condition.required) {
+      if (typeof key === "string" && record[key] === undefined) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Seed value for an object schema: declared defaults and consts, required
+ * sub-objects (recursively), and empty arrays for object-item arrays.
+ * Never invents values — a field without a default stays absent
+ * (x-anolis-placeholder is a hint, not a value).
+ */
+export function defaultsFor(schema: SchemaNode): UnknownRecord {
+  const out: UnknownRecord = {};
+  const requiredKeys = new Set<string>(
+    Array.isArray(schema.required)
+      ? schema.required.filter((k): k is string => typeof k === "string")
+      : [],
+  );
+  for (const [key, prop] of properties(schema)) {
+    if (prop.default !== undefined) {
+      out[key] = structuredClone(prop.default);
+    } else if (prop.const !== undefined) {
+      out[key] = structuredClone(prop.const);
+    } else if (isObjectSchema(prop)) {
+      const sub = defaultsFor(prop);
+      if (requiredKeys.has(key) || Object.keys(sub).length > 0) out[key] = sub;
+    } else if (isArraySchema(prop)) {
+      const items = itemsSchema(prop);
+      if (items && isObjectSchema(items)) out[key] = [];
+    }
+  }
+  return out;
+}
+
+/** Pick the concrete input control for a scalar property schema. */
+export function fieldControl(schema: SchemaNode): FieldControl {
+  if (schema.const !== undefined) return { control: "readonly", value: schema.const };
+  const options = enumOptions(schema);
+  if (options) return { control: "select", options };
+  if (isI2cField(schema)) return { control: "i2c" };
+  if (schema.type === "boolean") return { control: "checkbox" };
+  if (schema.type === "integer" || schema.type === "number") {
+    return {
+      control: "number",
+      integer: schema.type === "integer",
+      min: typeof schema.minimum === "number" ? schema.minimum : undefined,
+      max: typeof schema.maximum === "number" ? schema.maximum : undefined,
+    };
+  }
+  return {
+    control: "text",
+    pattern: typeof schema.pattern === "string" ? schema.pattern : undefined,
+    minLength: typeof schema.minLength === "number" ? schema.minLength : undefined,
+  };
+}
+
+/** Parse an I2C address in int-or-hex form ("0x0A", "10", 10). */
+export function parseI2c(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (text === "") return null;
+  const parsed = /^0[xX][0-9a-fA-F]+$/.test(text) ? parseInt(text, 16) : Number(text);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+const I2C_MIN = 0x08;
+const I2C_MAX = 0x77;
+
+/**
+ * Inline validation hint for one scalar field. Deliberately shallow —
+ * required/enum/pattern/bounds only; the backend envelope pass is
+ * authoritative and reports everything else on save.
+ */
+export function validateField(
+  schema: SchemaNode,
+  value: unknown,
+  required: boolean,
+): string | null {
+  const empty = value === undefined || value === null || value === "";
+  if (empty) return required ? "Required" : null;
+
+  const control = fieldControl(schema);
+  switch (control.control) {
+    case "select":
+      return control.options.some((o) => o.value === value)
+        ? null
+        : "Not one of the allowed values";
+    case "i2c": {
+      const parsed = parseI2c(value);
+      if (parsed === null) return "Enter an address like 0x0A (or decimal)";
+      if (parsed < I2C_MIN || parsed > I2C_MAX)
+        return `Address must be between 0x${I2C_MIN.toString(16).padStart(2, "0").toUpperCase()} and 0x${I2C_MAX.toString(16).toUpperCase()}`;
+      return null;
+    }
+    case "number": {
+      const n = typeof value === "number" ? value : Number(value);
+      if (Number.isNaN(n)) return "Must be a number";
+      if (control.integer && !Number.isInteger(n)) return "Must be an integer";
+      if (control.min !== undefined && n < control.min) return `Must be >= ${control.min}`;
+      if (control.max !== undefined && n > control.max) return `Must be <= ${control.max}`;
+      return null;
+    }
+    case "text": {
+      if (typeof value !== "string") return "Must be text";
+      if (control.minLength !== undefined && value.length < control.minLength) return "Required";
+      if (control.pattern !== undefined && !new RegExp(control.pattern).test(value)) {
+        return "Does not match the required format";
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+export interface UniqueViolation {
+  path: string;
+  message: string;
+}
+
+function normalizeUniqueValue(value: unknown, fieldSchema: SchemaNode | null): unknown {
+  if (fieldSchema && isI2cField(fieldSchema)) {
+    const parsed = parseI2c(value);
+    if (parsed !== null) return parsed;
+  }
+  return value;
+}
+
+function duplicates(values: unknown[]): unknown[] {
+  const seen = new Set<unknown>();
+  const dups: unknown[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      if (!dups.includes(value)) dups.push(value);
+    } else {
+      seen.add(value);
+    }
+  }
+  return dups;
+}
+
+/**
+ * x-anolis-unique violations for a schema+value pair (mirror of the backend
+ * walker): an array schema annotated directly enforces distinct scalar items;
+ * an items property annotated enforces distinct values of that property
+ * across items. i2c-typed fields compare value-normalized (10 vs "0x0A").
+ */
+export function uniqueViolations(
+  schema: SchemaNode,
+  value: unknown,
+  path = "$",
+): UniqueViolation[] {
+  const violations: UniqueViolation[] = [];
+
+  const record = asRecord(value);
+  if (record) {
+    for (const [key, prop] of properties(schema)) {
+      if (record[key] !== undefined) {
+        violations.push(...uniqueViolations(prop, record[key], `${path}.${key}`));
+      }
+    }
+    return violations;
+  }
+
+  if (Array.isArray(value)) {
+    const items = itemsSchema(schema);
+    if (schema["x-anolis-unique"] === true) {
+      const normalized = value.map((v) => normalizeUniqueValue(v, items));
+      for (const dup of duplicates(normalized)) {
+        violations.push({
+          path,
+          message: `Duplicate value ${JSON.stringify(dup)} — values must be unique`,
+        });
+      }
+    }
+    if (items) {
+      for (const [key, prop] of properties(items)) {
+        if (prop["x-anolis-unique"] !== true) continue;
+        const present = value
+          .map((item) => asRecord(item)?.[key])
+          .filter((v) => v !== undefined)
+          .map((v) => normalizeUniqueValue(v, prop));
+        for (const dup of duplicates(present)) {
+          violations.push({
+            path,
+            message: `Duplicate ${key} ${JSON.stringify(dup)} — ${key} must be unique`,
+          });
+        }
+      }
+      value.forEach((item, index) => {
+        violations.push(...uniqueViolations(items, item, `${path}[${index}]`));
+      });
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Delete keys the current discriminator state forbids (recursively), so a
+ * mode switch cannot leave stale keys the provider would reject. Returns
+ * whether anything was removed.
+ */
+export function pruneForbidden(schema: SchemaNode, value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+
+  let changed = false;
+  const { forbidden } = resolveConditionals(schema, record);
+  for (const key of forbidden) {
+    if (record[key] !== undefined) {
+      delete record[key];
+      changed = true;
+    }
+  }
+  for (const [key, prop] of properties(schema)) {
+    const child = record[key];
+    if (child === undefined) continue;
+    if (isObjectSchema(prop)) {
+      if (pruneForbidden(prop, child)) changed = true;
+    } else if (isArraySchema(prop) && Array.isArray(child)) {
+      const items = itemsSchema(prop);
+      if (items && isObjectSchema(items)) {
+        for (const item of child) {
+          if (pruneForbidden(items, item)) changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}

@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 import jsonschema
 
+from anolis_workbench.core import migrations, provider_schemas, renderer
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import renderer
 from anolis_workbench.core import validator as semantic_validator
 
 SYSTEMS_ROOT = paths_module.SYSTEMS_ROOT
@@ -83,8 +83,9 @@ def validate_system_payload(system: object) -> list[dict[str, str]]:
             for err in schema_errors
         ]
 
+    errors = _validate_provider_configs(system)
     semantic_messages = semantic_validator.validate_system(system)
-    return [
+    errors.extend(
         {
             "source": "semantic",
             "code": "semantic.validation",
@@ -92,7 +93,58 @@ def validate_system_payload(system: object) -> list[dict[str, str]]:
             "message": msg,
         }
         for msg in semantic_messages
-    ]
+    )
+    return errors
+
+
+def _validate_provider_configs(system: dict) -> list[dict[str, str]]:
+    """Validate each provider's config against its vendored --config-schema
+    envelope (Draft 2020-12) plus the x-anolis-unique annotations."""
+    errors: list[dict[str, str]] = []
+    providers = system.get("topology", {}).get("providers", {})
+    if not isinstance(providers, dict):
+        return errors
+
+    for pid, entry in providers.items():
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("kind")
+        base_path = f"$.topology.providers.{pid}"
+        envelope = provider_schemas.get_envelope(kind) if isinstance(kind, str) else None
+        if envelope is None:
+            known = ", ".join(provider_schemas.available_kinds())
+            errors.append(
+                {
+                    "source": "provider-schema",
+                    "code": "provider.unknown_kind",
+                    "path": f"{base_path}.kind",
+                    "message": f"Unknown provider kind '{kind}' — no vendored config schema (known kinds: {known}).",
+                }
+            )
+            continue
+
+        config = entry.get("config")
+        provider_schema = envelope["schema"]
+        config_validator = jsonschema.Draft202012Validator(provider_schema)
+        for err in sorted(config_validator.iter_errors(config), key=lambda e: list(e.path)):
+            errors.append(
+                {
+                    "source": "provider-schema",
+                    "code": "provider.schema",
+                    "path": f"{base_path}.config" + _json_path_from_iter(list(err.path))[1:],
+                    "message": err.message,
+                }
+            )
+        for violation in provider_schemas.unique_violations(provider_schema, config):
+            errors.append(
+                {
+                    "source": "provider-schema",
+                    "code": "provider.unique",
+                    "path": f"{base_path}.config" + violation["path"][1:],
+                    "message": violation["message"],
+                }
+            )
+    return errors
 
 
 def project_dir(name: str) -> pathlib.Path:
@@ -203,7 +255,18 @@ def get_project(name: str) -> dict:
     path = system_json_path(name)
     if not path.exists():
         raise FileNotFoundError(f"Project '{name}' not found")
-    return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    raw = path.read_text(encoding="utf-8")
+    system = json.loads(raw)
+    system, migrated = migrations.migrate_system(system)
+    if migrated:
+        try:
+            backup = path.with_suffix(".json.v1.bak")
+            if not backup.exists():  # keep the FIRST pre-migration document
+                backup.write_text(raw, encoding="utf-8")
+            path.write_text(json.dumps(system, indent=2), encoding="utf-8")
+        except OSError:
+            pass  # read-only workspace: serve the migrated doc, persist next save
+    return system
 
 
 def save_project(name: str, system: dict) -> None:
@@ -256,10 +319,16 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         project_dir(new_name),
         ignore=shutil.ignore_patterns("running.json", "logs"),
     )
-    system = get_project(new_name)
-    system["meta"]["name"] = new_name
-    system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
-    save_project(new_name, system)
+    try:
+        system = get_project(new_name)
+        system["meta"]["name"] = new_name
+        system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
+        save_project(new_name, system)
+    except Exception:
+        # Don't leave a half-initialized copy behind (e.g. the source fails
+        # validation post-migration) — the source project is untouched.
+        shutil.rmtree(project_dir(new_name), ignore_errors=True)
+        raise
     return system
 
 

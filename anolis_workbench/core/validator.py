@@ -48,20 +48,6 @@ def validate_system(system: dict) -> list[str]:
     provider_paths = paths.get("providers", {})
     runtime_providers = runtime.get("providers", [])
 
-    unsupported_custom_ids: set[str] = set()
-    for p in runtime_providers:
-        pid = p.get("id")
-        if not isinstance(pid, str) or not pid:
-            continue
-        kind = p.get("kind") or providers.get(pid, {}).get("kind")
-        if kind == "custom":
-            unsupported_custom_ids.add(pid)
-    for pid, pcfg in providers.items():
-        if pcfg.get("kind") == "custom":
-            unsupported_custom_ids.add(pid)
-    for pid in sorted(unsupported_custom_ids):
-        errors.append(f"Provider '{pid}' uses kind 'custom', which is not supported by Composer contract v1.")
-
     if not paths.get("runtime_executable"):
         errors.append("Runtime executable path is missing from paths.runtime_executable.")
 
@@ -80,22 +66,36 @@ def validate_system(system: dict) -> list[str]:
     if runtime_http_port == reserved_workbench_port:
         errors.append(f"Runtime HTTP port {reserved_workbench_port} conflicts with the workbench control server port.")
 
+    # Cross-provider I2C conflicts — capability-driven: any provider whose
+    # native config declares hardware.bus_path plus addressed devices takes
+    # part, regardless of kind. Within-provider duplicates are the provider
+    # schema's job (x-anolis-unique); the cross-provider view is workbench's.
     owned: dict = {}
     for pid, pcfg in providers.items():
-        if pcfg.get("kind") not in ("bread", "ezo"):
+        config = pcfg.get("config")
+        if not isinstance(config, dict):
             continue
-        bus_path = provider_paths.get(pid, {}).get("bus_path", "")
-        for dev in pcfg.get("devices", []):
-            addr_str = dev.get("address", "")
-            addr = _parse_i2c_address(addr_str)
+        hardware = config.get("hardware")
+        if not isinstance(hardware, dict):
+            continue
+        bus_path = hardware.get("bus_path", "")
+        if not bus_path:
+            continue
+        devices = config.get("devices")
+        if not isinstance(devices, list):
+            continue
+        for dev in devices:
+            if not isinstance(dev, dict):
+                continue
+            addr = _parse_i2c_address(dev.get("address", ""))
             if addr is None:
                 continue
             key = (bus_path, addr)
-            if key in owned:
+            if key in owned and owned[key] != pid:
                 errors.append(
                     f"I2C address 0x{addr:02X} on bus '{bus_path}' is claimed by both '{owned[key]}' and '{pid}'."
                 )
-            else:
+            elif key not in owned:
                 owned[key] = pid
 
     for p in runtime_providers:
@@ -107,11 +107,6 @@ def validate_system(system: dict) -> list[str]:
     for pid in providers:
         if pid not in runtime_ids:
             errors.append(f"Provider '{pid}' has a config entry but is not in the runtime list.")
-
-    for pid, pcfg in providers.items():
-        device_ids = [dev.get("id") for dev in pcfg.get("devices", []) if dev.get("id")]
-        if len(device_ids) != len(set(device_ids)):
-            errors.append(f"Provider '{pid}' has duplicate device IDs.")
 
     for p in runtime_providers:
         pid = p.get("id")
@@ -125,10 +120,6 @@ def validate_system(system: dict) -> list[str]:
 
         if not path_entry.get("executable"):
             errors.append(f"Provider '{pid}' is missing paths.providers.{pid}.executable.")
-
-        kind = p.get("kind") or providers.get(pid, {}).get("kind")
-        if kind in ("bread", "ezo") and not path_entry.get("bus_path"):
-            errors.append(f"Provider '{pid}' requires paths.providers.{pid}.bus_path.")
 
     for p in runtime_providers:
         pid = p.get("id", "<unknown>")

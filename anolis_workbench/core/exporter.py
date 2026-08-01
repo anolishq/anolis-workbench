@@ -19,8 +19,8 @@ from typing import Any
 import jsonschema
 import yaml
 
+from anolis_workbench.core import migrations, releases
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import releases
 from anolis_workbench.core import renderer as renderer_module
 
 
@@ -113,6 +113,7 @@ def _load_system_json(system_path: pathlib.Path) -> dict[str, Any]:
         raise ExportError(f"Failed reading {system_path}: {exc}") from exc
     if not isinstance(payload, dict):
         raise ExportError("system.json root must be an object")
+    payload, _ = migrations.migrate_system(payload)  # defensive: tolerate a v1 doc on disk
     return payload
 
 

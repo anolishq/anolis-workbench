@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "meta": {
     "name": "sim-quickstart",
     "created": "2026-04-03T00:00:00Z",
@@ -10,10 +10,7 @@
       "name": "anolis-main",
       "http_port": 8080,
       "http_bind": "127.0.0.1",
-      "cors_origins": [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-      ],
+      "cors_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
       "cors_allow_credentials": false,
       "shutdown_timeout_ms": 2000,
       "startup_timeout_ms": 30000,
@@ -30,45 +27,23 @@
           "timeout_ms": 5000,
           "hello_timeout_ms": 2000,
           "ready_timeout_ms": 10000,
-          "restart_policy": {
-            "enabled": false
-          }
+          "restart_policy": { "enabled": false }
         }
       ]
     },
     "providers": {
       "sim0": {
         "kind": "sim",
-        "config": {
-          "provider": {
-            "name": "sim0"
-          },
-          "startup_policy": "degraded",
-          "devices": [
-            {
-              "id": "tempctl0",
-              "type": "tempctl",
-              "initial_temp": 25.0
-            },
-            {
-              "id": "motorctl0",
-              "type": "motorctl",
-              "max_speed": 3000.0
-            },
-            {
-              "id": "relayio0",
-              "type": "relayio"
-            },
-            {
-              "id": "analogsensor0",
-              "type": "analogsensor"
-            }
-          ],
-          "simulation": {
-            "mode": "non_interacting",
-            "tick_rate_hz": 10.0
-          }
-        }
+        "provider_name": "sim0",
+        "startup_policy": "degraded",
+        "simulation_mode": "non_interacting",
+        "tick_rate_hz": 10.0,
+        "devices": [
+          { "id": "tempctl0",    "type": "tempctl",    "initial_temp": 25.0 },
+          { "id": "motorctl0",   "type": "motorctl",   "max_speed": 3000.0 },
+          { "id": "relayio0",    "type": "relayio" },
+          { "id": "analogsensor0", "type": "analogsensor" }
+        ]
       }
     }
   },

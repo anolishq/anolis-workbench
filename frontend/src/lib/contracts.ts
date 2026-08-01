@@ -116,64 +116,23 @@ export interface RuntimeConfig extends UnknownRecord {
   providers?: ProviderRuntimeEntry[];
 }
 
-export interface SimDeviceConfig extends UnknownRecord {
-  id: string;
-  type: string;
+/**
+ * system.json v2 (#270): provider config is stored provider-natively — the
+ * exact document the kind's --config-schema envelope describes. The workbench
+ * has no per-kind knowledge of its shape.
+ */
+export interface ProviderTopologyEntry extends UnknownRecord {
+  kind: ProviderKind;
+  config: UnknownRecord;
 }
-
-export interface BreadDeviceConfig extends UnknownRecord {
-  id: string;
-  type: string;
-  address: string;
-}
-
-export interface EzoDeviceConfig extends UnknownRecord {
-  id: string;
-  type: string;
-  address: string;
-}
-
-export interface SimProviderConfig extends UnknownRecord {
-  kind: "sim";
-  startup_policy?: string;
-  simulation_mode?: string;
-  tick_rate_hz?: number;
-  devices?: SimDeviceConfig[];
-}
-
-export interface BreadProviderConfig extends UnknownRecord {
-  kind: "bread";
-  provider_name?: string;
-  query_delay_us?: number;
-  timeout_ms?: number;
-  retry_count?: number;
-  discovery?: {
-    mode?: string;
-    addresses?: string[];
-  };
-  devices?: BreadDeviceConfig[];
-}
-
-export interface EzoProviderConfig extends UnknownRecord {
-  kind: "ezo";
-  provider_name?: string;
-  query_delay_us?: number;
-  timeout_ms?: number;
-  retry_count?: number;
-  devices?: EzoDeviceConfig[];
-}
-
-export type ProviderTopologyConfig =
-  SimProviderConfig | BreadProviderConfig | EzoProviderConfig | UnknownRecord;
 
 export interface TopologyConfig extends UnknownRecord {
   runtime: RuntimeConfig;
-  providers?: Record<string, ProviderTopologyConfig>;
+  providers?: Record<string, ProviderTopologyEntry>;
 }
 
 export interface ProviderPaths extends UnknownRecord {
   executable?: string;
-  bus_path?: string;
 }
 
 export interface PathsConfig extends UnknownRecord {
@@ -188,6 +147,7 @@ export interface SystemMeta extends UnknownRecord {
 }
 
 export interface SystemConfig extends UnknownRecord {
+  schema_version?: number;
   meta: SystemMeta;
   topology: TopologyConfig;
   paths: PathsConfig;

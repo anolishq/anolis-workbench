@@ -23,7 +23,7 @@ from typing import Any, Callable
 import requests
 import yaml
 
-from anolis_workbench.core import exporter, releases
+from anolis_workbench.core import exporter, migrations, releases
 from anolis_workbench.core import renderer as renderer_module
 from anolis_workbench.core.executor import Executor, LocalExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -77,6 +77,8 @@ def materialize_project_dir(
     install.sh's render pass only rewrites dev-relative sibling-repo paths,
     which workbench-rendered configs never contain.
     """
+    system, _ = migrations.migrate_system(system)  # defensive: tolerate a v1 doc from any caller
+
     project_dir = dest / project_name
     (project_dir / "config").mkdir(parents=True, exist_ok=True)
 

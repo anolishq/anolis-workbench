@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from anolis_workbench.core import migrations
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import Executor, LocalExecutor
 
@@ -85,6 +86,8 @@ def provision_project(
         if not tpl_path.exists():
             raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
         system = json.loads(tpl_path.read_text(encoding="utf-8"))
+
+    system, _ = migrations.migrate_system(system)
 
     # Patch meta
     system["meta"]["name"] = project_name

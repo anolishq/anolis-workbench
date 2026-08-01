@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import deploy, installer
+from anolis_workbench.core import deploy, installer, migrations
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -66,6 +66,7 @@ def _prepare_workspace(params: dict[str, Any], progress: Any) -> tuple[dict[str,
         progress("project", f"Creating workspace project {project} from {template}")
         installer.provision_project(template, project, prefix, force=params.get("force", False))
     system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+    system, _ = migrations.migrate_system(system)
     return system, project_dir
 
 
@@ -267,6 +268,7 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         if not tpl_path.exists():
             raise RuntimeError(f"Template '{template}' not found at {tpl_path}")
         system = json.loads(tpl_path.read_text(encoding="utf-8"))
+        system, _ = migrations.migrate_system(system)
 
         tarball_path = deploy.stage_bundle(
             system=system,

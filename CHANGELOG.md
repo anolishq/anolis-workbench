@@ -20,6 +20,42 @@ Historical note:
   the provider-owned contracts the composer will render config forms from.
   New `core/provider_schemas.py` registry; the set of known provider kinds is
   now exactly the set of vendored envelopes.
+- Schema-driven provider composer (#270 part 2b): the per-kind provider forms
+  are replaced by a generic `SchemaForm` rendered from the vendored
+  `--config-schema` envelopes (`frontend/src/lib/schema-form/`, no new
+  runtime dependencies). Conditional fields follow the schema
+  (`allOf`/`if`/`then` + `dependentRequired`): forbidden keys are hidden and
+  pruned on discriminator change, titled `oneOf` consts become selects,
+  `x-anolis-type: i2c_address` fields validate int-or-hex, and device-list
+  keys a schema revision does not describe are preserved and shown read-only.
+  Generic "Import from devices" fills i2c address arrays from the device
+  address column.
+- `system.json` schema v2 (#270 part 2b): provider config is stored
+  provider-natively — each `topology.providers` entry is `{kind, config}`
+  where `config` is exactly the document the provider's `--config-schema`
+  describes; `paths.providers[].bus_path` moved into
+  `config.hardware.bus_path`. v1 documents migrate on load (new
+  `core/migrations.py`, persisted by `projects.get_project`, applied
+  defensively in the exporter, deploy, installer and provision loaders).
+  Save-time validation now checks each provider config against its envelope
+  (Draft 2020-12) plus `x-anolis-unique` annotations (i2c-normalized, so
+  `10` and `"0x0A"` collide), with error paths anchored under
+  `$.topology.providers.<id>.config`.
+
+### Changed
+
+- `core/renderer.py` renders provider configs as a verbatim YAML passthrough
+  of the native config; the per-kind `_render_sim`/`_render_bread`/
+  `_render_ezo` transforms are deleted (they live on only as the v1→v2
+  migration). I2C addresses keep their authored hex-string form in rendered
+  YAML (provider binaries parse both).
+- `core/validator.py` keeps only cross-provider concerns; the I2C bus/address
+  conflict check is capability-driven (any provider whose config declares
+  `hardware.bus_path` plus addressed devices), and per-provider checks
+  (required fields, duplicate device ids, `custom` kind) are subsumed by the
+  envelope/unknown-kind validation in `projects.py`.
+- Bundled templates store provider config in the native shape; the old v1
+  templates are kept as migration test fixtures.
 
 ### Removed
 
