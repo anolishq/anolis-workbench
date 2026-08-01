@@ -223,6 +223,12 @@ jobs:
       - name: Verify runtime-http OpenAPI lock
         run: python3 scripts/verify-upstream-schema.py --schema runtime-http --require-release-artifact
 
+      - name: Verify provider config-schema locks
+        run: |
+          python3 scripts/verify-upstream-schema.py --schema provider-config-ezo --require-release-artifact
+          python3 scripts/verify-upstream-schema.py --schema provider-config-bread --require-release-artifact
+          python3 scripts/verify-upstream-schema.py --schema provider-config-sim --require-release-artifact
+
   freeze-smoke:
     name: Freeze smoke test (Linux)
     needs: [changes]

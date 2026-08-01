@@ -11,6 +11,12 @@ Supported schemas:
   --schema runtime-config
   --schema machine-profile
   --schema runtime-http
+  --schema provider-config-ezo
+  --schema provider-config-bread
+  --schema provider-config-sim
+
+Provider config-schema envelopes are raw JSON assets (the asset IS the schema
+document; lock distribution.asset_format == "raw").
 
 Usage:
   python scripts/verify-upstream-schema.py --schema runtime-config
@@ -46,6 +52,19 @@ _SCHEMA_CONFIGS: dict[str, dict[str, str]] = {
     "runtime-http": {
         "schema_path": "contracts/runtime-http.openapi.v0.yaml",
         "lock_path": "contracts/upstream/anolis/runtime-http.lock.json",
+    },
+    # Provider config-schema envelopes (raw JSON assets; see the sync script).
+    "provider-config-ezo": {
+        "schema_path": "anolis_workbench/schemas/providers/ezo.config-schema.json",
+        "lock_path": "contracts/upstream/providers/ezo-config-schema.lock.json",
+    },
+    "provider-config-bread": {
+        "schema_path": "anolis_workbench/schemas/providers/bread.config-schema.json",
+        "lock_path": "contracts/upstream/providers/bread-config-schema.lock.json",
+    },
+    "provider-config-sim": {
+        "schema_path": "anolis_workbench/schemas/providers/sim.config-schema.json",
+        "lock_path": "contracts/upstream/providers/sim-config-schema.lock.json",
     },
 }
 
@@ -169,10 +188,18 @@ def validate_release_mode(
         print("\nERROR: release artifact checksum mismatch", file=sys.stderr)
         return 1
 
-    try:
-        extracted_schema = extract_tar_member(asset_bytes, source_path)
-    except RuntimeError as exc:
-        print(f"\nERROR: {exc}", file=sys.stderr)
+    asset_format = distribution.get("asset_format", "tar-member")
+    if asset_format == "raw":
+        # The asset IS the schema document (provider config-schema envelopes).
+        extracted_schema = asset_bytes
+    elif asset_format == "tar-member":
+        try:
+            extracted_schema = extract_tar_member(asset_bytes, source_path)
+        except RuntimeError as exc:
+            print(f"\nERROR: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print(f"\nERROR: unsupported lock asset_format '{asset_format}'", file=sys.stderr)
         return 1
 
     extracted_schema_sha = sha256_bytes(extracted_schema)

@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "source": {
+    "repo": "anolishq/anolis-provider-ezo",
+    "path": "anolis-provider-ezo-0.3.4-config-schema.json",
+    "tag": "v0.3.4"
+  },
+  "distribution": {
+    "mode": "release-artifact",
+    "asset_format": "raw",
+    "release": {
+      "repo": "anolishq/anolis-provider-ezo",
+      "tag": "v0.3.4",
+      "asset": "anolis-provider-ezo-0.3.4-config-schema.json",
+      "manifest_asset": "anolis-provider-ezo-0.3.4-config-schema-manifest.json"
+    },
+    "schema_sha256": "1014922a7b5cb14ea6ef567d56cf5d64031913193a9f928603a1f5692e9714c0",
+    "asset_sha256": "1014922a7b5cb14ea6ef567d56cf5d64031913193a9f928603a1f5692e9714c0"
+  },
+  "synced_at_utc": "2026-08-01T18:57:19Z"
+}
