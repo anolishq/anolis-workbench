@@ -27,7 +27,10 @@ def _fake_binary(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
     return script
 
 
-def _make_system(tmp_path: pathlib.Path, provider_body: str) -> dict:
+def _make_system(tmp_path: pathlib.Path, provider_body: str, monkeypatch: pytest.MonkeyPatch) -> dict:
+    # --check-config subprocesses run with cwd=DATA_ROOT (~/.anolis), which
+    # does not exist on CI runners — point it at the sandbox.
+    monkeypatch.setattr("anolis_workbench.core.paths.DATA_ROOT", tmp_path)
     system: dict = json.loads((TEMPLATES / "sim-quickstart" / "system.json").read_text(encoding="utf-8"))
     runtime_bin = _fake_binary(tmp_path, "anolis-runtime", 'test "$1" = --check-config && test -f "$2" && exit 0')
     provider_bin = _fake_binary(tmp_path, "anolis-provider-sim", provider_body)
@@ -43,8 +46,10 @@ def _check(result: dict, name: str) -> dict:
     return matches[0]
 
 
-def test_preflight_renders_native_config_and_check_config_passes(tmp_path: pathlib.Path) -> None:
-    system = _make_system(tmp_path, 'test "$1" = --check-config && test -f "$2" && exit 0')
+def test_preflight_renders_native_config_and_check_config_passes(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = _make_system(tmp_path, 'test "$1" = --check-config && test -f "$2" && exit 0', monkeypatch)
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
@@ -58,8 +63,8 @@ def test_preflight_renders_native_config_and_check_config_passes(tmp_path: pathl
     assert result["ok"] is True
 
 
-def test_preflight_reports_provider_config_rejection(tmp_path: pathlib.Path) -> None:
-    system = _make_system(tmp_path, 'echo "config invalid: bad tick" >&2; exit 1')
+def test_preflight_reports_provider_config_rejection(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    system = _make_system(tmp_path, 'echo "config invalid: bad tick" >&2; exit 1', monkeypatch)
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
@@ -71,8 +76,10 @@ def test_preflight_reports_provider_config_rejection(tmp_path: pathlib.Path) -> 
     assert result["ok"] is False
 
 
-def test_preflight_degrades_for_binaries_without_the_verb(tmp_path: pathlib.Path) -> None:
-    system = _make_system(tmp_path, 'echo "unknown option: --check-config" >&2; exit 1')
+def test_preflight_degrades_for_binaries_without_the_verb(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = _make_system(tmp_path, 'echo "unknown option: --check-config" >&2; exit 1', monkeypatch)
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
