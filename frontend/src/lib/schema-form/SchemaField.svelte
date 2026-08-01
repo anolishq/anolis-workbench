@@ -46,12 +46,21 @@
   const value = $derived(parent[key]);
   const error = $derived(!isObject && !isArray ? validateField(schema, value, required) : null);
 
-  // Nested object sections need their container to exist before children bind.
-  $effect(() => {
-    if (isObject && parent[key] === undefined) parent[key] = {};
-  });
-  const childRecord = $derived(isObject ? asObject(parent[key]) : null);
+  // Nested object sections whose container doesn't exist yet render into a
+  // local draft; the draft is committed to the document on the first child
+  // write. Rendering must never mutate the document — materializing an empty
+  // required-members object (e.g. sim's optional provider{name}) would turn a
+  // valid config invalid without the user touching anything.
+  const draft: UnknownRecord = $state({});
+  const childRecord = $derived(isObject ? (asObject(parent[key]) ?? draft) : null);
   const childConditionals = $derived(childRecord ? resolveConditionals(schema, childRecord) : null);
+
+  function childChanged(): void {
+    if (isObject && asObject(parent[key]) === null && Object.keys(draft).length > 0) {
+      parent[key] = draft;
+    }
+    onChanged();
+  }
 
   function inputTarget(event: Event): HTMLInputElement {
     return event.currentTarget as HTMLInputElement;
@@ -118,7 +127,7 @@
             key={childKey}
             required={childConditionals.required.has(childKey)}
             parent={childRecord}
-            {onChanged}
+            onChanged={childChanged}
             {i2cImport}
           />
         {/if}

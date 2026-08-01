@@ -136,6 +136,29 @@ describe("SchemaForm.svelte (sim envelope)", () => {
     });
   });
 
+  it("rendering never materializes optional object sections (provider stays absent)", async () => {
+    // A legacy sim config without provider is VALID (name is required only
+    // inside the section); rendering the form must not inject provider: {}.
+    const config = reactive({
+      devices: [],
+      simulation: { mode: "inert" },
+    }) as UnknownRecord;
+    const onChanged = vi.fn();
+    render(SchemaForm, { props: { schema: simSchema, value: config, onChanged } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Provider name")).toBeInTheDocument();
+    });
+    expect(config.provider).toBeUndefined();
+    expect(onChanged).not.toHaveBeenCalled();
+
+    // First write into the section commits the draft to the document.
+    const nameInput = screen.getByText("Provider name").parentElement?.querySelector("input");
+    await fireEvent.input(nameInput as HTMLInputElement, { target: { value: "sim-a" } });
+    expect(config.provider).toEqual({ name: "sim-a" });
+    expect(onChanged).toHaveBeenCalled();
+  });
+
   it("tick_rate_hz uses the placeholder, never a fabricated value", () => {
     const config = reactive({
       devices: [],

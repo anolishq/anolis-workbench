@@ -126,7 +126,10 @@ def render(system: dict, project_name: str, *, systems_dir_name: str = "systems"
     # -------------------------------------------------------------------------
     for pid, pdata in topology.get("providers", {}).items():
         config = pdata.get("config")
-        if not isinstance(config, dict):
+        # Skip missing AND empty configs: an unknown-kind provider migrates to
+        # config {}, and emitting "{}" here would shadow the exporter/deploy
+        # fallback that packages a hand-authored providers/<pid>.yaml.
+        if not isinstance(config, dict) or not config:
             continue
         outputs[f"providers/{pid}.yaml"] = yaml.dump(config, default_flow_style=False, sort_keys=False)
 

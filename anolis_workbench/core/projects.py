@@ -255,10 +255,14 @@ def get_project(name: str) -> dict:
     path = system_json_path(name)
     if not path.exists():
         raise FileNotFoundError(f"Project '{name}' not found")
-    system = json.loads(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8")
+    system = json.loads(raw)
     system, migrated = migrations.migrate_system(system)
     if migrated:
         try:
+            backup = path.with_suffix(".json.v1.bak")
+            if not backup.exists():  # keep the FIRST pre-migration document
+                backup.write_text(raw, encoding="utf-8")
             path.write_text(json.dumps(system, indent=2), encoding="utf-8")
         except OSError:
             pass  # read-only workspace: serve the migrated doc, persist next save
@@ -315,10 +319,16 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         project_dir(new_name),
         ignore=shutil.ignore_patterns("running.json", "logs"),
     )
-    system = get_project(new_name)
-    system["meta"]["name"] = new_name
-    system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
-    save_project(new_name, system)
+    try:
+        system = get_project(new_name)
+        system["meta"]["name"] = new_name
+        system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
+        save_project(new_name, system)
+    except Exception:
+        # Don't leave a half-initialized copy behind (e.g. the source fails
+        # validation post-migration) — the source project is untouched.
+        shutil.rmtree(project_dir(new_name), ignore_errors=True)
+        raise
     return system
 
 

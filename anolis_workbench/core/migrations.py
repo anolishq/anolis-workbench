@@ -70,7 +70,9 @@ def _migrate_v1_to_v2(system: dict[str, Any]) -> dict[str, Any]:
 def _sim_config(pdata: dict[str, Any]) -> dict[str, Any]:
     config: dict[str, Any] = {}
 
-    if "provider_name" in pdata:
+    # The old composer seeded provider_name: "" — an empty name violates the
+    # envelope pattern, and the provider defaults the name anyway, so omit it.
+    if pdata.get("provider_name"):
         config["provider"] = {"name": pdata["provider_name"]}
 
     if "startup_policy" in pdata:
@@ -111,7 +113,7 @@ def _bus_provider_config(
 ) -> dict[str, Any]:
     config: dict[str, Any] = {}
 
-    if "provider_name" in pdata:
+    if pdata.get("provider_name"):
         config["provider"] = {"name": pdata["provider_name"]}
 
     hardware: dict[str, Any] = {"bus_path": path_data.get("bus_path", "")}
@@ -134,6 +136,13 @@ def _bus_provider_config(
             d["label"] = dev["label"]
         if "address" in dev:
             d["address"] = dev["address"]
+        # Preserve any other authored device keys (e.g. command_watchdog_ms,
+        # which the bread envelope describes). Migration must be lossless;
+        # keys a schema rejects surface as loud, path-scoped save errors
+        # rather than being silently destroyed here.
+        for key, value in dev.items():
+            if key not in d:
+                d[key] = value
         devices.append(d)
     config["devices"] = devices
 

@@ -105,6 +105,78 @@ def test_render_parity_with_old_renderer_output() -> None:
     assert sim["devices"][1] == {"id": "motorctl0", "type": "motorctl", "max_speed": 3000.0}
 
 
+def test_empty_provider_name_is_omitted_not_migrated_invalid() -> None:
+    """The old composer seeded provider_name: "" on new bread/ezo providers;
+    migrating that to provider.name "" would violate the envelope pattern on a
+    doc the user never touched. It must be omitted (provider defaults the name)."""
+    v1 = _load_v1("mixed-bus-mock")
+    v1["topology"]["providers"]["bread0"]["provider_name"] = ""
+    migrated, _ = migrations.migrate_system(v1)
+    assert "provider" not in migrated["topology"]["providers"]["bread0"]["config"]
+    assert projects.validate_system_payload(migrated) == []
+
+
+def test_bus_device_extras_are_preserved() -> None:
+    """Migration is lossless: authored device keys beyond id/type/label/address
+    (e.g. command_watchdog_ms, which the bread envelope describes) survive."""
+    v1 = _load_v1("mixed-bus-mock")
+    v1["topology"]["providers"]["bread0"]["devices"][0]["command_watchdog_ms"] = 500
+    migrated, _ = migrations.migrate_system(v1)
+    device = migrated["topology"]["providers"]["bread0"]["config"]["devices"][0]
+    assert device["command_watchdog_ms"] == 500
+    assert projects.validate_system_payload(migrated) == []
+
+
+def test_unknown_kind_empty_config_renders_no_yaml() -> None:
+    """An unknown-kind provider migrates to config {}; the renderer must NOT
+    emit '{}' for it, or the exporter/deploy disk fallback for hand-authored
+    provider YAML would be shadowed."""
+    v1 = _load_v1("sim-quickstart")
+    v1["topology"]["providers"]["custom0"] = {"kind": "custom"}
+    migrated, _ = migrations.migrate_system(v1)
+    assert migrated["topology"]["providers"]["custom0"] == {"kind": "custom", "config": {}}
+    outputs = renderer.render(migrated, "custom-test")
+    assert "providers/custom0.yaml" not in outputs
+
+
+def test_get_project_backs_up_the_v1_document(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    systems_root = tmp_path / "systems"
+    monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
+    project_dir = systems_root / "legacy"
+    project_dir.mkdir(parents=True)
+    original = json.dumps(_load_v1("sim-quickstart"))
+    (project_dir / "system.json").write_text(original, encoding="utf-8")
+
+    projects.get_project("legacy")
+
+    backup = project_dir / "system.json.v1.bak"
+    assert backup.read_text(encoding="utf-8") == original
+    # A second load must not clobber the original backup with a v2 doc.
+    projects.get_project("legacy")
+    assert backup.read_text(encoding="utf-8") == original
+
+
+def test_duplicate_project_cleans_up_when_source_fails_validation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """A legal-but-degenerate v1 doc (sim without tick_rate_hz) migrates to a
+    doc the envelope rejects; duplicating it must fail loudly WITHOUT leaving a
+    half-initialized copy on disk."""
+    systems_root = tmp_path / "systems"
+    monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
+    v1 = _load_v1("sim-quickstart")
+    del v1["topology"]["providers"]["sim0"]["tick_rate_hz"]
+    source_dir = systems_root / "legacy"
+    source_dir.mkdir(parents=True)
+    (source_dir / "system.json").write_text(json.dumps(v1), encoding="utf-8")
+
+    with pytest.raises(projects.ProjectValidationError):
+        projects.duplicate_project("legacy", "copy1")
+
+    assert not (systems_root / "copy1").exists()
+    assert (source_dir / "system.json").exists()  # source untouched
+
+
 def test_sim_inert_mode_drops_tick_rate() -> None:
     v1 = _load_v1("sim-quickstart")
     v1["topology"]["providers"]["sim0"]["simulation_mode"] = "inert"
