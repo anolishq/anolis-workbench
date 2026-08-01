@@ -13,6 +13,30 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- `GET /api/provider-schemas` (#270, part of the #271 arc): serves the vendored
+  provider `--config-schema` envelopes (executable profile v1 §2) verbatim —
+  the provider-owned contracts the composer will render config forms from.
+  New `core/provider_schemas.py` registry; the set of known provider kinds is
+  now exactly the set of vendored envelopes.
+
+### Removed
+
+- `catalog/providers.json`, its loaders, and `GET /api/catalog` (#270): the
+  catalog's form-field data (`topology_fields`/`device_types`/`path_fields`)
+  had zero consumers, and its live fields are replaced — kind display labels
+  come from the schema envelopes, build hints from the
+  `anolis-provider-<kind>` org convention, and provider `--check-config` now
+  runs unconditionally in preflight (the verb is universal per protocol#62;
+  unknown-flag binaries still degrade gracefully to "Not yet available").
+
+### Fixed
+
+- Packaged wheels now include `schemas/providers/*.json` (the vendored
+  provider envelopes) — the include glob previously missed the subdirectory.
+
+
 ## [0.13.0] - 2026-07-30
 
 ### Added

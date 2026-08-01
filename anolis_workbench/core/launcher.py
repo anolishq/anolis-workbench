@@ -18,8 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from anolis_workbench.core import paths as paths_module
-
-_CATALOG_PATH = paths_module.CATALOG_PATH
+from anolis_workbench.core import provider_schemas
 
 _state: dict = {
     "project": None,  # active project name
@@ -31,17 +30,6 @@ _state_lock = threading.Lock()
 
 _sse_subscribers: dict[str, list] = {}  # dict[project_name, list[queue.Queue]]
 _sse_lock = threading.Lock()
-
-_catalog_cache: dict | None = None
-
-
-def _load_catalog() -> dict:
-    global _catalog_cache
-    if _catalog_cache is None:
-        with open(_CATALOG_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-        _catalog_cache = {p["kind"]: p for p in data["providers"]}
-    return _catalog_cache
 
 
 def running_json_path(name: str) -> pathlib.Path:
@@ -314,7 +302,6 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     )
 
     checks: list[dict] = []
-    catalog = _load_catalog()
 
     # Re-render YAML to disk first so --check-config sees current state
     try:
@@ -350,9 +337,11 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         exe_str = system.get("paths", {}).get("providers", {}).get(pid, {}).get("executable", "")
         exe = _resolve_executable_path(exe_str)
         kind = pcfg.get("kind", "")
-        kind_info = catalog.get(kind, {})
-        repo = kind_info.get("repo")
-        docs = kind_info.get("build_docs")
+        # Build hints follow the org convention (releases.provider_repo) for any
+        # kind with a vendored config-schema envelope.
+        known_kind = provider_schemas.get_envelope(kind) is not None
+        repo = f"anolis-provider-{kind}" if known_kind else None
+        docs = "docs/" if known_kind else None
         _exists_check(
             checks,
             f"Provider {pid} binary exists",
@@ -385,11 +374,10 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         )
     )
 
-    # Check 6+: Provider --check-config (only for kinds with check_config_flag)
-    for pid, pcfg in providers.items():
-        kind = pcfg.get("kind", "")
-        if not catalog.get(kind, {}).get("check_config_flag"):
-            continue
+    # Check 6+: Provider --check-config. The verb is universal per the
+    # executable profile (protocol#62); _check_config_binary degrades gracefully
+    # ("Not yet available") for a binary that does not recognize the flag.
+    for pid in providers:
         exe_str = system.get("paths", {}).get("providers", {}).get(pid, {}).get("executable", "")
         exe = _resolve_executable_path(exe_str)
         yaml_path = project_dir / "providers" / f"{pid}.yaml"

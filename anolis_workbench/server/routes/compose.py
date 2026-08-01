@@ -6,6 +6,7 @@ import json
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core import provider_schemas
 
 
 def list_projects(handler) -> None:
@@ -149,12 +150,13 @@ def delete_project(handler, name: str) -> None:
         handler._json(404, {"error": f"Project '{name}' not found"})
 
 
-def serve_catalog(handler) -> None:
-    path = paths_module.CATALOG_PATH
-    if not path.exists():
-        handler._json(404, {"error": "Catalog not found"})
-        return
-    handler._json(200, json.loads(path.read_text(encoding="utf-8")))
+def serve_provider_schemas(handler) -> None:
+    """Provider config-schema envelopes, passed through verbatim (#270).
+
+    kind -> the vendored `--config-schema` envelope (executable profile v1 §2);
+    the composer renders provider config forms from these schemas.
+    """
+    handler._json(200, {"schema_version": 1, "providers": provider_schemas.all_envelopes()})
 
 
 def serve_templates(handler) -> None:

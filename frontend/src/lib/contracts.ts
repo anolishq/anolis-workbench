@@ -54,13 +54,16 @@ export interface PreflightResult extends UnknownRecord {
   checks: PreflightCheck[];
 }
 
-export interface ProviderCatalogEntry extends UnknownRecord {
-  kind: string;
-  display_name?: string;
+export interface ProviderSchemaEnvelope extends UnknownRecord {
+  config_schema_version: number;
+  provider?: string;
+  provider_version?: string;
+  schema: UnknownRecord;
 }
 
-export interface ProviderCatalog extends UnknownRecord {
-  providers?: ProviderCatalogEntry[];
+export interface ProviderSchemasResponse extends UnknownRecord {
+  schema_version: number;
+  providers: Record<string, ProviderSchemaEnvelope>;
 }
 
 export type ProviderKind = "sim" | "bread" | "ezo" | string;
