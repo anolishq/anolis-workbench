@@ -28,17 +28,17 @@ def _fake_binary(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
 
 
 def _make_system(tmp_path: pathlib.Path, provider_body: str) -> dict:
-    system = json.loads((TEMPLATES / "sim-quickstart" / "system.json").read_text(encoding="utf-8"))
+    system: dict = json.loads((TEMPLATES / "sim-quickstart" / "system.json").read_text(encoding="utf-8"))
     runtime_bin = _fake_binary(tmp_path, "anolis-runtime", 'test "$1" = --check-config && test -f "$2" && exit 0')
     provider_bin = _fake_binary(tmp_path, "anolis-provider-sim", provider_body)
     system["paths"]["runtime_executable"] = str(runtime_bin)
     system["paths"]["providers"]["sim0"]["executable"] = str(provider_bin)
     system["topology"]["runtime"]["http_port"] = 39321  # avoid a false port-in-use failure
-    return system  # type: ignore[no-any-return]
+    return system
 
 
 def _check(result: dict, name: str) -> dict:
-    matches = [c for c in result["checks"] if c["name"] == name]
+    matches: list[dict] = [c for c in result["checks"] if c["name"] == name]
     assert matches, [c["name"] for c in result["checks"]]
     return matches[0]
 

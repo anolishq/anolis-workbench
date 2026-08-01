@@ -104,7 +104,8 @@
       rows="3"
       placeholder="https://workbench.example"
       value={(rt.cors_origins ?? []).join("\n")}
-      oninput={(e: Event) => setCorsOrigins(textAreaTarget(e).value)}></textarea>
+      oninput={(e: Event) => setCorsOrigins(textAreaTarget(e).value)}
+    ></textarea>
   </div>
 
   <div class="form-group form-group-inline">
