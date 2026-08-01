@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Sync vendored upstream schemas from an anolis release artifact.
+"""Sync vendored upstream schemas from an upstream release artifact.
 
-This script downloads a schema release bundle from:
-  https://github.com/anolishq/anolis/releases/download/<tag>/<asset>
+This script downloads a schema release asset from:
+  https://github.com/<upstream-repo>/releases/download/<tag>/<asset>
 
 Then it:
-1. Extracts the schema file from the bundle.
-2. Verifies the bundle SHA256 against the release manifest.
-3. Updates the vendored schema copy in anolis_workbench/schemas/.
+1. Obtains the schema document (extracted from a tar bundle, or the raw asset
+   itself for provider config-schema envelopes).
+2. Verifies the asset SHA256 against the release manifest sidecar (and, for
+   provider envelopes, the executable-profile v1 §2 envelope shape).
+3. Updates the vendored schema copy under anolis_workbench/schemas/.
 4. Rewrites the lock file in release-artifact mode with pinned checksums.
+
+Anolis schemas come from anolishq/anolis; provider config-schema envelopes
+come from each provider's own repo (see each entry's default_repo).
 
 Supported schemas:
   --schema runtime-config    -> anolis-{VERSION}-runtime-config-schema.tar.gz
@@ -35,7 +40,7 @@ from urllib.request import urlopen
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-_SCHEMA_CONFIGS: dict[str, dict[str, str]] = {
+_SCHEMA_CONFIGS: dict[str, dict[str, str | bool]] = {
     "runtime-config": {
         "asset_template": "anolis-{version}-runtime-config-schema.tar.gz",
         "manifest_asset": "runtime-config-schema-manifest.json",
@@ -57,7 +62,50 @@ _SCHEMA_CONFIGS: dict[str, dict[str, str]] = {
         "vendored_path": "contracts/runtime-http.openapi.v0.yaml",
         "lock_path": "contracts/upstream/anolis/runtime-http.lock.json",
     },
+    # Provider config-schema envelopes (executable profile v1 §2): the asset IS
+    # the schema document (raw JSON, no tar member), published by each
+    # provider's release workflow with a versioned sha256 manifest sidecar.
+    "provider-config-ezo": {
+        "default_repo": "anolishq/anolis-provider-ezo",
+        "asset_template": "anolis-provider-ezo-{version}-config-schema.json",
+        "manifest_asset_template": "anolis-provider-ezo-{version}-config-schema-manifest.json",
+        "raw_asset": True,
+        "envelope": True,
+        "vendored_path": "anolis_workbench/schemas/providers/ezo.config-schema.json",
+        "lock_path": "contracts/upstream/providers/ezo-config-schema.lock.json",
+    },
+    "provider-config-bread": {
+        "default_repo": "anolishq/anolis-provider-bread",
+        "asset_template": "anolis-provider-bread-{version}-config-schema.json",
+        "manifest_asset_template": "anolis-provider-bread-{version}-config-schema-manifest.json",
+        "raw_asset": True,
+        "envelope": True,
+        "vendored_path": "anolis_workbench/schemas/providers/bread.config-schema.json",
+        "lock_path": "contracts/upstream/providers/bread-config-schema.lock.json",
+    },
+    "provider-config-sim": {
+        "default_repo": "anolishq/anolis-provider-sim",
+        "asset_template": "anolis-provider-sim-{version}-config-schema.json",
+        "manifest_asset_template": "anolis-provider-sim-{version}-config-schema-manifest.json",
+        "raw_asset": True,
+        "envelope": True,
+        "vendored_path": "anolis_workbench/schemas/providers/sim.config-schema.json",
+        "lock_path": "contracts/upstream/providers/sim-config-schema.lock.json",
+    },
 }
+
+
+def validate_envelope_shape(schema_bytes: bytes) -> None:
+    """Provider envelopes must satisfy the executable profile v1 §2 shape."""
+    try:
+        doc = json.loads(schema_bytes.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"provider envelope is not parseable JSON: {exc}") from exc
+    version = doc.get("config_schema_version") if isinstance(doc, dict) else None
+    if not isinstance(doc, dict) or isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise RuntimeError("provider envelope must carry an integer config_schema_version >= 1")
+    if not isinstance(doc.get("schema"), dict):
+        raise RuntimeError("provider envelope 'schema' must be a JSON object")
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -108,8 +156,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--upstream-repo",
-        default="anolishq/anolis",
-        help="Upstream GitHub repo in owner/name form",
+        default=None,
+        help="Upstream GitHub repo in owner/name form (default: the schema entry's repo)",
     )
     parser.add_argument(
         "--repo-root",
@@ -127,18 +175,29 @@ def main() -> int:
     schema_out = (repo_root / cfg["vendored_path"]).resolve()
     lock_out = (repo_root / cfg["lock_path"]).resolve()
 
+    upstream_repo = args.upstream_repo or cfg.get("default_repo", "anolishq/anolis")
+
     version = args.tag[1:] if args.tag.startswith("v") else args.tag
     asset = cfg["asset_template"].format(version=version)
-    manifest_asset = cfg["manifest_asset"]
+    if "manifest_asset_template" in cfg:
+        manifest_asset = cfg["manifest_asset_template"].format(version=version)
+    else:
+        manifest_asset = cfg["manifest_asset"]
 
-    asset_url = f"https://github.com/{args.upstream_repo}/releases/download/{args.tag}/{asset}"
-    manifest_url = f"https://github.com/{args.upstream_repo}/releases/download/{args.tag}/{manifest_asset}"
+    asset_url = f"https://github.com/{upstream_repo}/releases/download/{args.tag}/{asset}"
+    manifest_url = f"https://github.com/{upstream_repo}/releases/download/{args.tag}/{manifest_asset}"
 
     print(f"Fetching {asset_url} ...")
     asset_bytes = fetch_url_bytes(asset_url)
     asset_sha = sha256_bytes(asset_bytes)
 
-    schema_bytes = extract_tar_member(asset_bytes, cfg["schema_member"])
+    if cfg.get("raw_asset"):
+        # The asset IS the schema document (provider config-schema envelopes).
+        schema_bytes = asset_bytes
+    else:
+        schema_bytes = extract_tar_member(asset_bytes, cfg["schema_member"])
+    if cfg.get("envelope"):
+        validate_envelope_shape(schema_bytes)
     schema_sha = sha256_bytes(schema_bytes)
 
     print(f"Fetching {manifest_url} ...")
@@ -166,14 +225,15 @@ def main() -> int:
     lock_payload = {
         "schema_version": 2,
         "source": {
-            "repo": args.upstream_repo,
-            "path": cfg["schema_member"],
+            "repo": upstream_repo,
+            "path": asset if cfg.get("raw_asset") else cfg["schema_member"],
             "tag": args.tag,
         },
         "distribution": {
             "mode": "release-artifact",
+            "asset_format": "raw" if cfg.get("raw_asset") else "tar-member",
             "release": {
-                "repo": args.upstream_repo,
+                "repo": upstream_repo,
                 "tag": args.tag,
                 "asset": asset,
                 "manifest_asset": manifest_asset,
@@ -188,11 +248,11 @@ def main() -> int:
 
     print("\nUpstream schema sync summary")
     print(f"  schema:          {args.schema}")
-    print(f"  repo:            {args.upstream_repo}")
+    print(f"  repo:            {upstream_repo}")
     print(f"  tag:             {args.tag}")
     print(f"  asset:           {asset}")
     print(f"  asset_sha256:    {asset_sha}")
-    print(f"  schema_member:   {cfg['schema_member']}")
+    print(f"  schema_member:   {cfg.get('schema_member', '(raw asset)')}")
     print(f"  schema_sha256:   {schema_sha}")
     print(f"  schema_out:      {schema_out}")
     print(f"  lock_out:        {lock_out}")

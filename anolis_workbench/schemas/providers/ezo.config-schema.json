@@ -1,0 +1,157 @@
+{
+  "config_schema_version": 1,
+  "provider": "anolis-provider-ezo",
+  "provider_version": "0.3.4",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "anolis-provider-ezo configuration",
+    "description": "Atlas Scientific EZO I2C sensors over a shared bus.",
+    "properties": {
+      "provider": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Provider name",
+            "description": "Stable identifier for this provider instance.",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+            "default": "anolis-provider-ezo"
+          }
+        },
+        "additionalProperties": false
+      },
+      "hardware": {
+        "type": "object",
+        "properties": {
+          "bus_path": {
+            "type": "string",
+            "title": "I2C bus path",
+            "minLength": 1,
+            "x-anolis-placeholder": "/dev/i2c-1 or mock://name"
+          },
+          "query_delay_us": {
+            "type": "integer",
+            "title": "Query delay (µs)",
+            "description": "Delay between an EZO command write and its reply read.",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 300000
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "title": "I/O timeout (ms)",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 300
+          },
+          "retry_count": {
+            "type": "integer",
+            "title": "I/O retries",
+            "minimum": 0,
+            "maximum": 2147483647,
+            "default": 2
+          }
+        },
+        "required": [
+          "bus_path"
+        ],
+        "additionalProperties": false
+      },
+      "discovery": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Discovery mode",
+            "description": "EZO v1 is manual-only: every runtime device has a known expected identity before the provider probes the bus.",
+            "const": "manual"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "devices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Device id",
+              "description": "Stable device identifier; unique across devices.",
+              "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+              "x-anolis-unique": true
+            },
+            "type": {
+              "type": "string",
+              "title": "Device type",
+              "oneOf": [
+                {
+                  "const": "ph",
+                  "title": "pH Sensor"
+                },
+                {
+                  "const": "do",
+                  "title": "Dissolved Oxygen"
+                },
+                {
+                  "const": "ec",
+                  "title": "Conductivity"
+                },
+                {
+                  "const": "orp",
+                  "title": "ORP"
+                },
+                {
+                  "const": "rtd",
+                  "title": "Temperature (RTD)"
+                },
+                {
+                  "const": "hum",
+                  "title": "Humidity"
+                }
+              ]
+            },
+            "label": {
+              "type": "string",
+              "title": "Label",
+              "description": "Human-readable label; defaults to the device id.",
+              "minLength": 1
+            },
+            "address": {
+              "title": "I2C address",
+              "description": "7-bit address in the 0x08-0x77 range; unique across devices.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 8,
+                  "maximum": 119
+                },
+                {
+                  "type": "string",
+                  "pattern": "^0[xX](0[89a-fA-F]|[1-6][0-9a-fA-F]|7[0-7])$"
+                }
+              ],
+              "x-anolis-type": "i2c_address",
+              "x-anolis-unique": true
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "address"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "hardware",
+      "discovery"
+    ],
+    "additionalProperties": false
+  }
+}

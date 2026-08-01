@@ -1,0 +1,190 @@
+{
+  "config_schema_version": 1,
+  "provider": "anolis-provider-sim",
+  "provider_version": "0.2.7",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "anolis-provider-sim configuration",
+    "description": "Simulated devices for development and testing.",
+    "properties": {
+      "provider": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Provider name",
+            "description": "Stable identifier for this provider instance.",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "startup_policy": {
+        "type": "string",
+        "title": "Startup policy",
+        "oneOf": [
+          {
+            "const": "strict",
+            "title": "Abort on first device init failure"
+          },
+          {
+            "const": "degraded",
+            "title": "Continue with the devices that initialized"
+          }
+        ],
+        "default": "strict"
+      },
+      "devices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Device id",
+              "minLength": 1,
+              "not": {
+                "const": "chaos_control"
+              },
+              "x-anolis-unique": true
+            },
+            "type": {
+              "type": "string",
+              "title": "Device type",
+              "description": "A device type registered with the factory; the built-in set is tempctl, motorctl, relayio, analogsensor.",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "type"
+          ]
+        }
+      },
+      "simulation": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Simulation mode",
+            "oneOf": [
+              {
+                "const": "non_interacting",
+                "title": "Local physics (fixed tick)"
+              },
+              {
+                "const": "inert",
+                "title": "No automatic updates"
+              },
+              {
+                "const": "sim",
+                "title": "External simulation engine"
+              }
+            ]
+          },
+          "tick_rate_hz": {
+            "type": "number",
+            "title": "Tick rate (Hz)",
+            "description": "Required for the ticking modes (non_interacting, sim).",
+            "minimum": 0.1,
+            "maximum": 1000,
+            "x-anolis-placeholder": "10"
+          },
+          "physics_config": {
+            "type": "string",
+            "title": "Physics config path",
+            "description": "Path to the external physics config; required for mode sim, resolved relative to this config file.",
+            "minLength": 1
+          },
+          "ambient_temp_c": {
+            "type": "number",
+            "title": "Ambient temperature (°C)"
+          },
+          "ambient_signal_path": {
+            "type": "string",
+            "title": "Ambient signal path",
+            "description": "Signal path that publishes the ambient temperature; requires ambient_temp_c.",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "dependentRequired": {
+          "ambient_signal_path": [
+            "ambient_temp_c"
+          ]
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "inert"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "tick_rate_hz": false,
+                "physics_config": false,
+                "ambient_temp_c": false,
+                "ambient_signal_path": false
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "non_interacting"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "tick_rate_hz"
+              ],
+              "properties": {
+                "physics_config": false,
+                "ambient_temp_c": false,
+                "ambient_signal_path": false
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "sim"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "tick_rate_hz",
+                "physics_config"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "required": [
+      "simulation"
+    ]
+  }
+}

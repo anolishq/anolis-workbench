@@ -1,0 +1,216 @@
+{
+  "config_schema_version": 1,
+  "provider": "anolis-provider-bread",
+  "provider_version": "0.3.8",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "anolis-provider-bread configuration",
+    "description": "BREAD-over-CRUMBS hardware devices (RLHT, DCMT) on a shared I2C bus.",
+    "properties": {
+      "provider": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Provider name",
+            "description": "Stable identifier for this provider instance.",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+            "default": "anolis-provider-bread"
+          }
+        },
+        "additionalProperties": false
+      },
+      "hardware": {
+        "type": "object",
+        "properties": {
+          "bus_path": {
+            "type": "string",
+            "title": "I2C bus path",
+            "minLength": 1,
+            "x-anolis-placeholder": "/dev/i2c-1 or mock://name"
+          },
+          "query_delay_us": {
+            "type": "integer",
+            "title": "Query delay (µs)",
+            "description": "Delay between a CRUMBS query write and its reply read.",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 10000
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "title": "I/O timeout (ms)",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 100
+          },
+          "retry_count": {
+            "type": "integer",
+            "title": "I/O retries",
+            "minimum": 0,
+            "maximum": 2147483647,
+            "default": 2
+          }
+        },
+        "required": [
+          "bus_path"
+        ],
+        "additionalProperties": false
+      },
+      "discovery": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Discovery mode",
+            "description": "manual probes exactly the listed addresses; scan walks the bus.",
+            "oneOf": [
+              {
+                "const": "scan",
+                "title": "Scan the bus"
+              },
+              {
+                "const": "manual",
+                "title": "Manual address list"
+              }
+            ]
+          },
+          "addresses": {
+            "type": "array",
+            "title": "Manual addresses",
+            "description": "Probed in order when mode is manual; duplicates rejected.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 8,
+                  "maximum": 119
+                },
+                {
+                  "type": "string",
+                  "pattern": "^0[xX](0[89a-fA-F]|[1-6][0-9a-fA-F]|7[0-7])$"
+                }
+              ],
+              "x-anolis-type": "i2c_address"
+            },
+            "minItems": 1,
+            "uniqueItems": true,
+            "x-anolis-unique": true
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "manual"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "addresses"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "scan"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "addresses": false
+              }
+            }
+          }
+        ]
+      },
+      "devices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "Device id",
+              "description": "Stable device identifier; unique across devices.",
+              "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+              "x-anolis-unique": true
+            },
+            "type": {
+              "type": "string",
+              "title": "Device type",
+              "oneOf": [
+                {
+                  "const": "rlht",
+                  "title": "RLHT Heater"
+                },
+                {
+                  "const": "dcmt",
+                  "title": "DCMT Motor"
+                }
+              ]
+            },
+            "label": {
+              "type": "string",
+              "title": "Label",
+              "description": "Human-readable label; defaults to the device id.",
+              "minLength": 1
+            },
+            "address": {
+              "title": "I2C address",
+              "description": "7-bit address in the 0x08-0x77 range; unique across devices.",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 8,
+                  "maximum": 119
+                },
+                {
+                  "type": "string",
+                  "pattern": "^0[xX](0[89a-fA-F]|[1-6][0-9a-fA-F]|7[0-7])$"
+                }
+              ],
+              "x-anolis-type": "i2c_address",
+              "x-anolis-unique": true
+            },
+            "command_watchdog_ms": {
+              "type": "integer",
+              "title": "Command watchdog (ms)",
+              "description": "Firmware command-watchdog timeout; 0 never arms. Wire field is u16.",
+              "minimum": 0,
+              "maximum": 65535,
+              "default": 0
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "address"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "hardware",
+      "discovery"
+    ],
+    "additionalProperties": false
+  }
+}
