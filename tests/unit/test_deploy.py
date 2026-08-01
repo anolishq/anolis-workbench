@@ -30,6 +30,40 @@ def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _make_system() -> dict:
     return {
+        "schema_version": 2,
+        "meta": {"name": "Deploy Fixture"},
+        "topology": {
+            "runtime": {
+                "name": "anolis-main",
+                "http_port": 8080,
+                "http_bind": "127.0.0.1",
+                "polling_interval_ms": 500,
+                "automation_enabled": True,
+                "behavior_tree_path": "behaviors/local.xml",
+                "providers": [{"id": "sim0", "kind": "sim", "timeout_ms": 5000, "restart_policy": {"enabled": False}}],
+            },
+            "providers": {
+                "sim0": {
+                    "kind": "sim",
+                    "config": {
+                        "provider": {"name": "sim0"},
+                        "startup_policy": "degraded",
+                        "devices": [{"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0}],
+                        "simulation": {"mode": "non_interacting", "tick_rate_hz": 10.0},
+                    },
+                }
+            },
+        },
+        "paths": {
+            "runtime_executable": "build/dev-release/core/anolis-runtime",
+            "providers": {"sim0": {"executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim"}},
+        },
+    }
+
+
+def _make_v1_system() -> dict:
+    """The pre-#270 document shape — materialize must migrate it defensively."""
+    return {
         "schema_version": 1,
         "meta": {"name": "Deploy Fixture"},
         "topology": {
@@ -111,6 +145,28 @@ def test_materialize_produces_install_sh_layout(tmp_path: pathlib.Path) -> None:
     assert (pd / "behaviors" / "local.xml").is_file()
     assert mat.runtime_version == "0.1.27"
     assert mat.provider_kinds == {"sim0": "sim"}
+
+
+def test_materialize_accepts_v1_document(tmp_path: pathlib.Path) -> None:
+    """A v1 system.json reaching deploy directly is migrated, and its rendered
+    provider config matches the native-shape render (addresses/fields aside,
+    the sim fixture has no dual-form fields, so parity is exact)."""
+    ws = _make_workspace(tmp_path)
+    mat_v1 = deploy.materialize_project_dir(
+        system=_make_v1_system(),
+        project_name="deploy-v1",
+        workspace_dir=ws,
+        dest=tmp_path / "out-v1",
+    )
+    mat_v2 = deploy.materialize_project_dir(
+        system=_make_system(),
+        project_name="deploy-v1",
+        workspace_dir=ws,
+        dest=tmp_path / "out-v2",
+    )
+    v1_cfg = yaml.safe_load((mat_v1.project_dir / "config" / "provider-sim0.yaml").read_text(encoding="utf-8"))
+    v2_cfg = yaml.safe_load((mat_v2.project_dir / "config" / "provider-sim0.yaml").read_text(encoding="utf-8"))
+    assert v1_cfg == v2_cfg
 
 
 def test_materialize_writes_production_paths(tmp_path: pathlib.Path) -> None:

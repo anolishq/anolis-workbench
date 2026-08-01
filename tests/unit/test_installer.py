@@ -41,8 +41,10 @@ class TestProvisionProject:
         assert system["paths"]["runtime_executable"] == str(prefix / "bin" / "anolis-runtime")
         assert system["paths"]["providers"]["bread0"]["executable"] == str(prefix / "bin" / "anolis-provider-bread")
         assert system["paths"]["providers"]["ezo0"]["executable"] == str(prefix / "bin" / "anolis-provider-ezo")
-        # bus_path should remain unchanged
-        assert system["paths"]["providers"]["bread0"]["bus_path"] == "/dev/i2c-1"
+        # Hardware wiring lives in the provider-native config and must be untouched
+        # by the executable-path patching.
+        assert system["topology"]["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "/dev/i2c-1"
+        assert "bus_path" not in system["paths"]["providers"]["bread0"]
 
         # Check meta was updated
         assert system["meta"]["name"] == "test-project"

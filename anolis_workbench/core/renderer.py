@@ -14,7 +14,7 @@ def render(system: dict, project_name: str, *, systems_dir_name: str = "systems"
     Render a system.json dict into YAML config strings.
 
     Args:
-        system:       Parsed system.json dict (schema_version 1).
+        system:       Parsed system.json dict (schema_version 2).
         project_name: Name of the project directory under systems/.
                       Used to build the provider config file paths that the
                       runtime will pass to each provider via --config.
@@ -118,39 +118,19 @@ def render(system: dict, project_name: str, *, systems_dir_name: str = "systems"
     outputs["anolis-runtime.yaml"] = yaml.dump(runtime_doc, default_flow_style=False, sort_keys=False)
 
     # -------------------------------------------------------------------------
-    # Per-provider config files
+    # Per-provider config files — passthrough (#270)
+    #
+    # system.json v2 stores each provider's config in the provider-native
+    # shape its --config-schema envelope describes, so rendering is a verbatim
+    # YAML dump. No per-kind knowledge lives here anymore.
     # -------------------------------------------------------------------------
     for pid, pdata in topology.get("providers", {}).items():
-        kind = pdata["kind"]
-        path_data = provider_paths.get(pid, {})
-
-        if kind == "sim":
-            doc = _render_sim(pdata)
-        elif kind == "bread":
-            doc = _render_bread(pdata, path_data)
-        elif kind == "ezo":
-            doc = _render_ezo(pdata, path_data)
-        elif kind == "custom":
-            # Custom providers manage their own config files.
+        config = pdata.get("config")
+        if not isinstance(config, dict):
             continue
-        else:
-            continue
-
-        outputs[f"providers/{pid}.yaml"] = yaml.dump(doc, default_flow_style=False, sort_keys=False)
+        outputs[f"providers/{pid}.yaml"] = yaml.dump(config, default_flow_style=False, sort_keys=False)
 
     return outputs
-
-
-# ---------------------------------------------------------------------------
-# Provider-specific renderers
-# ---------------------------------------------------------------------------
-
-
-def _hex_to_int(addr) -> int:
-    """Convert a hex string like '0x0A' or a bare integer to int."""
-    if isinstance(addr, str):
-        return int(addr, 16)
-    return int(addr)
 
 
 def _runtime_telemetry(rt: dict) -> dict:
@@ -180,101 +160,3 @@ def _runtime_telemetry(rt: dict) -> dict:
             influx_out[key] = value
 
     return {"enabled": bool(enabled), "influxdb": influx_out}
-
-
-def _render_sim(pdata: dict) -> dict:
-    doc: dict = {}
-
-    if "provider_name" in pdata:
-        doc["provider"] = {"name": pdata["provider_name"]}
-
-    if "startup_policy" in pdata:
-        doc["startup_policy"] = pdata["startup_policy"]
-
-    devices = []
-    for dev in pdata.get("devices", []):
-        d: dict = {"id": dev["id"], "type": dev["type"]}
-        if dev["type"] == "tempctl" and "initial_temp" in dev:
-            d["initial_temp"] = dev["initial_temp"]
-        elif dev["type"] == "motorctl" and "max_speed" in dev:
-            d["max_speed"] = dev["max_speed"]
-        devices.append(d)
-    doc["devices"] = devices
-
-    simulation_cfg = pdata.get("simulation")
-    if not isinstance(simulation_cfg, dict):
-        simulation_cfg = {}
-
-    mode = pdata.get("simulation_mode") or simulation_cfg.get("mode") or "non_interacting"
-    sim_section: dict = {"mode": mode}
-    tick_rate_hz = pdata.get("tick_rate_hz", simulation_cfg.get("tick_rate_hz"))
-    if mode != "inert" and tick_rate_hz is not None:
-        sim_section["tick_rate_hz"] = tick_rate_hz
-    doc["simulation"] = sim_section
-
-    return doc
-
-
-def _render_bread(pdata: dict, path_data: dict) -> dict:
-    doc: dict = {}
-
-    if "provider_name" in pdata:
-        doc["provider"] = {"name": pdata["provider_name"]}
-
-    # No require_live_session: bread 0.3.0 removed the field and rejects it as an
-    # unknown key. The intent now rides on bus_path — a real path opens a live
-    # CRUMBS session and startup throws if the bus cannot be opened, while a
-    # mock:// path seeds an inventory instead.
-    hardware: dict = {"bus_path": path_data.get("bus_path", "")}
-    if "query_delay_us" in pdata:
-        hardware["query_delay_us"] = pdata["query_delay_us"]
-    if "timeout_ms" in pdata:
-        hardware["timeout_ms"] = pdata["timeout_ms"]
-    if "retry_count" in pdata:
-        hardware["retry_count"] = pdata["retry_count"]
-    doc["hardware"] = hardware
-
-    addresses = [_hex_to_int(dev["address"]) for dev in pdata.get("devices", []) if "address" in dev]
-    doc["discovery"] = {"mode": "manual", "addresses": addresses}
-
-    devices = []
-    for dev in pdata.get("devices", []):
-        d: dict = {"id": dev["id"], "type": dev["type"]}
-        if "label" in dev:
-            d["label"] = dev["label"]
-        if "address" in dev:
-            d["address"] = _hex_to_int(dev["address"])
-        devices.append(d)
-    doc["devices"] = devices
-
-    return doc
-
-
-def _render_ezo(pdata: dict, path_data: dict) -> dict:
-    doc: dict = {}
-
-    if "provider_name" in pdata:
-        doc["provider"] = {"name": pdata["provider_name"]}
-
-    hardware: dict = {"bus_path": path_data.get("bus_path", "")}
-    if "query_delay_us" in pdata:
-        hardware["query_delay_us"] = pdata["query_delay_us"]
-    if "timeout_ms" in pdata:
-        hardware["timeout_ms"] = pdata["timeout_ms"]
-    if "retry_count" in pdata:
-        hardware["retry_count"] = pdata["retry_count"]
-    doc["hardware"] = hardware
-
-    doc["discovery"] = {"mode": "manual"}
-
-    devices = []
-    for dev in pdata.get("devices", []):
-        d: dict = {"id": dev["id"], "type": dev["type"]}
-        if "label" in dev:
-            d["label"] = dev["label"]
-        if "address" in dev:
-            d["address"] = _hex_to_int(dev["address"])
-        devices.append(d)
-    doc["devices"] = devices
-
-    return doc

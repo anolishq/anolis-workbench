@@ -171,8 +171,9 @@ def test_renderer_tolerates_missing_provider_path_entries():
     rt_doc = yaml.safe_load(outputs["anolis-runtime.yaml"])
     bread_entry = next(p for p in rt_doc["providers"] if p["id"] == "bread0")
     assert bread_entry["command"] == ""
+    # bus_path lives in the provider-native config, not paths — unaffected.
     bread_doc = yaml.safe_load(outputs["providers/bread0.yaml"])
-    assert bread_doc["hardware"]["bus_path"] == ""
+    assert bread_doc["hardware"]["bus_path"] == "mock://mixed-bus"
 
 
 def test_behavior_tree_path_renders_canonical_runtime_key():
