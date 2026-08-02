@@ -40,9 +40,13 @@ log "Side A: anolis-provision install (workbench deploy)"
 uv run anolis-provision install --project "${PROJECT}" --template sim-quickstart --no-start
 snapshot a
 
-# Reuse the exact workspace system for side B so both derive from one config.
-SYSTEM_JSON="${HOME}/.anolis/systems/${PROJECT}/system.json"
-[[ -f "${SYSTEM_JSON}" ]] || { echo "workspace system.json missing"; exit 1; }
+# Both sides derive from ONE config: the workspace project side A authored.
+# Since #255 that project IS the canonical artifact set (machine-profile.yaml +
+# config/), which is what install.sh consumes directly — there is no
+# intermediate document to hand over.
+PROJECT_DIR="${HOME}/.anolis/systems/${PROJECT}"
+[[ -f "${PROJECT_DIR}/machine-profile.yaml" ]] \
+    || { echo "workspace machine-profile.yaml missing"; exit 1; }
 
 # --- Reset the target -------------------------------------------------------
 log "Uninstalling (reset target)"
@@ -55,7 +59,7 @@ sudo "${INSTALL_SH}" --uninstall
 
 # --- Side B: stage an offline bundle from the same config, install it -------
 log "Side B: anolis-provision bundle (install.sh --stage) + install.sh --local"
-uv run anolis-provision bundle --project "${PROJECT}" --system "${SYSTEM_JSON}" \
+uv run anolis-provision bundle --project "${PROJECT}" \
     --arch "${ARCH}" --out "${WORK}/bundles"
 TARBALL=$(ls "${WORK}/bundles/anolis-${PROJECT}-"*.tar.gz)
 sudo "${INSTALL_SH}" --local "${TARBALL}" --no-start

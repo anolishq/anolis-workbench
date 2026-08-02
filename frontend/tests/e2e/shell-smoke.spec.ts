@@ -78,14 +78,26 @@ test.beforeEach(async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        name: "alpha",
-        topology: {
-          runtime: {
-            http_bind: "127.0.0.1",
-            http_port: 8080,
-          },
-          providers: [],
+        format: "machine-profile",
+        authored: true,
+        meta: { name: "alpha" },
+        profile: {
+          schema_version: 1,
+          machine_id: "alpha",
+          display_name: "alpha",
+          runtime_profiles: { manual: "config/anolis-runtime.manual.yaml" },
+          providers: {},
         },
+        variants: {
+          manual: {
+            runtime: { name: "alpha" },
+            http: { enabled: true, bind: "127.0.0.1", port: 8080 },
+            providers: [],
+          },
+        },
+        providers: {},
+        host_paths: { runtime_executable: "", providers: {} },
+        launch: { variant: "manual" },
       }),
     });
   });
