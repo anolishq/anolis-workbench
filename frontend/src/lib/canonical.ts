@@ -87,22 +87,49 @@ export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigD
 }
 
 /**
- * Why this runtime config is not inert, or null — mirrors install.sh, which
- * REFUSES to install a `manual` variant that boots into automation.
+ * Why this runtime config is not inert, or null.
+ *
+ * Mirrors install.sh's install-time gate, which refuses a non-inert `manual`
+ * variant. That gate is an awk pass over the raw YAML, so it is blunter than a
+ * structural reading and this has to match its bluntness: `automation:` present
+ * but empty dies, the scan is not depth-anchored (a hook or flag nested at any
+ * depth counts), and `enabled` is compared as text so only `false` is inert.
  */
 export function inertnessViolation(doc: RuntimeConfigDoc | null | undefined): string | null {
   if (!doc || !("automation" in doc)) return null;
   const automation = doc.automation;
-  if (automation === null || automation === undefined) return null;
+  if (automation === null || automation === undefined) {
+    return "automation is present but empty (install.sh requires a plain block mapping)";
+  }
   if (typeof automation !== "object" || Array.isArray(automation)) {
     return "automation must be a mapping";
   }
-  const enabled = (automation as UnknownRecord).enabled;
-  if (typeof enabled === "string") {
-    return `automation.enabled is the string "${enabled}"`;
+  if (Object.keys(automation).length === 0) {
+    return "automation is an empty mapping (install.sh requires a plain block mapping)";
   }
-  if (enabled) return "automation.enabled is true";
-  if ("mode_transition_hooks" in automation) return "automation.mode_transition_hooks is present";
+  return nestedAutomationViolation(automation, "automation");
+}
+
+function nestedAutomationViolation(node: unknown, path: string): string | null {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const nested = nestedAutomationViolation(node[i], `${path}[${i}]`);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof node !== "object" || node === null) return null;
+
+  const record = node as UnknownRecord;
+  if ("mode_transition_hooks" in record) return `${path}.mode_transition_hooks is present`;
+  if ("enabled" in record && record.enabled !== false) {
+    return `${path}.enabled is ${JSON.stringify(record.enabled)}; only false is inert to install.sh`;
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "enabled" || key === "mode_transition_hooks") continue;
+    const nested = nestedAutomationViolation(value, `${path}.${key}`);
+    if (nested) return nested;
+  }
   return null;
 }
 

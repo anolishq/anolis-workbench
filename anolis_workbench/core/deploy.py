@@ -22,7 +22,7 @@ from typing import Callable
 
 import requests
 
-from anolis_workbench.core import machine_profile, releases
+from anolis_workbench.core import canonical, machine_profile, releases
 from anolis_workbench.core.executor import Executor, LocalExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
@@ -124,6 +124,8 @@ def materialize_project_dir(
     if profile_dir_name in ("", ".", "..") or "/" in profile_dir_name or "\\" in profile_dir_name:
         raise DeployError(f"invalid project directory name {profile_dir_name!r} in the imported project sidecar")
 
+    _assert_path_tokens_name(project_dir, profile, profile_dir_name)
+
     out = dest / profile_dir_name
     out.mkdir(parents=True, exist_ok=True)
     for entry in machine_profile.copy_entries(profile):
@@ -141,6 +143,37 @@ def materialize_project_dir(
         runtime_version=runtime_version,
         provider_kinds=provider_kinds,
     )
+
+
+def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_dir_name: str) -> None:
+    """The deploy directory basename must equal what the config tokens name.
+
+    install.sh rewrites `../anolis-projects/projects/<X>/...` using the TOKEN's
+    own `<X>`, but installs the project under the directory it is handed. When
+    the two disagree the install SUCCEEDS and the rig is broken: configs
+    resolve to a path nothing was written to. There is no check for this on the
+    install.sh side, so it has to happen here.
+    """
+    named: set[str] = set()
+    for rel in machine_profile.referenced_files(profile):
+        if machine_profile.containment_error(rel) is not None:
+            continue
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        named.update(match.group(1) for match in canonical.PROJECT_PATH_RE.finditer(text))
+
+    wrong = sorted(named - {profile_dir_name})
+    if wrong:
+        raise DeployError(
+            f"project configs reference project directory {', '.join(repr(w) for w in wrong)} "
+            f"but this project deploys as '{profile_dir_name}'. install.sh keys its path rewrites "
+            "on the token, so the installed configs would point at a directory that does not exist."
+        )
 
 
 def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
@@ -370,8 +403,11 @@ def stage_bundle(
         cmd = ["bash", str(install_sh), "--stage", str(out_dir), "--project", str(mat.project_dir)]
         if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
             cmd += ["--prefix", str(prefix)]
-        if variant:
-            cmd += ["--variant", variant]
+        # NOTE: --variant is deliberately NOT passed. install.sh's bundle
+        # assembly always stages the `manual` variant and ignores the flag, so
+        # passing it would tell the operator they had chosen something they had
+        # not. The bundle carries every variant; the choice is made at install
+        # time on the target.
         if arch:
             cmd += ["--arch", arch]
         _progress("stage", f"Building offline bundle (runtime v{mat.runtime_version})")

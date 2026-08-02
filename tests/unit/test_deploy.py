@@ -385,3 +385,45 @@ def test_stage_bundle_raises_when_no_tarball(
             project_name="deploy-fixture",
             out_dir=tmp_path / "bundles",
         )
+
+
+def test_materialize_refuses_when_tokens_name_another_project(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """install.sh rewrites `../anolis-projects/projects/<X>/` using the TOKEN's
+    own <X>, but installs under the directory it is handed. When they disagree
+    the install SUCCEEDS and the rig is broken — configs resolve to a path
+    nothing was written to — so it has to be caught here."""
+    variant = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("/projects/deploy-fixture/", "/projects/some-other-rig/"),
+        encoding="utf-8",
+    )
+    with pytest.raises(deploy.DeployError, match="some-other-rig"):
+        deploy.materialize_project_dir(project_dir, tmp_path / "out")
+
+
+def test_stage_bundle_does_not_pass_variant_to_install_sh(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """install.sh's bundle assembly always stages `manual` and ignores the flag.
+    Passing it would tell the operator they had chosen something they had not."""
+    _stub_fetch(monkeypatch)
+    out_dir = tmp_path / "bundles"
+    recorded: list[list[str]] = []
+
+    class _StagingExecutor(RecordingExecutor):
+        def run(self, cmd, *, input=None, sudo=False, timeout=None):
+            recorded.append(list(cmd))
+            (out_dir / "anolis-deploy-fixture-0.1.27-arm64.tar.gz").write_bytes(b"tar")
+            return RunResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(deploy, "LocalExecutor", _StagingExecutor)
+    deploy.stage_bundle(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        out_dir=out_dir,
+        arch="arm64",
+        variant="automation",
+    )
+    assert "--variant" not in recorded[0]

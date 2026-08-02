@@ -276,6 +276,41 @@ def _meta_of(sidecar: dict) -> dict:
     return meta if isinstance(meta, dict) else {}
 
 
+def machine_ids_in_use(exclude: str | None = None) -> dict[str, str]:
+    """machine_id -> the project that owns it, across the workspace."""
+    owners: dict[str, str] = {}
+    if not SYSTEMS_ROOT.exists():
+        return owners
+    for d in sorted(SYSTEMS_ROOT.iterdir()):
+        if not d.is_dir() or d.name == exclude:
+            continue
+        try:
+            profile = machine_profile.load_profile(d)
+        except (machine_profile.ProfileError, FileNotFoundError, OSError):
+            continue
+        machine_id = profile.get("machine_id")
+        if isinstance(machine_id, str) and machine_id:
+            owners.setdefault(machine_id, d.name)
+    return owners
+
+
+def _assert_machine_id_free(machine_id: str, name: str) -> None:
+    """install.sh `rm -rf`s `{prefix}/projects/<machine_id>` before installing.
+
+    Two workspace projects sharing a machine_id therefore fight over the same
+    directory on the rig: deploying one wipes the other's deployed config. The
+    names can collide easily (`Rig_A` and `rig-a` slugify identically, and a
+    rename deliberately keeps the old id), so refuse it here.
+    """
+    owner = machine_ids_in_use(exclude=name).get(machine_id)
+    if owner is not None:
+        raise ValueError(
+            f"Machine ID '{machine_id}' is already used by project '{owner}'. "
+            "Two projects cannot share one machine ID — deploying either would "
+            "overwrite the other on the target. Choose a different project name."
+        )
+
+
 def is_authored(name: str) -> bool:
     """Whether the workbench authored this project (vs. imported it).
 
@@ -301,8 +336,13 @@ def _dir_format(pdir: pathlib.Path, *, migrate: bool = True) -> str | None:
             return FORMAT_SYSTEM
         try:
             migrations.migrate_project_dir(pdir, project_name=pdir.name)
-        except OSError:
-            return FORMAT_SYSTEM  # read-only workspace: report honestly
+        except Exception as exc:  # noqa: BLE001 - one bad project must not break the workspace
+            # A read-only workspace, a truncated system.json, or a legacy
+            # document too degenerate to migrate. Report the project honestly
+            # and keep going: this runs from list_projects, so raising here
+            # would make EVERY other project unreachable in the UI.
+            print(f"[projects] Could not migrate '{pdir.name}' to the canonical layout: {exc}")
+            return FORMAT_SYSTEM
     sidecar = _read_sidecar(pdir)
     if sidecar and sidecar.get("format") == FORMAT_MACHINE_PROFILE:
         return FORMAT_MACHINE_PROFILE
@@ -348,10 +388,13 @@ def list_projects() -> list:
         if not d.is_dir():
             continue
         fmt = _dir_format(d)
-        if fmt != FORMAT_MACHINE_PROFILE:
+        if fmt is None:
             continue
         sidecar = _read_sidecar(d) or {}
         meta = sidecar.get("meta") if isinstance(sidecar.get("meta"), dict) else {}
+        # A project still reporting FORMAT_SYSTEM could not be migrated (a
+        # read-only workspace, or a legacy document too degenerate). List it
+        # anyway — hiding it would make a real project look deleted.
         result.append(
             {
                 "name": d.name,
@@ -363,7 +406,14 @@ def list_projects() -> list:
     return result
 
 
-def _get_imported_project(name: str) -> dict:
+def _degraded_project(name: str) -> dict:
+    """A project whose canonical files could not be fully parsed.
+
+    Returns the FULL document shape with empty collections rather than a
+    partial one: the API contract requires those keys, and a client that finds
+    `authored` missing reads the project as editable — then throws on the first
+    edit and never shows the parse error that caused this.
+    """
     pdir = project_dir(name)
     sidecar = _read_sidecar(pdir) or {}
     try:
@@ -373,11 +423,18 @@ def _get_imported_project(name: str) -> dict:
         warnings = [str(exc)]
     else:
         raw_warnings = sidecar.get("warnings")
-        warnings = raw_warnings if isinstance(raw_warnings, list) else []
+        warnings = list(raw_warnings) if isinstance(raw_warnings, list) else []
     return {
         "format": FORMAT_MACHINE_PROFILE,
+        # Degraded projects are never editable: saving would rewrite files we
+        # could not read in the first place.
+        "authored": False,
         "meta": sidecar.get("meta") if isinstance(sidecar.get("meta"), dict) else {"name": name},
         "profile": profile,
+        "variants": {},
+        "providers": {},
+        "host_paths": canonical.host_paths(sidecar),
+        "launch": sidecar.get("launch") if isinstance(sidecar.get("launch"), dict) else {},
         "warnings": warnings,
     }
 
@@ -393,7 +450,7 @@ def get_project(name: str) -> dict:
         try:
             document = canonical.read_project(pdir)
         except (machine_profile.ProfileError, canonical.CanonicalError) as exc:
-            return {**_get_imported_project(name), "warnings": [str(exc)]}
+            return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
         return document
     raise FileNotFoundError(f"Project '{name}' not found")
@@ -468,7 +525,7 @@ def save_project(name: str, document: dict) -> None:
             "verbatim — edit it in its source repository and re-import."
         )
 
-    errors = validate_project_payload(document)
+    errors = validate_project_payload(document, project_dir=pdir)
     if errors:
         raise ProjectValidationError(errors)
 
@@ -494,7 +551,7 @@ def save_project(name: str, document: dict) -> None:
     canonical.write_sidecar(pdir, sidecar)
 
 
-def validate_project_payload(document: object) -> list[dict[str, str]]:
+def validate_project_payload(document: object, project_dir: pathlib.Path | None = None) -> list[dict[str, str]]:
     """Structured save-time errors for a canonical project document."""
     if not isinstance(document, dict):
         return [
@@ -507,7 +564,7 @@ def validate_project_payload(document: object) -> list[dict[str, str]]:
         ]
     errors = [
         {"source": "canonical", "code": "canonical.validation", "path": "$", "message": message}
-        for message in canonical_validator.validate_project(document)
+        for message in canonical_validator.validate_project(document, project_dir)
     ]
     errors.extend(_validate_canonical_provider_configs(document))
     return errors
@@ -567,6 +624,7 @@ def create_project_from_template(name: str, template: str) -> dict:
     tpl_dir = TEMPLATES_ROOT / template
     if not (tpl_dir / machine_profile.PROFILE_FILENAME).is_file():
         raise FileNotFoundError(f"Template '{template}' not found")
+    _assert_machine_id_free(canonical.machine_id_from_name(name), name)
 
     pdir = project_dir(name)
     try:
@@ -637,6 +695,8 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         raise FileNotFoundError(f"Project '{source_name}' not found")
     if project_dir(new_name).exists():
         raise ValueError(f"Project '{new_name}' already exists")
+    if canonical.is_authored(_read_sidecar(src)):
+        _assert_machine_id_free(canonical.machine_id_from_name(new_name), new_name)
 
     shutil.copytree(
         src,

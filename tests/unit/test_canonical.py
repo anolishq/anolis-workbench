@@ -285,14 +285,38 @@ def test_hex_addresses_round_trip_as_quoted_strings(tmp_path: pathlib.Path) -> N
 
 
 def test_write_prunes_configs_the_profile_no_longer_references(tmp_path: pathlib.Path) -> None:
+    """A removed provider's config must go: install.sh globs
+    `config/provider-*.yaml`, so a leftover would be installed for a provider
+    the runtime never launches."""
+    pdir = tmp_path / "rig-a"
+    document = _document()
+    canonical.write_project(pdir, document)
+    dropped = pdir / "config" / "provider-bread.bread0.yaml"
+    assert dropped.is_file()
+
+    document["profile"]["providers"] = {"ezo0": {"config": "config/provider-ezo.ezo0.yaml"}}
+    document["providers"] = {"ezo0": {"kind": "ezo", "config": {"provider": {"name": "ezo0"}}}}
+    canonical.write_project(pdir, document)
+
+    assert not dropped.exists()
+    assert (pdir / "config" / "provider-ezo.ezo0.yaml").is_file()
+
+
+def test_write_never_deletes_a_file_the_profile_did_not_own(tmp_path: pathlib.Path) -> None:
+    """Users keep staged configs and notes next to the ones in use. A save must
+    reclaim only what THIS project previously referenced — deleting anything
+    else is data loss the user never asked for and cannot undo."""
     pdir = tmp_path / "rig-a"
     canonical.write_project(pdir, _document())
-    stale = pdir / "config" / "provider-ezo.ezo0.yaml"
-    stale.write_text("stale: true\n", encoding="utf-8")
+    spare = pdir / "config" / "provider-bread.spare0.yaml"
+    spare.write_text("staged: true\n", encoding="utf-8")
+    notes = pdir / "config" / "notes.yaml"
+    notes.write_text("note: keep me\n", encoding="utf-8")
 
-    canonical.write_project(pdir, _authored(pdir))
-    assert not stale.exists()
-    assert (pdir / "config" / "provider-bread.bread0.yaml").is_file()
+    canonical.write_project(pdir, _document())
+
+    assert spare.read_text(encoding="utf-8") == "staged: true\n"
+    assert notes.read_text(encoding="utf-8") == "note: keep me\n"
 
 
 def test_sidecar_authored_flag_defaults_false_for_pre_255_sidecars(tmp_path: pathlib.Path) -> None:
@@ -537,12 +561,38 @@ def test_machine_id_is_length_capped() -> None:
     assert MACHINE_ID_RE.fullmatch(machine_id)
 
 
-def test_inertness_is_strict_about_install_sh_edge_cases() -> None:
-    """install.sh's stage-time gate is Python truthiness on the parsed YAML, and
-    a non-mapping automation makes its renderer die outright."""
-    assert canonical.inertness_violation(_runtime_doc(automation={"enabled": "false"})) is not None
+@pytest.mark.parametrize(
+    ("automation", "inert"),
+    [
+        ({"enabled": False}, True),
+        ({"enabled": False, "behavior_tree": "behaviors/main.xml"}, True),
+        ({"enabled": True}, False),
+        # install.sh compares the SERIALIZED text against "false", so every one
+        # of these reads as enabled there.
+        ({"enabled": "false"}, False),
+        ({"enabled": 0}, False),
+        ({"mode_transition_hooks": []}, False),
+        # Its scan is not depth-anchored: a flag or hook nested anywhere in the
+        # automation block trips it.
+        ({"enabled": False, "policy": {"enabled": True}}, False),
+        ({"enabled": False, "policy": {"mode_transition_hooks": []}}, False),
+    ],
+)
+def test_inertness_matches_install_sh(automation: dict, inert: bool) -> None:
+    """install.sh's install-time gate is an awk pass over the raw YAML. Anywhere
+    this is laxer, the workbench authors a manual variant that install.sh then
+    refuses at sudo time on the target."""
+    violation = canonical.inertness_violation(_runtime_doc(automation=automation))
+    assert (violation is None) is inert, violation
+
+
+def test_inertness_rejects_an_empty_automation_block() -> None:
+    """install.sh needs a plain block mapping; `automation:` alone is not one —
+    and safe_dump writes a bare key exactly that way, so this is reachable just
+    by round-tripping such a config through the workbench."""
+    assert canonical.inertness_violation({"automation": None, "providers": []}) is not None
+    assert canonical.inertness_violation({"automation": {}, "providers": []}) is not None
     assert canonical.inertness_violation({"automation": "yes", "providers": []}) is not None
-    assert canonical.inertness_violation({"automation": None, "providers": []}) is None
     assert canonical.inertness_violation({"providers": []}) is None
 
 

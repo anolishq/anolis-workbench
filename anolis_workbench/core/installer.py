@@ -86,7 +86,20 @@ def provision_project(
         projects_module.SYSTEMS_ROOT = systems_root
         if system_path is not None:
             _copy_canonical(source, project_dir)
-            canonical.retarget_project(project_dir, canonical.machine_id_from_name(project_name))
+            machine_id = canonical.machine_id_from_name(project_name)
+            canonical.retarget_project(project_dir, machine_id)
+            # retarget rewrote every path token onto the new machine_id, so the
+            # sidecar's deploy-directory name has to follow. Leaving the copied
+            # source's name behind installs the project into one directory while
+            # its configs point at another — install.sh reports success and the
+            # providers then crash-loop on a config that isn't there.
+            sidecar = machine_profile.read_sidecar(project_dir) or {}
+            meta = sidecar.get("meta")
+            meta = meta if isinstance(meta, dict) else {}
+            meta["profile_dir_name"] = machine_id
+            meta["name"] = project_name
+            sidecar["meta"] = meta
+            canonical.write_sidecar(project_dir, sidecar)
         else:
             projects_module.create_project_from_template(project_name, template_name)
         _point_host_paths_at_prefix(project_dir, install_prefix)

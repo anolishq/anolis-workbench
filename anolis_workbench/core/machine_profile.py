@@ -217,12 +217,21 @@ def copy_entries(profile: dict[str, Any]) -> list[str]:
     return entries
 
 
+_CONFIG_KIND_RE = re.compile(r"^provider-([a-z0-9-]+)\.")
+
+
 def derive_kinds(profile: dict[str, Any], source_dir: Path) -> dict[str, str | None]:
     """provider instance id -> component kind.
 
-    The profile itself doesn't name kinds; they come from components.providers
-    keys matched against the instance's config filename (`provider-<kind>.*` —
-    the same rule install.sh's bundle assembly uses).
+    The profile itself doesn't name kinds; they come from the instance's config
+    filename (`provider-<kind>.*` — the same rule install.sh's bundle assembly
+    uses), preferring a match against `components.providers` when pins exist so
+    that a kind containing a dot or dash resolves the way install.sh will.
+
+    The filename fallback matters: a project migrated from the retired layout
+    has no pins yet (they are authored data now), and without it EVERY provider
+    would read back as an unknown kind — which blocks the very save that would
+    let the user fill the pins in.
     """
     components = profile.get("components")
     kinds = []
@@ -243,6 +252,10 @@ def derive_kinds(profile: dict[str, Any], source_dir: Path) -> dict[str, str | N
             if basename.startswith(f"provider-{kind}."):
                 result[pid] = kind
                 break
+        else:
+            match = _CONFIG_KIND_RE.match(basename)
+            if match is not None:
+                result[pid] = match.group(1)
     return result
 
 

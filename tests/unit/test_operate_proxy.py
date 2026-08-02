@@ -114,3 +114,52 @@ def test_proxy_sends_no_auth_header_without_token(monkeypatch) -> None:
     operate.proxy_runtime(handler, "GET", "/v0/runtime/status")
 
     assert captured["auth"] is None
+
+
+def test_runtime_base_targets_the_running_variants_port(monkeypatch) -> None:
+    """Operate must proxy to the port the RUNNING variant declares (#255).
+
+    A fixed default here is worse than an error: the launcher still reports the
+    runtime as running, so the UI shows a live project and then 502s on every
+    call to it.
+    """
+    monkeypatch.delenv("ANOLIS_WORKBENCH_RUNTIME_URL", raising=False)
+    monkeypatch.setattr(operate.launcher_module, "get_status", lambda: {"running": True, "active_project": "rig"})
+    monkeypatch.setattr(
+        operate.projects_module,
+        "get_project",
+        lambda name: {
+            "format": "machine-profile",
+            "authored": True,
+            "profile": {"machine_id": "rig", "runtime_profiles": {"manual": "x"}, "providers": {}},
+            "variants": {"manual": {"http": {"bind": "127.0.0.1", "port": 8085}}},
+            "providers": {},
+            "launch": {"variant": "manual"},
+        },
+    )
+
+    base, error, status = operate._runtime_base()
+    assert (base, error, status) == ("http://127.0.0.1:8085", None, 200)
+
+
+def test_runtime_base_follows_the_launch_variant(monkeypatch) -> None:
+    monkeypatch.delenv("ANOLIS_WORKBENCH_RUNTIME_URL", raising=False)
+    monkeypatch.setattr(operate.launcher_module, "get_status", lambda: {"running": True, "active_project": "rig"})
+    monkeypatch.setattr(
+        operate.projects_module,
+        "get_project",
+        lambda name: {
+            "format": "machine-profile",
+            "authored": True,
+            "profile": {"machine_id": "rig", "runtime_profiles": {}, "providers": {}},
+            "variants": {
+                "manual": {"http": {"port": 8080}},
+                "automation": {"http": {"port": 9090}},
+            },
+            "providers": {},
+            "launch": {"variant": "automation"},
+        },
+    )
+
+    base, _, _ = operate._runtime_base()
+    assert base == "http://127.0.0.1:9090"

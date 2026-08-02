@@ -221,28 +221,58 @@ def runtime_config_errors(doc: Any) -> list[str]:
 def inertness_violation(doc: dict[str, Any]) -> str | None:
     """Why this runtime config is not inert, or None.
 
-    Mirrors install.sh's inertness gates: automation enabled, or
-    mode_transition_hooks present. install.sh REFUSES a non-inert `manual`
-    variant at stage and install time, so the workbench must never author one.
+    Mirrors install.sh's install-time gate, which refuses a non-inert `manual`
+    variant. That gate is an awk pass over the raw YAML, so it is blunter than
+    a structural reading and this has to match its bluntness or the workbench
+    authors files that install.sh then rejects at `sudo` time:
 
-    Deliberately errs strict: a non-mapping `automation` makes install.sh's
-    stage-time renderer die outright, and a string like "false" is truthy to
-    its Python gate, so both are violations here rather than silent passes.
+    - `automation:` present but null or empty is "not a plain block mapping"
+      and dies. (safe_dump writes a bare `automation:` key as `null`, so this
+      is reachable just by round-tripping such a config through the workbench.)
+    - the awk is not depth-anchored: an `enabled:` or `mode_transition_hooks:`
+      ANYWHERE inside the automation block trips it, however deeply nested.
+    - `enabled` is compared as text, so 0/"false"/any non-empty string count.
     """
     if "automation" not in doc:
         return None
     automation = doc.get("automation")
     if automation is None:
-        return None
+        return "automation is present but empty (install.sh requires a plain block mapping)"
     if not isinstance(automation, dict):
         return f"automation must be a mapping (install.sh fails to render {automation!r})"
-    enabled = automation.get("enabled")
-    if isinstance(enabled, str):
-        return f"automation.enabled is the string {enabled!r} (install.sh treats any non-empty string as enabled)"
-    if enabled:
-        return "automation.enabled is true"
-    if "mode_transition_hooks" in automation:
-        return "automation.mode_transition_hooks is present"
+    if not automation:
+        return "automation is an empty mapping (install.sh requires a plain block mapping)"
+
+    violation = _nested_automation_violation(automation, "automation")
+    if violation is not None:
+        return violation
+    return None
+
+
+def _nested_automation_violation(node: Any, path: str) -> str | None:
+    """install.sh's inertness awk scans the whole automation block, not just its
+    top level — so a hook or an enabled flag buried in a sub-mapping counts."""
+    if isinstance(node, dict):
+        if "mode_transition_hooks" in node:
+            return f"{path}.mode_transition_hooks is present"
+        if "enabled" in node:
+            enabled = node["enabled"]
+            # install.sh compares the SERIALIZED text against "false", so the
+            # only inert value is a real boolean false — 0, "false" and every
+            # other scalar read as enabled there.
+            if enabled is not False:
+                return f"{path}.enabled is {enabled!r}; only `false` is inert to install.sh"
+        for key, value in node.items():
+            if key in ("enabled", "mode_transition_hooks"):
+                continue
+            nested = _nested_automation_violation(value, f"{path}.{key}")
+            if nested is not None:
+                return nested
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            nested = _nested_automation_violation(item, f"{path}[{index}]")
+            if nested is not None:
+                return nested
     return None
 
 
@@ -454,32 +484,55 @@ def write_project(project_dir: Path, document: dict[str, Any]) -> None:
             if isinstance(config, dict):
                 targets.append((_checked_target(project_dir, rel, f"providers.{pid}.config"), config))
 
+    # What the profile ON DISK claimed before this save — the only files this
+    # save is entitled to reclaim.
+    previously_owned = _owned_paths(project_dir, _previous_profile(project_dir))
+
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / CONFIG_DIR).mkdir(exist_ok=True)
     _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
     for path, doc in targets:
         _write_yaml_atomic(path, doc)
 
-    _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets})
+    _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets}, previously_owned)
 
 
-def _prune_orphans(project_dir: Path, profile: dict[str, Any], just_written: set[Path]) -> None:
-    """Remove config files the profile no longer references (renamed/removed
-    providers and variants), so the directory always matches the profile.
+def _previous_profile(project_dir: Path) -> dict[str, Any]:
+    try:
+        return machine_profile.load_profile(project_dir)
+    except (machine_profile.ProfileError, FileNotFoundError):
+        return {}
 
-    `just_written` is unioned in so a file this same save produced can never be
-    pruned by a path-normalization mismatch.
-    """
-    referenced = set(just_written) | {
+
+def _owned_paths(project_dir: Path, profile: dict[str, Any]) -> set[Path]:
+    return {
         (project_dir / ref).resolve()
         for ref in machine_profile.referenced_files(profile)
         if machine_profile.containment_error(ref) is None
     }
-    config_dir = project_dir / CONFIG_DIR
-    if not config_dir.is_dir():
-        return
-    for path in config_dir.glob("*.yaml"):
-        if path.resolve() not in referenced:
+
+
+def _prune_orphans(
+    project_dir: Path,
+    profile: dict[str, Any],
+    just_written: set[Path],
+    previously_owned: set[Path],
+) -> None:
+    """Reclaim config files this project used to reference and no longer does.
+
+    Renaming or removing a provider has to remove its old config, or install.sh
+    (which globs `config/provider-*.yaml`) would install a provider config for
+    something the runtime never launches.
+
+    Deliberately scoped to files the PREVIOUS profile referenced: a save must
+    never delete a file the workbench did not put there, and users do keep
+    staged configs and notes alongside the ones in use. `just_written` is
+    unioned into the keep-set so a file this same save produced can never be
+    pruned by a path-normalization mismatch.
+    """
+    keep = set(just_written) | _owned_paths(project_dir, profile)
+    for path in sorted(previously_owned - keep):
+        if path.is_file():
             path.unlink()
 
 
@@ -498,10 +551,15 @@ def _write_yaml_atomic(path: Path, document: Any) -> None:
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
+    # newline="\n" is load-bearing, not tidiness: these files are shipped
+    # verbatim to a Linux target, and install.sh's parsers do not strip \r.
+    # A CRLF machine-profile makes it fail to find the `manual` variant, and a
+    # CRLF runtime config silently skips the LAN-exposure bind rewrite — so a
+    # project authored on Windows would deploy loopback-only with no warning.
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
         os.replace(tmp, path)
     except BaseException:

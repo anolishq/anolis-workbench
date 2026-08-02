@@ -76,13 +76,39 @@ describe("inertnessViolation", () => {
   });
 
   it("flags every shape install.sh treats as enabled", () => {
-    expect(inertnessViolation({ automation: { enabled: true } })).toMatch(/enabled is true/);
-    // install.sh's gate is a Python truthiness test, so "false" counts as ON.
-    expect(inertnessViolation({ automation: { enabled: "false" as never } })).toMatch(/string/);
+    // install.sh's gate compares the SERIALIZED text against "false", so a real
+    // boolean false is the only inert value.
+    expect(inertnessViolation({ automation: { enabled: true } })).toMatch(/only false is inert/);
+    expect(inertnessViolation({ automation: { enabled: "false" as never } })).toMatch(
+      /only false is inert/,
+    );
+    expect(inertnessViolation({ automation: { enabled: 0 as never } })).toMatch(
+      /only false is inert/,
+    );
     expect(inertnessViolation({ automation: { mode_transition_hooks: [] } })).toMatch(
       /mode_transition_hooks/,
     );
     expect(inertnessViolation({ automation: "yes" as never })).toMatch(/mapping/);
+  });
+
+  it("matches install.sh's un-anchored scan of the whole automation block", () => {
+    // Its awk is not depth-aware: a flag or hook nested anywhere inside the
+    // block trips it, so a structural top-level-only reading would let the
+    // workbench author a manual variant install.sh then refuses.
+    expect(
+      inertnessViolation({ automation: { enabled: false, policy: { enabled: true } } }),
+    ).toMatch(/policy\.enabled/);
+    expect(
+      inertnessViolation({ automation: { enabled: false, policy: { mode_transition_hooks: [] } } }),
+    ).toMatch(/policy\.mode_transition_hooks/);
+  });
+
+  it("treats an empty automation block as a violation", () => {
+    // safe_dump writes a bare `automation:` key as null, so this is reachable
+    // just by round-tripping such a config through the workbench.
+    expect(inertnessViolation({ automation: null as never })).toMatch(/empty/);
+    expect(inertnessViolation({ automation: {} })).toMatch(/empty/);
+    expect(inertnessViolation({})).toBeNull();
   });
 });
 

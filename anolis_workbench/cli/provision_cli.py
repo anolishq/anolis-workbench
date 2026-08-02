@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import deploy, installer, migrations, releases
+from anolis_workbench.core import deploy, installer, releases
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
@@ -41,7 +40,7 @@ def _parse_args() -> argparse.Namespace:
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     install_parser.add_argument(
         "--install-prefix",
@@ -104,7 +103,7 @@ def _parse_args() -> argparse.Namespace:
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     bundle_parser.add_argument(
         "--arch",
@@ -149,7 +148,7 @@ def _parse_args() -> argparse.Namespace:
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     remote_parser.add_argument(
         "--install-prefix",
@@ -473,19 +472,19 @@ def _run_install(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_system_for_deploy(template: str, system_path: Path | None) -> tuple[dict, Path]:
-    """Load a system definition + the dir its behavior files resolve against."""
+def _template_project_dir(template: str) -> Path:
+    """A bundled template as a canonical project directory (#255).
+
+    Templates are the artifacts themselves now — there is nothing to load or
+    render, only a directory to hand to install.sh.
+    """
+    from anolis_workbench.core import machine_profile
     from anolis_workbench.core import paths as paths_module
 
-    if system_path is not None:
-        if not system_path.exists():
-            raise FileNotFoundError(f"System file not found: {system_path}")
-        return migrations.migrate_system(json.loads(system_path.read_text(encoding="utf-8")))[0], system_path.parent
-    tpl_dir = paths_module.TEMPLATES_ROOT / template
-    tpl_path = tpl_dir / "system.json"
-    if not tpl_path.exists():
-        raise FileNotFoundError(f"Template '{template}' not found at {tpl_path}")
-    return migrations.migrate_system(json.loads(tpl_path.read_text(encoding="utf-8")))[0], tpl_dir
+    tpl_dir: Path = paths_module.TEMPLATES_ROOT / template
+    if not (tpl_dir / machine_profile.PROFILE_FILENAME).is_file():
+        raise FileNotFoundError(f"Template '{template}' not found at {tpl_dir}")
+    return tpl_dir
 
 
 def _run_bundle(args: argparse.Namespace) -> int:
@@ -507,9 +506,11 @@ def _run_bundle(args: argparse.Namespace) -> int:
     print()
 
     try:
-        system, workspace_dir = _load_system_for_deploy(args.template, args.system)
+        # Bundle from the workspace project, like install/remote do — the
+        # template is only the seed when the project does not exist yet.
+        project_dir = _provision_workspace(args)
         tarball = deploy.stage_bundle(
-            project_dir=workspace_dir,
+            project_dir=project_dir,
             project_name=args.project,
             out_dir=args.out,
             arch=arch,
@@ -658,10 +659,21 @@ def _provision_single_target(
     )
 
     try:
-        system, workspace_dir = _load_system_for_deploy(target.template, None)
+        from anolis_workbench.core import paths as paths_module
+
+        project_dir = paths_module.SYSTEMS_ROOT / target.project
+        if not project_dir.exists():
+            # Seed from the template only when the operator has no workspace
+            # project yet; an existing one is the source of truth and must not
+            # be replaced under a fleet run.
+            project_dir = installer.provision_project(
+                target.template,
+                target.project,
+                target.install_prefix,
+            )
         result = deploy.deploy_remote(
             executor=executor,
-            project_dir=workspace_dir,
+            project_dir=project_dir,
             project_name=target.project,
             prefix=target.install_prefix,
             dry_run=dry_run,

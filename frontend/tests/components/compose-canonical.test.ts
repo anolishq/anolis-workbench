@@ -94,7 +94,13 @@ describe("Compose.svelte (variants)", () => {
       },
     });
 
+    // The behaviour tree is authored outside the workbench, so the control asks
+    // for its path rather than inventing one that isn't there.
     await fireEvent.click(screen.getByRole("button", { name: /Automation variant/ }));
+    await fireEvent.input(screen.getByPlaceholderText("behaviors/main.xml"), {
+      target: { value: "behaviors/main.xml" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     // Before #255 the composer set automation on its ONLY config, and install.sh
     // rejected every such deploy for having a non-inert manual variant.
@@ -135,5 +141,33 @@ describe("Compose.svelte (variants)", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.variants.manual.experimental_knob).toEqual({ deep: true });
     expect(body.profile.machine_id).toBe("demo");
+  });
+});
+
+describe("Compose.svelte (automation variant is reversible)", () => {
+  it("removes the variant and its behaviour reference again", async () => {
+    const doc = reactive(createProjectDocument("demo"));
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: doc,
+        providerSchemas: null,
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Automation variant/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(doc.variants[AUTOMATION_VARIANT]).toBeDefined();
+
+    await fireEvent.click(screen.getByRole("button", { name: /Remove automation variant/ }));
+
+    // A dangling behaviours reference blocks EVERY deploy of the project, so
+    // undoing has to take the profile entry with it.
+    expect(doc.variants[AUTOMATION_VARIANT]).toBeUndefined();
+    expect(doc.profile.runtime_profiles[AUTOMATION_VARIANT]).toBeUndefined();
+    expect(doc.profile.behaviors).toBeUndefined();
   });
 });

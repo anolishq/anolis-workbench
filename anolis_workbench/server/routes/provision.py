@@ -55,20 +55,25 @@ def _create_job() -> ProvisionJob:
 # ---------------------------------------------------------------------------
 
 
-def _prepare_workspace(params: dict[str, Any], progress: Any) -> Path:
+def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: bool = True) -> Path:
     """Authoring: ensure the local workspace project exists; return its dir.
 
     Since #255 a workspace project IS the canonical artifact set, so there is
     nothing to render — deploy copies this directory verbatim.
+
+    `allow_replace=False` for read-only operations: `force` deletes and
+    re-seeds the project directory, which for a commissioned rig means losing
+    its configs, behaviours and the pre-migration backup.
     """
     project = params.get("project", "bioreactor-v1")
     template = params.get("template", "bioreactor-manual")
     prefix = Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
 
     project_dir: Path = paths_module.SYSTEMS_ROOT / project
-    if not project_dir.exists() or params.get("force", False):
+    replace = bool(params.get("force", False)) and allow_replace
+    if not project_dir.exists() or replace:
         progress("project", f"Creating workspace project {project} from {template}")
-        installer.provision_project(template, project, prefix, force=params.get("force", False))
+        installer.provision_project(template, project, prefix, force=replace)
     return project_dir
 
 
@@ -266,7 +271,8 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         _progress("resolve", f"Building bundle for {project} ({arch})")
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="anolis-bundle-"))
-        project_dir = _prepare_workspace(params, _progress)
+        # Building a bundle reads the project; it must never replace it.
+        project_dir = _prepare_workspace(params, _progress, allow_replace=False)
         tarball_path = deploy.stage_bundle(
             project_dir=project_dir,
             project_name=project,

@@ -76,7 +76,7 @@ describe("Compose.svelte (imported project)", () => {
 });
 
 describe("Commission.svelte (imported project)", () => {
-  it("hides launch/preflight/.anpkg and offers the variant selector", () => {
+  it("hides launch/preflight/.anpkg and names the variants the bundle carries", () => {
     render(Commission, {
       props: {
         projectName: "rig-a",
@@ -91,9 +91,12 @@ describe("Commission.svelte (imported project)", () => {
     expect(screen.queryByRole("button", { name: /Export \.anpkg/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export Bundle/ })).toBeInTheDocument();
 
-    const variantSelect = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(variantSelect.value).toBe("manual"); // prefers manual
-    expect(screen.getByRole("option", { name: "automation" })).toBeInTheDocument();
+    // No variant picker: install.sh's bundle assembly always stages `manual`
+    // and ignores --variant, so a picker here would claim a choice the bundle
+    // does not carry. The variants ARE all in the bundle; the target chooses.
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.getByText(/Carries every runtime variant/)).toHaveTextContent("automation");
+    expect(screen.getByText(/install\.sh --variant/)).toBeInTheDocument();
   });
 });
 

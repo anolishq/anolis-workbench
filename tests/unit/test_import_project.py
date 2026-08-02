@@ -234,10 +234,20 @@ def test_derive_kinds_from_components_and_filenames(source_dir: pathlib.Path) ->
     assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": "bread", "ezo0": "ezo"}
 
 
-def test_derive_kinds_unknown_without_components(source_dir: pathlib.Path) -> None:
+def test_derive_kinds_falls_back_to_the_config_filename(source_dir: pathlib.Path) -> None:
+    """Without pins the kind still has to resolve: a migrated project has no
+    components yet (they are authored data), and reading every provider back as
+    an unknown kind would block the very save that fills the pins in."""
     profile = machine_profile.load_profile(source_dir)
     del profile["components"]
-    assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": None, "ezo0": None}
+    assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": "bread", "ezo0": "ezo"}
+
+
+def test_derive_kinds_is_none_when_the_filename_says_nothing(source_dir: pathlib.Path) -> None:
+    profile = machine_profile.load_profile(source_dir)
+    del profile["components"]
+    profile["providers"]["bread0"]["config"] = "config/mystery.yaml"
+    assert machine_profile.derive_kinds(profile, source_dir)["bread0"] is None
 
 
 def test_validate_project_dir_reports_missing_dir(tmp_path: pathlib.Path) -> None:

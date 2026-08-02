@@ -67,26 +67,52 @@
    * automated machine needs a second runtime config. Before #255 the composer
    * wrote automation into its ONLY config and every such deploy was rejected
    * at the target.
+   *
+   * The behaviour tree itself is authored outside the workbench, so this asks
+   * for its path. If the file is not in the project the SAVE is rejected with
+   * a message naming it — better than a profile that quietly references a
+   * missing file, which blocks every deploy of the project, manual included.
    */
+  let behaviorPath = $state<string>("behaviors/main.xml");
+  let showAutomationForm = $state<boolean>(false);
+
   function addAutomationVariant(): void {
     const doc = editable;
-    if (!doc || doc.variants[AUTOMATION_VARIANT]) return;
+    const rel = behaviorPath.trim();
+    if (!doc || doc.variants[AUTOMATION_VARIANT] || rel === "") return;
     const base = doc.variants[MANUAL_VARIANT] ?? doc.variants[variant] ?? {};
     doc.variants[AUTOMATION_VARIANT] = {
       ...structuredClone($state.snapshot(base)),
       automation: {
         enabled: true,
-        behavior_tree: projectPathToken(doc.profile.machine_id, "behaviors/main.xml"),
+        behavior_tree: projectPathToken(doc.profile.machine_id, rel),
       },
     };
     doc.profile.runtime_profiles = {
       ...doc.profile.runtime_profiles,
       [AUTOMATION_VARIANT]: variantRelpath(AUTOMATION_VARIANT),
     };
-    doc.profile.behaviors = Array.from(
-      new Set([...(doc.profile.behaviors ?? []), "behaviors/main.xml"]),
-    );
+    doc.profile.behaviors = Array.from(new Set([...(doc.profile.behaviors ?? []), rel]));
     selectedVariant = AUTOMATION_VARIANT;
+    showAutomationForm = false;
+    markDirty();
+  }
+
+  /** Remove it again — without this an automation variant is a one-way door. */
+  function removeAutomationVariant(): void {
+    const doc = editable;
+    if (!doc || !doc.variants[AUTOMATION_VARIANT]) return;
+    const behaviorRef = doc.variants[AUTOMATION_VARIANT]?.automation?.behavior_tree;
+    delete doc.variants[AUTOMATION_VARIANT];
+    const rest = { ...doc.profile.runtime_profiles };
+    delete rest[AUTOMATION_VARIANT];
+    doc.profile.runtime_profiles = rest;
+    if (typeof behaviorRef === "string") {
+      const rel = behaviorRef.split("/").slice(-2).join("/");
+      doc.profile.behaviors = (doc.profile.behaviors ?? []).filter((b) => b !== rel);
+      if (doc.profile.behaviors.length === 0) delete doc.profile.behaviors;
+    }
+    selectedVariant = MANUAL_VARIANT;
     markDirty();
   }
 
@@ -160,12 +186,34 @@
             <option value={name}>{name}</option>
           {/each}
         </select>
-        {#if !editable.variants[AUTOMATION_VARIANT]}
-          <button type="button" class="btn-add-provider" onclick={addAutomationVariant}
+        {#if editable.variants[AUTOMATION_VARIANT]}
+          <button type="button" class="btn-remove-provider" onclick={removeAutomationVariant}
+            >✕ Remove automation variant</button
+          >
+        {:else if showAutomationForm}
+          <label class="inline-label">
+            behavior tree
+            <input
+              type="text"
+              spellcheck="false"
+              style="font-family:monospace"
+              placeholder="behaviors/main.xml"
+              bind:value={behaviorPath}
+            />
+          </label>
+          <button type="button" class="btn-add-provider" onclick={addAutomationVariant}>Add</button>
+        {:else}
+          <button type="button" class="btn-add-provider" onclick={() => (showAutomationForm = true)}
             >+ Automation variant</button
           >
         {/if}
       </div>
+      {#if showAutomationForm && !editable.variants[AUTOMATION_VARIANT]}
+        <p class="field-note">
+          The behaviour tree is authored outside the workbench — put the XML in the project
+          directory first, then give its path here. Saving is refused while the file is missing.
+        </p>
+      {/if}
 
       <RuntimeForm doc={editable} {variant} onChanged={markDirty} />
       <ProviderList doc={editable} {variant} {providerSchemas} onChanged={markDirty} />

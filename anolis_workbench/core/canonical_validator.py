@@ -49,8 +49,15 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def validate_project(document: dict[str, Any]) -> list[str]:
-    """Errors that must block a save. Empty list means the project is valid."""
+def validate_project(document: dict[str, Any], project_dir: Any = None) -> list[str]:
+    """Errors that must block a save. Empty list means the project is valid.
+
+    `project_dir` enables the existence check on referenced files. It is worth
+    doing at save time because the profile is a manifest: a reference to a file
+    that isn't there blocks EVERY deploy of the project — including variants
+    that have nothing to do with it — and the only symptom is a deploy-time
+    error naming a file the user never knowingly added.
+    """
     errors: list[str] = []
     profile = _as_mapping(document.get("profile"))
     variants = _as_mapping(document.get("variants"))
@@ -68,6 +75,29 @@ def validate_project(document: dict[str, Any]) -> list[str]:
     errors.extend(_pinned_provider_errors(profile, variants))
     errors.extend(_i2c_conflict_errors(providers))
     errors.extend(_port_errors(variants))
+    errors.extend(_bind_errors(variants))
+    if project_dir is not None:
+        errors.extend(_missing_behavior_errors(profile, project_dir))
+    return errors
+
+
+def _missing_behavior_errors(profile: dict[str, Any], project_dir: Any) -> list[str]:
+    """Behaviour trees are authored outside the workbench, so the profile can
+    name one that was never added. Provider configs and runtime variants are
+    written by this same save, so they are deliberately not checked here."""
+    behaviors = profile.get("behaviors")
+    if not isinstance(behaviors, list):
+        return []
+    errors: list[str] = []
+    for ref in behaviors:
+        if not isinstance(ref, str) or machine_profile.containment_error(ref) is not None:
+            continue
+        if not (project_dir / ref).is_file():
+            errors.append(
+                f"Behavior tree '{ref}' is declared in the machine-profile but is not in the "
+                "project. Add the file, or remove the variant that uses it — while it is missing "
+                "NO variant of this project can be deployed."
+            )
     return errors
 
 
@@ -265,6 +295,38 @@ def _port_errors(variants: dict[str, Any]) -> list[str]:
                 f"Runtime variant '{variant}' uses HTTP port {reserved}, which conflicts "
                 "with the workbench control server."
             )
+    return errors
+
+
+def _is_loopback_bind(value: str) -> bool:
+    text = value.strip().strip("[]")
+    return text == "localhost" or text == "::1" or text.startswith("127.")
+
+
+def _bind_errors(variants: dict[str, Any]) -> list[str]:
+    """A non-loopback bind without auth is refused by install.sh — but LATE.
+
+    Its check runs in the config phase, AFTER the binaries have already been
+    replaced on the target, so the operator is left mid-install. Catch it at
+    save time instead, while it is still a one-field fix.
+    """
+    errors: list[str] = []
+    for variant, doc in sorted(variants.items()):
+        if not isinstance(doc, dict):
+            continue
+        http = doc.get("http")
+        if not isinstance(http, dict):
+            continue
+        bind = http.get("bind")
+        if not isinstance(bind, str) or bind == "" or _is_loopback_bind(bind):
+            continue
+        if http.get("auth_enabled") or http.get("allow_insecure_bind"):
+            continue
+        errors.append(
+            f"Runtime variant '{variant}' binds HTTP to '{bind}', which is reachable off-host, "
+            "with authentication disabled. Set http.auth_enabled (or keep bind on 127.0.0.1 and "
+            "let install.sh do the LAN rewrite, which turns authentication on for you)."
+        )
     return errors
 
 

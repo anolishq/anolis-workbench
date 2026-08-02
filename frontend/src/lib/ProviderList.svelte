@@ -132,18 +132,39 @@
     entry.args = ["--config", projectPathToken(machineId, providerConfigRelpath(kind, id))];
   }
 
-  function declare(id: string, kind: string): void {
+  function compatEntries(): UnknownRecord {
+    doc.profile.compatibility ??= {};
+    return ((doc.profile.compatibility as UnknownRecord).providers ??= {}) as UnknownRecord;
+  }
+
+  /** `carry` preserves an authored compatibility entry across a rename. */
+  function declare(id: string, kind: string, carry?: unknown): void {
     doc.profile.providers ??= {};
     doc.profile.providers[id] = { config: providerConfigRelpath(kind, id) };
-    doc.profile.compatibility ??= {};
-    const compat = ((doc.profile.compatibility as UnknownRecord).providers ??= {}) as UnknownRecord;
-    compat[id] ??= { strategy: "local-build", version: "unspecified" };
+    const compat = compatEntries();
+    compat[id] = carry ?? compat[id] ?? { strategy: "local-build", version: "unspecified" };
   }
 
   function undeclare(id: string): void {
     delete doc.profile?.providers?.[id];
     const compat = asObject((doc.profile?.compatibility as UnknownRecord)?.providers);
     if (compat) delete compat[id];
+  }
+
+  /** Drop pins for kinds nothing runs any more, so install.sh stops fetching them. */
+  function pruneUnusedPins(): void {
+    const pins = asObject(doc.profile?.components?.providers);
+    if (!pins) return;
+    const inUse = new Set(
+      Object.values(doc.variants ?? {}).flatMap((config) =>
+        (config.providers ?? [])
+          .map((entry) => commandKind(entry.command))
+          .filter((kind): kind is string => kind !== null),
+      ),
+    );
+    for (const kind of Object.keys(pins)) {
+      if (!inUse.has(kind)) delete pins[kind];
+    }
   }
 
   function addProvider(): void {
@@ -176,6 +197,7 @@
       }
     }
     delete doc.host_paths?.providers?.[id];
+    pruneUnusedPins();
     onChanged();
   }
 
@@ -189,8 +211,11 @@
       const provider = asObject(instance.config?.provider);
       if (provider && provider.name === oldId) provider.name = newId;
     }
+    // The compatibility entry is AUTHORED data with no other editor in the UI —
+    // re-keying an id must carry it, not reset it to local-build/unspecified.
+    const carried = compatEntries()[oldId];
     undeclare(oldId);
-    declare(newId, kind);
+    declare(newId, kind, carried);
 
     for (const config of Object.values(doc.variants ?? {})) {
       for (const entry of config.providers ?? []) {
@@ -209,12 +234,16 @@
   function changeKind(id: string, newKind: string): void {
     doc.providers ??= {};
     doc.providers[id] = { kind: newKind, config: seedConfig(newKind, id) };
-    declare(id, newKind);
+    // The old kind's compatibility entry describes a provider this instance no
+    // longer is.
+    compatEntries()[id] = { strategy: "local-build", version: "unspecified" };
+    declare(id, newKind, compatEntries()[id]);
     for (const config of Object.values(doc.variants ?? {})) {
       for (const entry of config.providers ?? []) {
         if (entry.id === id) retarget(entry, id, newKind);
       }
     }
+    pruneUnusedPins();
     doc.host_paths ??= {};
     doc.host_paths.providers ??= {};
     doc.host_paths.providers[id] = { executable: "" };

@@ -181,3 +181,53 @@ def test_save_project_writes_the_canonical_layout(_systems_root: pathlib.Path) -
     reread = canonical.read_project(root)
     assert reread["authored"] is True
     assert reread["providers"]["sim0"]["config"] == document["providers"]["sim0"]["config"]
+
+
+def test_save_project_rejects_an_off_host_bind_without_auth(_systems_root: pathlib.Path) -> None:
+    """install.sh refuses this too, but only in its config phase — AFTER the
+    binaries on the target have already been replaced. Catching it at save time
+    keeps it a one-field fix instead of a half-finished install."""
+    document = _load_template("sim-quickstart")
+    _manual(document)["http"]["bind"] = "0.0.0.0"
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("open-bind", document)
+    assert any("authentication" in err.get("message", "") for err in exc_info.value.errors)
+
+
+def test_an_off_host_bind_with_auth_is_allowed(_systems_root: pathlib.Path) -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["http"]["bind"] = "0.0.0.0"
+    _manual(document)["http"]["auth_enabled"] = True
+
+    projects.save_project("open-bind-auth", document)
+    assert (_systems_root / "open-bind-auth" / machine_profile.PROFILE_FILENAME).is_file()
+
+
+def test_loopback_binds_are_not_flagged(_systems_root: pathlib.Path) -> None:
+    for bind in ("127.0.0.1", "127.0.1.1", "::1", "localhost"):
+        document = _load_template("sim-quickstart")
+        _manual(document)["http"]["bind"] = bind
+        assert projects.validate_project_payload(document) == [], bind
+
+
+def test_two_projects_cannot_share_a_machine_id(_systems_root: pathlib.Path) -> None:
+    """install.sh `rm -rf`s {prefix}/projects/<machine_id> before installing, so
+    a collision means deploying one project destroys the other's config on the
+    rig. `Rig_A` and `rig-a` slugify identically, so this is easy to hit."""
+    projects.create_project_from_template("Rig_A", "sim-quickstart")
+
+    with pytest.raises(ValueError, match="already used by project"):
+        projects.create_project_from_template("rig-a", "sim-quickstart")
+    with pytest.raises(ValueError, match="already used by project"):
+        projects.duplicate_project("Rig_A", "rig-a")
+
+
+def test_rename_keeps_the_machine_id_and_does_not_self_collide(_systems_root: pathlib.Path) -> None:
+    projects.create_project_from_template("Rig_A", "sim-quickstart")
+    projects.rename_project("Rig_A", "Rig_A_old")
+    # The deploy identity deliberately survives a rename...
+    assert projects.get_project("Rig_A_old")["profile"]["machine_id"] == "rig-a"
+    # ...which is exactly why the name it freed up must stay blocked.
+    with pytest.raises(ValueError, match="already used by project"):
+        projects.create_project_from_template("rig-a", "sim-quickstart")

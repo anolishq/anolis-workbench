@@ -21,6 +21,8 @@ import pathlib
 import shutil
 from typing import Any
 
+import yaml
+
 from anolis_workbench.core import canonical, machine_profile
 
 CURRENT_SCHEMA_VERSION = 2
@@ -300,18 +302,36 @@ def migrate_project_dir(project_dir: pathlib.Path, *, project_name: str | None =
     # filename cannot encode the kind install.sh needs.
     provider_relpaths: dict[str, str] = {}
     provider_configs: dict[str, dict[str, Any]] = {}
+    dropped: set[str] = set()
     for pid, entry in topo_providers.items():
         if not isinstance(entry, dict):
             continue
         kind = entry.get("kind")
         if not isinstance(kind, str) or kind == "":
             warnings.append(f"Provider '{pid}' has no kind; it was dropped from the migrated project.")
+            dropped.add(pid)
             continue
         config = entry.get("config")
+        config = config if isinstance(config, dict) else {}
+        if not config:
+            # The retired layout let a provider config live ONLY as a
+            # hand-written providers/<pid>.yaml, which the old deploy and
+            # export paths fell back to. Carry it, or the migration silently
+            # replaces a commissioned config with an empty document.
+            config = _legacy_provider_yaml(project_dir, pid)
+            if config:
+                warnings.append(f"Provider '{pid}' config was carried over from the hand-written providers/{pid}.yaml.")
         provider_relpaths[pid] = canonical.provider_config_relpath(kind, pid)
-        provider_configs[pid] = config if isinstance(config, dict) else {}
+        provider_configs[pid] = config
 
     runtime_doc = _legacy_runtime_doc(system)
+
+    # A provider the profile no longer declares must not stay in a runtime
+    # variant: install.sh would launch it with an unresolvable --config.
+    if dropped:
+        runtime_doc["providers"] = [
+            entry for entry in runtime_doc.get("providers", []) if entry.get("id") not in dropped
+        ]
 
     # Rewrite host paths -> canonical deploy tokens.
     for provider_entry in runtime_doc.get("providers", []):
@@ -334,20 +354,27 @@ def migrate_project_dir(project_dir: pathlib.Path, *, project_name: str | None =
         # install.sh then refuses as a non-inert `manual` variant. Split it:
         # manual stays inert, automation becomes its own variant.
         behavior_name = pathlib.PurePosixPath(behavior_ref.strip()).name
-        behaviors = [f"{canonical.BEHAVIORS_DIR}/{behavior_name}"]
-        automation_doc = copy.deepcopy(runtime_doc)
-        automation_doc["automation"] = {
-            "enabled": True,
-            "behavior_tree": canonical.project_path_token(machine_id, behaviors[0]),
-        }
-        variants[canonical.AUTOMATION_VARIANT] = automation_doc
-        variant_relpaths[canonical.AUTOMATION_VARIANT] = canonical.variant_relpath(canonical.AUTOMATION_VARIANT)
-        if rt.get("automation_enabled"):
-            warnings.append(
-                "Automation was enabled in the legacy config; it is now the separate "
-                "'automation' variant and 'manual' boots inert (install.sh refuses a "
-                "non-inert manual variant)."
-            )
+        behavior_rel = f"{canonical.BEHAVIORS_DIR}/{behavior_name}"
+        # The legacy path could point anywhere under the project (trees/x.xml);
+        # the canonical layout carries behaviours in behaviors/, so relocate it.
+        # If the file cannot be found, the automation variant is DROPPED rather
+        # than declared: a profile that references a missing file blocks every
+        # deploy of the project, including the manual variant.
+        if _relocate_behavior(project_dir, behavior_ref.strip(), behavior_rel, warnings):
+            behaviors = [behavior_rel]
+            automation_doc = copy.deepcopy(runtime_doc)
+            automation_doc["automation"] = {
+                "enabled": True,
+                "behavior_tree": canonical.project_path_token(machine_id, behavior_rel),
+            }
+            variants[canonical.AUTOMATION_VARIANT] = automation_doc
+            variant_relpaths[canonical.AUTOMATION_VARIANT] = canonical.variant_relpath(canonical.AUTOMATION_VARIANT)
+            if rt.get("automation_enabled"):
+                warnings.append(
+                    "Automation was enabled in the legacy config; it is now the separate "
+                    "'automation' variant and 'manual' boots inert (install.sh refuses a "
+                    "non-inert manual variant)."
+                )
     runtime_doc["automation"] = {"enabled": False}
 
     profile = canonical.build_profile(
@@ -392,6 +419,42 @@ def migrate_project_dir(project_dir: pathlib.Path, *, project_name: str | None =
     (project_dir / "anolis-runtime.yaml").unlink(missing_ok=True)
     legacy_providers = project_dir / "providers"
     if legacy_providers.is_dir():
-        shutil.rmtree(legacy_providers, ignore_errors=True)
+        # Moved aside, never deleted: these files could be hand-written and are
+        # not covered by the system.json backup.
+        retired = project_dir / "providers.pre255.bak"
+        if retired.exists():
+            shutil.rmtree(legacy_providers, ignore_errors=True)
+        else:
+            legacy_providers.rename(retired)
 
     return True, warnings
+
+
+def _legacy_provider_yaml(project_dir: pathlib.Path, provider_id: str) -> dict[str, Any]:
+    """A hand-written providers/<pid>.yaml from the retired layout, if any."""
+    path = project_dir / "providers" / f"{provider_id}.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _relocate_behavior(project_dir: pathlib.Path, source_ref: str, target_rel: str, warnings: list[str]) -> bool:
+    """Carry a legacy behaviour tree into `behaviors/`. False if it isn't there."""
+    target = project_dir / target_rel
+    if target.is_file():
+        return True
+    source = project_dir / source_ref
+    if machine_profile.containment_error(source_ref) is not None or not source.is_file():
+        warnings.append(
+            f"Behavior tree '{source_ref}' was not found in the project, so the automation "
+            f"variant was not carried over. Add the file at {target_rel} and re-add the "
+            "automation variant to restore it."
+        )
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    return True

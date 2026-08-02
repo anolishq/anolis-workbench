@@ -103,6 +103,8 @@ def test_automation_is_split_into_its_own_variant(tmp_path: pathlib.Path) -> Non
         system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/main.xml"
 
     pdir, _ = _legacy_project(tmp_path, "bioreactor-manual", enable_automation)
+    (pdir / "behaviors").mkdir()
+    (pdir / "behaviors" / "main.xml").write_text("<root />\n", encoding="utf-8")
     _, warnings = migrations.migrate_project_dir(pdir, project_name="bio")
     doc = canonical.read_project(pdir)
 
@@ -192,4 +194,82 @@ def test_machine_id_is_derived_and_used_in_every_path_token(tmp_path: pathlib.Pa
     assert doc["profile"]["machine_id"] == "my-rig-01"
     arg = doc["variants"][canonical.MANUAL_VARIANT]["providers"][0]["args"][1]
     assert "/projects/my-rig-01/" in arg
+    assert canonical_validator.validate_project(doc) == []
+
+
+def test_a_behavior_tree_outside_behaviors_is_relocated(tmp_path: pathlib.Path) -> None:
+    """The legacy path could point anywhere under the project; the canonical
+    layout carries behaviours in behaviors/."""
+
+    def elsewhere(system: dict) -> None:
+        system["topology"]["runtime"]["automation_enabled"] = True
+        system["topology"]["runtime"]["behavior_tree_path"] = "trees/reactor.xml"
+
+    pdir, _ = _legacy_project(tmp_path, "bioreactor-manual", elsewhere)
+    (pdir / "trees").mkdir()
+    (pdir / "trees" / "reactor.xml").write_text("<root />\n", encoding="utf-8")
+
+    migrations.migrate_project_dir(pdir, project_name="bio")
+    doc = canonical.read_project(pdir)
+
+    assert (pdir / "behaviors" / "reactor.xml").read_text(encoding="utf-8") == "<root />\n"
+    assert doc["profile"]["behaviors"] == ["behaviors/reactor.xml"]
+    assert canonical_validator.validate_project(doc) == []
+
+
+def test_a_missing_behavior_tree_drops_the_automation_variant(tmp_path: pathlib.Path) -> None:
+    """Declaring a file that isn't there would block EVERY deploy of the
+    project, manual included — so the variant is dropped with a warning
+    instead, leaving a project that still works."""
+
+    def enable_automation(system: dict) -> None:
+        system["topology"]["runtime"]["automation_enabled"] = True
+        system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/ghost.xml"
+
+    pdir, _ = _legacy_project(tmp_path, "bioreactor-manual", enable_automation)
+    _, warnings = migrations.migrate_project_dir(pdir, project_name="bio")
+    doc = canonical.read_project(pdir)
+
+    assert sorted(doc["variants"]) == [canonical.MANUAL_VARIANT]
+    assert "behaviors" not in doc["profile"]
+    assert any("was not found" in w for w in warnings), warnings
+    assert canonical_validator.validate_project(doc) == []
+
+
+def test_a_hand_written_provider_yaml_is_carried_over(tmp_path: pathlib.Path) -> None:
+    """The retired layout let a provider config live ONLY as a hand-written
+    providers/<pid>.yaml, which the old deploy and export paths fell back to.
+    Dropping it would replace a commissioned config with an empty document."""
+
+    def blank_config(system: dict) -> None:
+        system["topology"]["providers"]["bread0"]["config"] = {}
+
+    pdir, _ = _legacy_project(tmp_path, "bioreactor-manual", blank_config)
+    (pdir / "providers").mkdir()
+    (pdir / "providers" / "bread0.yaml").write_text("hardware:\n  bus_path: /dev/i2c-9\n", encoding="utf-8")
+
+    _, warnings = migrations.migrate_project_dir(pdir, project_name="bio")
+    doc = canonical.read_project(pdir)
+
+    assert doc["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "/dev/i2c-9"
+    assert any("providers/bread0.yaml" in w for w in warnings), warnings
+    # Moved aside, never deleted: these files are not covered by the backup.
+    assert (pdir / "providers.pre255.bak" / "bread0.yaml").is_file()
+
+
+def test_a_provider_without_a_kind_is_dropped_from_the_variants_too(tmp_path: pathlib.Path) -> None:
+    """Leaving it in a variant hands the runtime an unresolvable --config, and
+    makes the project unsaveable (a variant may not run a provider the profile
+    does not declare)."""
+
+    def drop_kind(system: dict) -> None:
+        del system["topology"]["providers"]["ezo0"]["kind"]
+
+    pdir, _ = _legacy_project(tmp_path, "bioreactor-manual", drop_kind)
+    _, warnings = migrations.migrate_project_dir(pdir, project_name="bio")
+    doc = canonical.read_project(pdir)
+
+    assert sorted(doc["profile"]["providers"]) == ["bread0"]
+    assert [e["id"] for e in doc["variants"][canonical.MANUAL_VARIANT]["providers"]] == ["bread0"]
+    assert any("no kind" in w for w in warnings), warnings
     assert canonical_validator.validate_project(doc) == []
