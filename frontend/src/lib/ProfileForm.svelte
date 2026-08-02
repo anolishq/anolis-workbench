@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ComponentPin, ProjectDocument } from "./contracts";
+  import type { ComponentPin, ProjectDocument, ProviderSchemasResponse } from "./contracts";
   import { commandKind } from "./canonical";
 
   /**
@@ -11,7 +11,15 @@
    * bump the runtime under a running rig and made deploying offline
    * impossible. The cost is that they have to be filled in here.
    */
-  let { doc, onChanged }: { doc: ProjectDocument; onChanged: () => void } = $props();
+  let {
+    doc,
+    providerSchemas = null,
+    onChanged,
+  }: {
+    doc: ProjectDocument;
+    providerSchemas?: ProviderSchemasResponse | null;
+    onChanged: () => void;
+  } = $props();
 
   const profile = $derived(doc.profile);
 
@@ -73,6 +81,18 @@
     onChanged();
   }
 
+  /**
+   * The provider version the vendored envelope was generated from, when it
+   * says. A config edited here is checked against THAT contract, so a pin
+   * naming a different version is checked against the wrong one (#283).
+   */
+  function skewFor(kind: string): string | null {
+    const envelopeVersion = providerSchemas?.providers?.[kind]?.provider_version;
+    const pinned = doc.profile?.components?.providers?.[kind]?.version?.trim();
+    if (!envelopeVersion || !pinned || envelopeVersion === pinned) return null;
+    return envelopeVersion;
+  }
+
   function setProviderPin(kind: string, version: string): void {
     const c = components();
     c.providers ??= {};
@@ -83,6 +103,18 @@
     onChanged();
   }
 </script>
+
+{#snippet skewNote(kind: string)}
+  {@const envelopeVersion = skewFor(kind)}
+  {#if envelopeVersion}
+    <div class="bus-note note-warning" data-testid={`schema-skew-${kind}`}>
+      Config forms and validation for <code>{kind}</code> use the schema published by
+      <strong>{kind} {envelopeVersion}</strong>, but this machine pins
+      <strong>{profile?.components?.providers?.[kind]?.version}</strong>. If the config contract
+      changed between them, this machine's provider may reject a config accepted here.
+    </div>
+  {/if}
+{/snippet}
 
 <section class="form-section">
   <h3>Machine</h3>
@@ -154,6 +186,7 @@
         >No runtime variant runs <code>{kind}</code> any more. install.sh still downloads a binary for
         every pin and fails the bundle if that release is missing.</span
       >
+      {@render skewNote(kind)}
     </div>
   {/each}
 
@@ -172,6 +205,7 @@
       <span class="field-note"
         >{profile?.components?.providers?.[kind]?.repo ?? `anolishq/anolis-provider-${kind}`}</span
       >
+      {@render skewNote(kind)}
     </div>
   {/each}
 </section>

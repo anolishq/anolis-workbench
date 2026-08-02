@@ -315,3 +315,106 @@ describe("stale component pins", () => {
     expect(reactiveDoc.profile.components?.providers?.sim).toBeDefined();
   });
 });
+
+describe("provider schema version skew (#283)", () => {
+  /**
+   * Read the version off the envelope rather than hardcoding it: a routine
+   * schema-sync PR bumps `provider_version`, and a test pinned to the old
+   * literal would fail for a reason that has nothing to do with the feature.
+   */
+  function packagedVersion(kind: string): string {
+    const version = schemasResponseForPins().providers[kind]?.provider_version;
+    if (!version) throw new Error(`vendored ${kind} envelope has no provider_version`);
+    return version;
+  }
+
+  /** A version guaranteed to differ from whatever is currently vendored. */
+  function olderThanPackaged(kind: string): string {
+    return `${packagedVersion(kind)}-older`;
+  }
+
+  function skewedDoc(pin = olderThanPackaged("bread")) {
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "bread0", "bread", {});
+    // A machine commissioned before the packaged envelope was synced — the
+    // live case: deployed rigs run an older bread than the workbench ships.
+    doc.profile.components!.providers!.bread = {
+      repo: "anolishq/anolis-provider-bread",
+      version: pin,
+    };
+    return reactive(doc);
+  }
+
+  it("names both versions when the pin disagrees with the packaged envelope", () => {
+    render(ProfileForm, {
+      props: { doc: skewedDoc(), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+    });
+
+    const warning = screen.getByTestId("schema-skew-bread");
+    expect(warning).toHaveTextContent(packagedVersion("bread"));
+    expect(warning).toHaveTextContent(olderThanPackaged("bread"));
+  });
+
+  it("clears as soon as the pin is corrected, with no save", async () => {
+    // Derived, not stored — the property that keeps it from going stale the
+    // way sidecar-carried warnings do (#290).
+    render(ProfileForm, {
+      props: { doc: skewedDoc(), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+    });
+    expect(screen.getByTestId("schema-skew-bread")).toBeInTheDocument();
+
+    await fireEvent.input(screen.getByLabelText("bread version"), {
+      target: { value: packagedVersion("bread") },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
+    });
+  });
+
+  it("stays quiet when the schemas could not be loaded", () => {
+    // Nothing to compare against is not the same as agreement, but a warning
+    // the user cannot act on is worse than none.
+    render(ProfileForm, { props: { doc: skewedDoc(), providerSchemas: null, onChanged: vi.fn() } });
+
+    expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
+  });
+
+  it("warns on a pin no variant runs, where the backend also warns", () => {
+    // The backend keys skew on declared providers; this loop keys on variant
+    // commands. Without this the user gets a project-level warning naming a
+    // kind whose only field on screen is a readonly stale-pin input.
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", {});
+    doc.profile.components!.providers!.sim = {
+      repo: "anolishq/anolis-provider-sim",
+      version: packagedVersion("sim"),
+    };
+    doc.profile.components!.providers!.bread = {
+      repo: "anolishq/anolis-provider-bread",
+      version: olderThanPackaged("bread"),
+    };
+
+    render(ProfileForm, {
+      props: { doc: reactive(doc), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+    });
+
+    expect(screen.getByTestId("stale-pin-bread")).toBeInTheDocument();
+    expect(screen.getByTestId("schema-skew-bread")).toHaveTextContent(packagedVersion("bread"));
+  });
+
+  it("stays quiet when the pin matches", () => {
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", {});
+    doc.profile.components!.providers!.sim = {
+      repo: "anolishq/anolis-provider-sim",
+      version: packagedVersion("sim"),
+    };
+
+    render(ProfileForm, {
+      props: { doc: reactive(doc), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+    });
+
+    expect(screen.queryByTestId("schema-skew-sim")).not.toBeInTheDocument();
+  });
+});
