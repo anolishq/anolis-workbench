@@ -21,7 +21,7 @@ class TestValidateSystemTemplate:
         assert _validate_system_template(args) is False
 
     def test_system_only_returns_true(self) -> None:
-        args = argparse.Namespace(system="/tmp/sys.json", template="bioreactor-manual")
+        args = argparse.Namespace(system="/tmp/sys.json", template="sim-quickstart")
         assert _validate_system_template(args) is True
 
     def test_template_only_returns_true(self) -> None:
@@ -29,7 +29,7 @@ class TestValidateSystemTemplate:
         assert _validate_system_template(args) is True
 
     def test_neither_returns_true(self) -> None:
-        args = argparse.Namespace(system=None, template="bioreactor-manual")
+        args = argparse.Namespace(system=None, template="sim-quickstart")
         assert _validate_system_template(args) is True
 
 

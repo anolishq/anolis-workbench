@@ -120,6 +120,23 @@ Historical note:
 
 ### Removed
 
+- The `bioreactor-manual` and `mixed-bus-mock` templates. Since a template is
+  now literally a canonical project directory, one that mirrors a real machine
+  is a **fork** of it — and this pair had already drifted: the bioreactor
+  template was missing `command_watchdog_ms` on all three bread devices, which
+  the real `anolis-projects/projects/bioreactor-v1` carries (the firmware
+  command watchdog; "0 never arms"). A fork like that cannot be kept honest by a
+  test, because the source of truth lives in another repo CI cannot see.
+
+  Real machines come from **Import** (#226), which carries every variant, the
+  safety block and the docs verbatim, with no drift possible. `sim-quickstart`
+  remains the one shipped template: it is synthetic, has no hardware and no
+  counterpart, so there is nothing for it to drift from. `mixed-bus-mock` moved
+  to `tests/fixtures/` — it was a test artifact that happened to ship in the
+  wheel; nothing user-facing should offer to create a mock-bus machine.
+
+  The default template for `anolis-provision`, the provision routes and fleet
+  entries is now `sim-quickstart`.
 - `catalog/providers.json`, its loaders, and `GET /api/catalog` (#270): the
   catalog's form-field data (`topology_fields`/`device_types`/`path_fields`)
   had zero consumers, and its live fields are replaced — kind display labels

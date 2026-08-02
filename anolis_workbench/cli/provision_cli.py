@@ -33,8 +33,8 @@ def _parse_args() -> argparse.Namespace:
     )
     install_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for project creation (default: bioreactor-manual).",
+        default="sim-quickstart",
+        help="Template to use for project creation (default: sim-quickstart).",
     )
     install_parser.add_argument(
         "--system",
@@ -96,8 +96,8 @@ def _parse_args() -> argparse.Namespace:
     )
     bundle_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for config rendering (default: bioreactor-manual).",
+        default="sim-quickstart",
+        help="Template to use for config rendering (default: sim-quickstart).",
     )
     bundle_parser.add_argument(
         "--system",
@@ -141,8 +141,8 @@ def _parse_args() -> argparse.Namespace:
     )
     remote_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for project creation (default: bioreactor-manual).",
+        default="sim-quickstart",
+        help="Template to use for project creation (default: sim-quickstart).",
     )
     remote_parser.add_argument(
         "--system",
@@ -309,7 +309,7 @@ def _validate_system_template(args: argparse.Namespace) -> bool:
 
     Returns True if valid, False if error was printed.
     """
-    if hasattr(args, "system") and args.system is not None and args.template != "bioreactor-manual":
+    if hasattr(args, "system") and args.system is not None and args.template != "sim-quickstart":
         print("ERROR: --system and --template are mutually exclusive", file=sys.stderr)
         return False
     return True

@@ -1,15 +1,19 @@
-"""The bundled templates are shipped ARTIFACTS now (#255), not renderer input.
+"""The bundled templates are shipped ARTIFACTS (#255), not renderer input.
 
-Before the flip a template was a system.json the workbench translated at deploy
-time, so the tests here exercised the renderer. A template is now a canonical
-project directory that gets copied to create a project and copied again to
-deploy — which means every property install.sh depends on has to hold in the
-checked-in files themselves. That is what this module asserts.
+A template is a canonical project directory that gets copied to create a
+project and copied again to deploy, so every property install.sh depends on has
+to hold in the checked-in files themselves. That is what this module asserts.
+
+Only `sim-quickstart` ships. It is synthetic — no hardware, no counterpart in
+anolis-projects — so there is nothing for it to drift from. Templates that
+mirrored REAL machines were removed: a fork of a machine config cannot be kept
+honest by a test, because the source of truth lives in another repo that CI
+cannot see, and the bioreactor fork had already silently lost
+`command_watchdog_ms` from its bread devices. Real machines are imported (#226).
 """
 
 from __future__ import annotations
 
-import copy
 import pathlib
 
 import pytest
@@ -20,7 +24,7 @@ from anolis_workbench.core import canonical, canonical_validator, machine_profil
 TEMPLATES_DIR = pathlib.Path(__file__).parent.parent / "anolis_workbench" / "templates"
 FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "bioreactor"
 
-TEMPLATES = ("sim-quickstart", "mixed-bus-mock", "bioreactor-manual")
+TEMPLATES = ("sim-quickstart",)
 
 
 def _load_yaml(path: pathlib.Path) -> dict:
@@ -102,41 +106,14 @@ def test_template_runtime_configs_are_schema_valid(template: pathlib.Path) -> No
         assert canonical.runtime_config_errors(doc) == [], f"{template.name}/{variant}"
 
 
-# ---------------------------------------------------------------------------
-# Parity with the real bench project
-# ---------------------------------------------------------------------------
-
-
-def _normalize_runtime_doc(doc: dict) -> dict:
-    """Everything except the path form, which is what the two layouts differ in:
-    the baseline is an anolis-projects checkout, the template is a deploy-token
-    project."""
-    normalized = copy.deepcopy(doc)
-    for provider in normalized.get("providers", []):
-        provider.pop("command", None)
-        provider.pop("args", None)
-    return normalized
-
-
-def test_bioreactor_template_still_matches_the_real_project_baselines() -> None:
-    """The bundled template is the bench rig's config. If the two drift, a
-    demo rig commissioned from the workbench stops matching the one that is
-    actually known to work."""
-    template = TEMPLATES_DIR / "bioreactor-manual"
-    document = canonical.read_project(template)
-
-    assert _normalize_runtime_doc(document["variants"][canonical.MANUAL_VARIANT]) == _normalize_runtime_doc(
-        _load_yaml(FIXTURE_DIR / "anolis-runtime.bioreactor.manual.yaml")
-    )
-    assert document["providers"]["bread0"]["config"] == _load_yaml(FIXTURE_DIR / "provider-bread.bioreactor.yaml")
-    assert document["providers"]["ezo0"]["config"] == _load_yaml(FIXTURE_DIR / "provider-ezo.bioreactor.yaml")
-
-
 @pytest.mark.parametrize(
     "baseline",
     ["anolis-runtime.bioreactor.manual.yaml", "anolis-runtime.bioreactor.telemetry.yaml"],
 )
 def test_real_world_baselines_validate_against_the_vendored_schema(baseline: str) -> None:
     """The vendored runtime-config schema is what save-time validation rejects
-    on — it must accept hand-authored configs that the runtime itself accepts."""
+    on — it must accept hand-authored configs that the runtime itself accepts.
+
+    These fixtures are captured from the real bioreactor project. They are kept
+    as a CONTRACT check on the schema, not as a copy of a machine we ship."""
     assert canonical.runtime_config_errors(_load_yaml(FIXTURE_DIR / baseline)) == []

@@ -16,12 +16,18 @@ import pytest
 from anolis_workbench.core import canonical, machine_profile, projects
 
 TEMPLATES_ROOT = pathlib.Path(__file__).parent.parent.parent / "anolis_workbench" / "templates"
+FIXTURES_ROOT = pathlib.Path(__file__).parent.parent / "fixtures"
 
 
 def _load_template(name: str) -> dict:
-    """A bundled template as an in-memory canonical document."""
-    document = canonical.read_project(TEMPLATES_ROOT / name)
-    return copy.deepcopy(document)
+    """A canonical project as an in-memory document.
+
+    `sim-quickstart` is the one SHIPPED template; `mixed-bus-mock` is a test
+    fixture (a multi-provider I2C machine, which is what these checks need —
+    nothing user-facing should offer to create a mock-bus machine).
+    """
+    root = TEMPLATES_ROOT if (TEMPLATES_ROOT / name).is_dir() else FIXTURES_ROOT
+    return copy.deepcopy(canonical.read_project(root / name))
 
 
 def _manual(document: dict) -> dict:

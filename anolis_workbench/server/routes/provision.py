@@ -66,7 +66,7 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     its configs, behaviours and the pre-migration backup.
     """
     project = params.get("project", "bioreactor-v1")
-    template = params.get("template", "bioreactor-manual")
+    template = params.get("template", "sim-quickstart")
     prefix = Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
 
     project_dir: Path = paths_module.SYSTEMS_ROOT / project
@@ -142,7 +142,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         auto_register_host(
             host=host,
             project=params.get("project", "bioreactor-v1"),
-            template=params.get("template", "bioreactor-manual"),
+            template=params.get("template", "sim-quickstart"),
         )
         job.events.append(
             {

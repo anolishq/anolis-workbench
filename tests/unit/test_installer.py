@@ -27,7 +27,7 @@ class TestProvisionProject:
         prefix.mkdir()
 
         project_dir = installer.provision_project(
-            template_name="bioreactor-manual",
+            template_name="sim-quickstart",
             project_name="test-project",
             install_prefix=prefix,
         )
@@ -38,14 +38,13 @@ class TestProvisionProject:
         # Host binary paths (the dev-launch residual) point at the prefix...
         host = document["host_paths"]
         assert host["runtime_executable"] == str(prefix / "bin" / "anolis-runtime")
-        assert host["providers"]["bread0"]["executable"] == str(prefix / "bin" / "anolis-provider-bread")
-        assert host["providers"]["ezo0"]["executable"] == str(prefix / "bin" / "anolis-provider-ezo")
+        assert host["providers"]["sim0"]["executable"] == str(prefix / "bin" / "anolis-provider-sim")
 
         # ...and the canonical configs do NOT: they stay prefix-agnostic.
         manual = document["variants"][canonical.MANUAL_VARIANT]
         for entry in manual["providers"]:
             assert str(prefix) not in entry["command"]
-            assert canonical.command_kind(entry["command"]) in {"bread", "ezo"}
+            assert canonical.command_kind(entry["command"]) == "sim"
 
         # Re-keyed onto the new project, or it would deploy into the template's dir.
         assert document["profile"]["machine_id"] == "test-project"
@@ -54,11 +53,10 @@ class TestProvisionProject:
         )
         assert document["meta"]["name"] == "test-project"
 
-        # Hardware wiring is provider-owned config and must survive untouched.
-        assert document["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "/dev/i2c-1"
+        # Provider-owned config must survive untouched.
+        assert document["providers"]["sim0"]["config"]["provider"]["name"] == "sim0"
 
-        assert (project_dir / canonical.provider_config_relpath("bread", "bread0")).is_file()
-        assert (project_dir / canonical.provider_config_relpath("ezo", "ezo0")).is_file()
+        assert (project_dir / canonical.provider_config_relpath("sim", "sim0")).is_file()
 
     def test_raises_on_existing_project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         systems_root = tmp_path / "systems"
@@ -70,7 +68,7 @@ class TestProvisionProject:
         (systems_root / "existing-project").mkdir()
 
         with pytest.raises(ValueError, match="already exists"):
-            installer.provision_project("bioreactor-manual", "existing-project", Path("/opt/anolis"))
+            installer.provision_project("sim-quickstart", "existing-project", Path("/opt/anolis"))
 
     def test_force_overwrites(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         systems_root = tmp_path / "systems"
@@ -85,7 +83,7 @@ class TestProvisionProject:
         (systems_root / "force-test").mkdir()
         (systems_root / "force-test" / "old-file.txt").write_text("old")
 
-        project_dir = installer.provision_project("bioreactor-manual", "force-test", prefix, force=True)
+        project_dir = installer.provision_project("sim-quickstart", "force-test", prefix, force=True)
         assert (project_dir / machine_profile.PROFILE_FILENAME).exists()
         assert not (project_dir / "old-file.txt").exists()
 
