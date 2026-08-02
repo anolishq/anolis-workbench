@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
@@ -44,6 +45,44 @@ def create_project(handler) -> None:
         handler._json(409, {"error": str(exc)})
 
 
+def import_project(handler) -> None:
+    """POST /api/projects/import — import a canonical machine-profile dir (#226)."""
+    body = handler._body_json()
+    if body is None:
+        return
+    path = body.get("path") or ""
+    if not isinstance(path, str) or path.strip() == "":
+        handler._json(400, {"error": "path required (absolute path to a machine-profile project directory)"})
+        return
+    source = pathlib.Path(path.strip()).expanduser()
+    name = body.get("name") or source.name
+    err = projects_module.validate_name(name)
+    if err:
+        handler._json(400, {"error": err})
+        return
+    try:
+        meta, warnings = projects_module.import_project(str(source), name)
+        handler._json(
+            201,
+            {"name": name, "format": projects_module.FORMAT_MACHINE_PROFILE, "meta": meta, "warnings": warnings},
+        )
+    except projects_module.ImportValidationError as exc:
+        handler._json(
+            400,
+            {
+                "error": "Machine-profile directory failed import validation",
+                "code": "import_validation_failed",
+                "errors": [
+                    {"source": "import", "code": "import.validation", "path": "$", "message": m} for m in exc.errors
+                ],
+            },
+        )
+    except ValueError as exc:
+        handler._json(409, {"error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 - HTTP boundary
+        handler._json(500, {"error": str(exc)})
+
+
 def get_project(handler, name: str) -> None:
     err = projects_module.validate_name(name)
     if err:
@@ -66,6 +105,8 @@ def save_project(handler, name: str) -> None:
     try:
         projects_module.save_project(name, system)
         handler._json(200, {"ok": True})
+    except projects_module.ReadOnlyProjectError as exc:
+        handler._json(409, {"error": str(exc), "code": "read_only_project"})
     except projects_module.ProjectValidationError as exc:
         handler._json(
             400,
