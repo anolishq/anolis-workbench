@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-02
+
 ### Added
 
 - Import an existing machine-profile project (#226): `POST /api/projects/import`
