@@ -91,7 +91,12 @@ paths:
               properties:
                 path:
                   type: string
-                  description: Absolute path to the machine-profile project directory
+                  description: >-
+                    Path to the machine-profile project directory. Must resolve
+                    inside an allowed import root (default: the operator's home
+                    directory and the workbench data dir; override with
+                    ANOLIS_IMPORT_ROOTS) — otherwise 400 with code
+                    "import_source_rejected".
                 name:
                   type: string
                   pattern: '^[a-zA-Z0-9_-]{1,64}$'

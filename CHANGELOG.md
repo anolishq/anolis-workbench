@@ -32,6 +32,11 @@ Historical note:
   mismatch) as persisted warnings. Imported projects are read-only in the
   composer (`ProfileView`); save/preflight/dev-launch/.anpkg return 409 —
   edit the profile in its source repository and re-import.
+  Import sources are confined to an allowlist of roots (default: the
+  operator's home directory plus the workbench data dir; override with
+  `ANOLIS_IMPORT_ROOTS`), checked on the fully-resolved path so a symlink
+  cannot escape them — the workbench can be operated over LAN, so a
+  caller-supplied path must not reach anywhere on the host.
 
 - `GET /api/provider-schemas` (#270, part of the #271 arc): serves the vendored
   provider `--config-schema` envelopes (executable profile v1 §2) verbatim —

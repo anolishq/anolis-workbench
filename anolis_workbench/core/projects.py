@@ -344,18 +344,27 @@ def get_project(name: str) -> dict:
     return system
 
 
-def import_project(source_path: str, name: str) -> tuple[dict, list[str]]:
+def import_project(source_path: str, name: str | None = None) -> tuple[dict, list[str]]:
     """Import a canonical machine-profile directory as a verbatim project (#226).
 
-    Copies machine-profile.yaml + config/ + behaviors/ byte-for-byte and writes
-    the workbench sidecar. Returns (project meta, import warnings).
+    Copies the profile plus everything it references byte-for-byte and writes
+    the workbench sidecar. `name` defaults to the source directory's name.
+    Returns (project meta, import warnings).
     """
-    if project_dir(name).exists():
-        raise ValueError(f"Project '{name}' already exists")
-    source = pathlib.Path(source_path).expanduser().resolve()
+    # Canonicalize + allowlist-check the caller-supplied path BEFORE any
+    # filesystem use; everything below works on the returned safe path.
+    source = machine_profile.resolve_import_source(source_path)
     profile_dir_name = source.name
     if profile_dir_name == "":  # e.g. "/" — deploy needs a real project dir name
         raise ImportValidationError([f"Cannot import {source}: not a project directory"])
+
+    if name is None:
+        name = profile_dir_name
+    name_error = validate_name(name)
+    if name_error:
+        raise ValueError(name_error)
+    if project_dir(name).exists():
+        raise ValueError(f"Project '{name}' already exists")
 
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:

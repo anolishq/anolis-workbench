@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import pathlib
 
+from anolis_workbench.core import machine_profile, provider_schemas
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
-from anolis_workbench.core import provider_schemas
 
 
 def list_projects(handler) -> None:
@@ -46,26 +45,27 @@ def create_project(handler) -> None:
 
 
 def import_project(handler) -> None:
-    """POST /api/projects/import — import a canonical machine-profile dir (#226)."""
+    """POST /api/projects/import — import a canonical machine-profile dir (#226).
+
+    The caller-supplied path is canonicalized and allowlist-checked inside
+    `projects.import_project`; this handler never builds a filesystem path.
+    """
     body = handler._body_json()
     if body is None:
         return
-    path = body.get("path") or ""
-    if not isinstance(path, str) or path.strip() == "":
-        handler._json(400, {"error": "path required (absolute path to a machine-profile project directory)"})
-        return
-    source = pathlib.Path(path.strip()).expanduser()
-    name = body.get("name") or source.name
-    err = projects_module.validate_name(name)
-    if err:
-        handler._json(400, {"error": err})
+    requested_name = body.get("name")
+    if requested_name is not None and not isinstance(requested_name, str):
+        handler._json(400, {"error": "name must be a string"})
         return
     try:
-        meta, warnings = projects_module.import_project(str(source), name)
+        meta, warnings = projects_module.import_project(body.get("path"), requested_name or None)
+        name = meta["name"]
         handler._json(
             201,
             {"name": name, "format": projects_module.FORMAT_MACHINE_PROFILE, "meta": meta, "warnings": warnings},
         )
+    except machine_profile.ImportSourceError as exc:
+        handler._json(400, {"error": str(exc), "code": "import_source_rejected"})
     except projects_module.ImportValidationError as exc:
         handler._json(
             400,

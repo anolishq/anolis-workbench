@@ -32,6 +32,13 @@ def _tree_digests(root: pathlib.Path, *, exclude: tuple[str, ...] = ()) -> dict[
     return out
 
 
+@pytest.fixture(autouse=True)
+def _allow_tmp_import_roots(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """Imports are allowlist-confined (default: $HOME + the data dir); tests
+    import from pytest tmp dirs, so widen the roots for them explicitly."""
+    monkeypatch.setenv("ANOLIS_IMPORT_ROOTS", str(tmp_path))
+
+
 @pytest.fixture()
 def systems_root(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> pathlib.Path:
     root = tmp_path / "systems"
@@ -375,3 +382,58 @@ def test_import_carries_referenced_dirs_outside_the_base_set(
     carried = systems_root / "rig-b" / "validation" / "check_http.sh"
     assert carried.is_file(), warnings
     assert carried.read_bytes() == (source_dir / "validation" / "check_http.sh").read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Import source allowlist (CodeQL py/path-injection: the import path is
+# caller-supplied and the workbench can be operated over LAN)
+# ---------------------------------------------------------------------------
+
+
+def test_import_refuses_a_source_outside_the_allowed_roots(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    monkeypatch.setenv("ANOLIS_IMPORT_ROOTS", str(tmp_path / "allowed"))
+    (tmp_path / "allowed").mkdir()
+
+    with pytest.raises(machine_profile.ImportSourceError, match="allowed root"):
+        projects.import_project(str(source_dir), "rig-a")
+    assert not (systems_root / "rig-a").exists()
+
+
+def test_import_refuses_a_symlink_escaping_the_allowed_roots(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Containment is checked on the FULLY RESOLVED path, so a symlink inside
+    an allowed root cannot be used to reach outside it."""
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    source_dir.rename(outside)
+    (allowed / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv("ANOLIS_IMPORT_ROOTS", str(allowed))
+
+    with pytest.raises(machine_profile.ImportSourceError, match="allowed root"):
+        projects.import_project(str(allowed / "link"), "rig-a")
+
+
+def test_import_rejects_a_non_directory_and_empty_path(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(machine_profile.ImportSourceError, match="path required"):
+        projects.import_project("", "rig-a")
+    plain_file = tmp_path / "afile"
+    plain_file.write_text("x", encoding="utf-8")
+    with pytest.raises(machine_profile.ImportSourceError, match="Not a directory"):
+        projects.import_project(str(plain_file), "rig-a")
+
+
+def test_import_name_defaults_to_the_source_directory_name(
+    systems_root: pathlib.Path, source_dir: pathlib.Path
+) -> None:
+    meta, _ = projects.import_project(str(source_dir))
+    assert meta["name"] == "imported-profile"
+    assert (systems_root / "imported-profile").is_dir()
+
+
+def test_import_rejects_an_invalid_project_name(systems_root: pathlib.Path, source_dir: pathlib.Path) -> None:
+    with pytest.raises(ValueError, match="Project name"):
+        projects.import_project(str(source_dir), "../escape")

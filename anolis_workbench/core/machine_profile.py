@@ -9,6 +9,7 @@ import-time validation matrix, and provider-kind derivation.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from importlib import resources
@@ -36,6 +37,67 @@ _PROJECTS_PATH_RE = re.compile(r"\.\./anolis-projects/projects/([^/\s\"']+)/")
 
 class ProfileError(RuntimeError):
     """Raised when a machine-profile directory cannot be read at all."""
+
+
+class ImportSourceError(ValueError):
+    """Raised when an import source path is outside the permitted roots."""
+
+
+def import_roots() -> list[Path]:
+    """Directories an import may read from.
+
+    The workbench can be operated over LAN (token-authenticated), so an
+    arbitrary caller-supplied path must not be able to reach anywhere on the
+    host. Defaults to the operator's home directory plus the workbench data
+    dir; override with ANOLIS_IMPORT_ROOTS (os.pathsep-separated).
+    """
+    raw = os.getenv("ANOLIS_IMPORT_ROOTS")
+    if raw:
+        roots = [Path(part).expanduser() for part in raw.split(os.pathsep) if part.strip()]
+    else:
+        from anolis_workbench.core import paths as paths_module
+
+        roots = [Path.home(), paths_module.DATA_ROOT]
+    resolved: list[Path] = []
+    for root in roots:
+        try:
+            resolved.append(Path(os.path.realpath(root)))
+        except OSError:
+            continue
+    return resolved
+
+
+def resolve_import_source(raw_path: str) -> Path:
+    """Validate and canonicalize a caller-supplied import source directory.
+
+    Fully resolves the path (following symlinks) and requires the result to be
+    a directory inside one of `import_roots()`. Everything downstream operates
+    on the returned canonical path, never on the caller's string.
+    """
+    if not isinstance(raw_path, str) or raw_path.strip() == "":
+        raise ImportSourceError("path required (path to a machine-profile project directory)")
+
+    candidate = Path(os.path.realpath(Path(raw_path.strip()).expanduser()))
+
+    roots = import_roots()
+    permitted = False
+    for root in roots:
+        try:
+            if os.path.commonpath([str(candidate), str(root)]) == str(root):
+                permitted = True
+                break
+        except ValueError:  # different drives (Windows) — not contained
+            continue
+    if not permitted:
+        allowed = ", ".join(str(r) for r in roots) or "(none configured)"
+        raise ImportSourceError(
+            f"Import source must be inside an allowed root ({allowed}). "
+            "Set ANOLIS_IMPORT_ROOTS to permit other locations."
+        )
+
+    if not candidate.is_dir():
+        raise ImportSourceError(f"Not a directory: {candidate}")
+    return candidate
 
 
 @dataclass
