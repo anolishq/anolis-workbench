@@ -71,6 +71,66 @@ paths:
         "500":
           $ref: "#/components/responses/Error500"
 
+  /api/projects/import:
+    post:
+      summary: Import a machine-profile project directory (near-passthrough)
+      description: >-
+        Copies a canonical machine-profile project (machine-profile.yaml +
+        config/ + behaviors/) into the workspace BYTE-FOR-BYTE and records a
+        workbench.json sidecar. The workbench never re-renders imported files;
+        deploys hand the directory to install.sh verbatim. Import-time
+        validation hard-fails on schema/reference errors and reports
+        everything else as warnings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  description: >-
+                    Path to the machine-profile project directory. Must resolve
+                    inside an allowed import root (default: the operator's home
+                    directory and the workbench data dir; override with
+                    ANOLIS_IMPORT_ROOTS) — otherwise 400 with code
+                    "import_source_rejected".
+                name:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
+                  description: Workspace project name (defaults to the directory basename)
+              additionalProperties: true
+      responses:
+        "201":
+          description: Project imported
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, format, warnings]
+                properties:
+                  name:
+                    type: string
+                  format:
+                    type: string
+                    enum: [machine-profile]
+                  meta:
+                    type: object
+                    additionalProperties: true
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/Error400"
+        "409":
+          $ref: "#/components/responses/Error409"
+        "500":
+          $ref: "#/components/responses/Error500"
+
   /api/projects/{name}:
     get:
       summary: Get project document
@@ -78,11 +138,15 @@ paths:
         - $ref: "#/components/parameters/ProjectName"
       responses:
         "200":
-          description: Full system document
+          description: >-
+            Full project document — the system document for composer projects,
+            or the imported (machine-profile) document for imported projects.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SystemDocument"
+                oneOf:
+                  - $ref: "#/components/schemas/SystemDocument"
+                  - $ref: "#/components/schemas/ImportedProjectDocument"
         "400":
           $ref: "#/components/responses/Error400"
         "404":
@@ -105,6 +169,8 @@ paths:
           $ref: "#/components/responses/Ok200"
         "400":
           $ref: "#/components/responses/Error400"
+        "409":
+          $ref: "#/components/responses/Error409"
         "500":
           $ref: "#/components/responses/Error500"
     delete:
@@ -288,6 +354,8 @@ paths:
           $ref: "#/components/responses/Error400"
         "404":
           $ref: "#/components/responses/Error404"
+        "409":
+          $ref: "#/components/responses/Error409"
 
   /api/projects/{name}/launch:
     post:
@@ -339,6 +407,8 @@ paths:
           $ref: "#/components/responses/Error400"
         "404":
           $ref: "#/components/responses/Error404"
+        "409":
+          $ref: "#/components/responses/Error409"
 
   /api/projects/{name}/restart:
     post:
@@ -401,6 +471,8 @@ paths:
                 format: binary
         "400":
           $ref: "#/components/responses/Error400"
+        "409":
+          $ref: "#/components/responses/Error409"
         "404":
           $ref: "#/components/responses/Error404"
         "500":
@@ -630,10 +702,43 @@ components:
         name:
           type: string
           description: Project name (directory name)
+        format:
+          type: string
+          enum: [system, machine-profile]
+          description: >-
+            Project format — "system" for composer projects (system.json),
+            "machine-profile" for imported near-passthrough projects.
         meta:
           type: object
-          description: Project metadata from system.json (name, created, template)
+          description: >-
+            Project metadata — from system.json for composer projects, from
+            the workbench.json sidecar for imported projects.
           additionalProperties: true
+      additionalProperties: true
+
+    ImportedProjectDocument:
+      type: object
+      required: [format, meta, profile]
+      description: >-
+        An imported (machine-profile) project. The profile and its referenced
+        files are carried verbatim; this document is a read-only parsed view
+        plus workbench-owned metadata. Write endpoints reject these projects.
+      properties:
+        format:
+          type: string
+          enum: [machine-profile]
+        meta:
+          type: object
+          additionalProperties: true
+        profile:
+          type: object
+          description: Parsed machine-profile.yaml (read-only view)
+          additionalProperties: true
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Import-time validation warnings (persisted in the sidecar)
       additionalProperties: true
 
     SystemDocument:

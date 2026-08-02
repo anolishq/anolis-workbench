@@ -1,0 +1,56 @@
+# Test fixture for #226 near-passthrough import.
+# Derived from anolis-projects/projects/bioreactor-v1 with a safety block added.
+# YAML comments and key order are LOAD-BEARING: the byte-compare tests prove the
+# workbench never rewrites this file.
+schema_version: 1
+machine_id: imported-profile
+display_name: Imported Profile Fixture
+
+runtime_profiles:
+  manual: config/anolis-runtime.bioreactor.manual.yaml
+  telemetry: config/anolis-runtime.bioreactor.telemetry.yaml
+  automation: config/anolis-runtime.bioreactor.automation.yaml
+  full: config/anolis-runtime.bioreactor.full.yaml
+
+providers:
+  bread0:
+    config: config/provider-bread.bioreactor.yaml
+    notes: "CRUMBS bus devices: rlht0 (0x0A), dcmt0 (0x14), dcmt1 (0x15)"
+  ezo0:
+    config: config/provider-ezo.bioreactor.yaml
+    notes: "EZO sensors: ph0 (0x63), do0 (0x61)"
+
+behaviors:
+  - behaviors/bioreactor_stir_dual_dosing.xml
+
+# The block the workbench never emitted before #226 — must survive verbatim.
+safety:
+  estop_topology: power_cut
+
+compatibility:
+  runtime:
+    config_contract: "01-runtime-config"
+    http_contract: "02-runtime-http"
+  providers:
+    bread0:
+      strategy: pinned-ref
+      version: "0.3.8"
+    ezo0:
+      strategy: pinned-ref
+      version: "0.3.4"
+
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: "0.1.39"
+  providers:
+    bread:
+      repo: anolishq/anolis-provider-bread
+      version: "0.3.8"
+    ezo:
+      repo: anolishq/anolis-provider-ezo
+      version: "0.3.4"
+  optional:
+    telemetry_export:
+      package: anolis-telemetry-export
+      version: "0.1.1"

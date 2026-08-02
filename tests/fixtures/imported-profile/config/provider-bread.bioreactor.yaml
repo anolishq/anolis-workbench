@@ -1,0 +1,36 @@
+provider:
+  name: bread0
+
+hardware:
+  # bread 0.3.0 removed `require_live_session` and rejects it as an unknown key.
+  # The same intent is now carried by bus_path: a real path opens a live CRUMBS
+  # session and startup throws if the bus cannot be opened (a mock:// path would
+  # seed an inventory instead).
+  bus_path: /dev/i2c-1
+  query_delay_us: 15000
+  timeout_ms: 150
+  retry_count: 3
+
+discovery:
+  mode: manual
+  addresses: [0x0A, 0x14, 0x15]
+
+devices:
+  - id: rlht0
+    type: rlht
+    label: Reactor Temperature Node
+    address: 0x0A
+    command_watchdog_ms: 5000
+  - id: dcmt0
+    type: dcmt
+    label: Reactor Sampling + Stirring (ch1 sample, ch2 stir)
+    address: 0x14
+    # Firmware command watchdog (bread >=0.3.5 + DCMT firmware with
+    # CMD_WATCHDOG caps): auto-brake if the bus goes silent this long.
+    # The provider skips arming (with a warning) on older firmware.
+    command_watchdog_ms: 5000
+  - id: dcmt1
+    type: dcmt
+    label: Reactor Dual Dosing (ch1 dose1, ch2 dose2)
+    address: 0x15
+    command_watchdog_ms: 5000

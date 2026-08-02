@@ -180,6 +180,9 @@ class _Handler(BaseHTTPRequestHandler):
             provision.cancel_job(self, job_id)
         elif path == "/api/projects":
             compose.create_project(self)
+        elif path == "/api/projects/import":
+            # Must match before _parse_project_path, or "import" parses as a name.
+            compose.import_project(self)
         elif path.startswith("/api/projects/"):
             name, sub = self._parse_project_path(path)
             if sub == "rename":

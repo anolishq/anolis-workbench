@@ -23,7 +23,7 @@ from typing import Any, Callable
 import requests
 import yaml
 
-from anolis_workbench.core import exporter, migrations, releases
+from anolis_workbench.core import exporter, machine_profile, migrations, releases
 from anolis_workbench.core import renderer as renderer_module
 from anolis_workbench.core.executor import Executor, LocalExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -175,6 +175,93 @@ def materialize_project_dir(
     )
 
 
+def materialize_imported_project_dir(
+    project_dir: pathlib.Path,
+    dest: pathlib.Path,
+    *,
+    variant: str | None = None,
+) -> MaterializedProject:
+    """Materialize an imported (machine-profile) project for install.sh (#226).
+
+    Near-passthrough: every file is copied BYTE-FOR-BYTE — no rendering, no
+    profile synthesis, no network. install.sh natively understands this layout
+    (components pins, provider-<kind> configs, runtime_profiles variants,
+    dev-relative path rewrites), so the workbench's whole job is an honest copy
+    plus fast fail-early validation.
+    """
+    project_dir = project_dir.resolve()
+    try:
+        profile = machine_profile.load_profile(project_dir)
+    except machine_profile.ProfileError as exc:
+        raise DeployError(str(exc)) from exc
+    errors = machine_profile.schema_errors(profile)
+    if errors:
+        raise DeployError(f"machine-profile failed schema validation: {'; '.join(errors)}")
+
+    components = profile.get("components")
+    if not isinstance(components, dict):
+        raise DeployError(
+            "machine profile has no components block — deploy requires pinned "
+            "components (fill components.runtime/providers before deploying)"
+        )
+    runtime_component = components.get("runtime")
+    runtime_version = runtime_component.get("version") if isinstance(runtime_component, dict) else None
+    if not isinstance(runtime_version, str) or runtime_version == "":
+        raise DeployError("machine profile components.runtime.version is missing")
+
+    runtime_profiles = profile.get("runtime_profiles")
+    if not isinstance(runtime_profiles, dict) or not isinstance(runtime_profiles.get("manual"), str):
+        raise DeployError("machine profile has no 'manual' runtime profile — boot-inert install requires one")
+    if variant is not None and variant not in runtime_profiles:
+        known = ", ".join(sorted(runtime_profiles))
+        raise DeployError(f"variant '{variant}' not in the profile's runtime_profiles (known: {known})")
+
+    uncarriable = [
+        f"{ref} ({problem})"
+        for ref in machine_profile.referenced_files(profile)
+        if (problem := machine_profile.containment_error(ref)) is not None
+    ]
+    if uncarriable:
+        raise DeployError(f"machine profile references files it cannot carry: {', '.join(sorted(uncarriable))}")
+    missing = [
+        ref
+        for ref in machine_profile.referenced_files(profile)
+        if machine_profile.containment_error(ref) is None and not (project_dir / ref).is_file()
+    ]
+    if missing:
+        raise DeployError(f"machine profile references missing files: {', '.join(sorted(missing))}")
+
+    # install.sh keys its ../anolis-projects/projects/<name>/ path rewrites on
+    # the project dir BASENAME — use the original canonical dir name, not the
+    # (renamable) workbench project name.
+    sidecar = machine_profile.read_sidecar(project_dir) or {}
+    raw_meta = sidecar.get("meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    profile_dir_name = str(meta.get("profile_dir_name") or profile.get("machine_id") or project_dir.name)
+    # This value builds a filesystem path; the sidecar is workbench-owned but
+    # unvalidated, so keep it to a single plain directory name.
+    if profile_dir_name in ("", ".", "..") or "/" in profile_dir_name or "\\" in profile_dir_name:
+        raise DeployError(f"invalid project directory name {profile_dir_name!r} in the imported project sidecar")
+
+    out = dest / profile_dir_name
+    out.mkdir(parents=True, exist_ok=True)
+    for entry in machine_profile.copy_entries(profile):
+        src = project_dir / entry
+        if src.is_file():
+            shutil.copy2(src, out / entry)
+        elif src.is_dir():
+            shutil.copytree(src, out / entry, copy_function=shutil.copy2, dirs_exist_ok=True)
+
+    provider_kinds = {
+        pid: kind or "unknown" for pid, kind in machine_profile.derive_kinds(profile, project_dir).items()
+    }
+    return MaterializedProject(
+        project_dir=out,
+        runtime_version=runtime_version,
+        provider_kinds=provider_kinds,
+    )
+
+
 def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
     """Download install.sh from the anolis release the profile pins."""
     url = f"https://github.com/{releases.RUNTIME_REPO}/releases/download/v{runtime_version}/install.sh"
@@ -232,10 +319,13 @@ def _install_args(
     no_start: bool,
     dry_run: bool,
     with_telemetry_export: bool = False,
+    variant: str | None = None,
 ) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
         args += ["--prefix", str(prefix)]
+    if variant is not None:
+        args += ["--variant", variant]
     if no_start:
         args.append("--no-start")
     if dry_run:
@@ -246,6 +336,14 @@ def _install_args(
     if with_telemetry_export:
         args.append("--with-telemetry-export")
     return args
+
+
+def _push_dir(executor: Executor, local_dir: pathlib.Path, remote_root: str) -> None:
+    for local in sorted(p for p in local_dir.rglob("*") if p.is_file()):
+        rel = local.relative_to(local_dir).as_posix()
+        remote_path = f"{remote_root}/{rel}"
+        executor.mkdir(remote_path.rsplit("/", 1)[0])
+        executor.write_file(remote_path, local.read_bytes())
 
 
 def _run_install_sh(
@@ -353,11 +451,7 @@ def deploy_remote(
 
         remote_root = f"{remote_staging}/{project_name}"
         _progress("push", f"Pushing project config to {remote_root}")
-        for local in sorted(p for p in mat.project_dir.rglob("*") if p.is_file()):
-            rel = local.relative_to(mat.project_dir).as_posix()
-            remote_path = f"{remote_root}/{rel}"
-            executor.mkdir(remote_path.rsplit("/", 1)[0])
-            executor.write_file(remote_path, local.read_bytes())
+        _push_dir(executor, mat.project_dir, remote_root)
         remote_install = f"{remote_staging}/install.sh"
         executor.write_file(remote_install, install_sh.read_bytes())
 
@@ -380,6 +474,149 @@ def deploy_remote(
         prefix=str(prefix),
         output=output,
     )
+
+
+def deploy_local_profile(
+    *,
+    project_dir: pathlib.Path,
+    project_name: str,
+    prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
+    no_start: bool = False,
+    dry_run: bool = False,
+    with_telemetry_export: bool = False,
+    variant: str | None = None,
+    executor: Executor | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> DeployResult:
+    """Copy an imported machine-profile project verbatim and run install.sh --project."""
+    if executor is None:
+        executor = LocalExecutor()
+
+    def _progress(step: str, detail: str = "") -> None:
+        if progress_callback:
+            progress_callback(step, detail)
+
+    with tempfile.TemporaryDirectory(prefix="anolis-deploy-") as td:
+        tmp = pathlib.Path(td)
+        _progress("materialize", "Copying machine-profile project for install.sh")
+        mat = materialize_imported_project_dir(project_dir, tmp, variant=variant)
+        _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
+        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
+        output = _run_install_sh(
+            executor,
+            str(install_sh),
+            _install_args(
+                str(mat.project_dir),
+                prefix=prefix,
+                no_start=no_start,
+                dry_run=dry_run,
+                with_telemetry_export=with_telemetry_export,
+                variant=variant,
+            ),
+            progress_callback,
+        )
+    return DeployResult(
+        project_name=project_name,
+        runtime_version=mat.runtime_version,
+        prefix=str(prefix),
+        output=output,
+    )
+
+
+def deploy_remote_profile(
+    *,
+    executor: Executor,
+    project_dir: pathlib.Path,
+    project_name: str,
+    prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
+    no_start: bool = False,
+    dry_run: bool = False,
+    with_telemetry_export: bool = False,
+    variant: str | None = None,
+    remote_staging: str = "/tmp/anolis-deploy",
+    progress_callback: ProgressCallback | None = None,
+) -> DeployResult:
+    """Copy an imported machine-profile project verbatim, push it, run install.sh remotely."""
+
+    def _progress(step: str, detail: str = "") -> None:
+        if progress_callback:
+            progress_callback(step, detail)
+
+    with tempfile.TemporaryDirectory(prefix="anolis-deploy-") as td:
+        tmp = pathlib.Path(td)
+        _progress("materialize", "Copying machine-profile project for install.sh")
+        mat = materialize_imported_project_dir(project_dir, tmp, variant=variant)
+        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+
+        remote_root = f"{remote_staging}/{mat.project_dir.name}"
+        _progress("push", f"Pushing project config to {remote_root}")
+        _push_dir(executor, mat.project_dir, remote_root)
+        remote_install = f"{remote_staging}/install.sh"
+        executor.write_file(remote_install, install_sh.read_bytes())
+
+        _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
+        output = _run_install_sh(
+            executor,
+            remote_install,
+            _install_args(
+                remote_root,
+                prefix=prefix,
+                no_start=no_start,
+                dry_run=dry_run,
+                with_telemetry_export=with_telemetry_export,
+                variant=variant,
+            ),
+            progress_callback,
+        )
+    return DeployResult(
+        project_name=project_name,
+        runtime_version=mat.runtime_version,
+        prefix=str(prefix),
+        output=output,
+    )
+
+
+def stage_bundle_profile(
+    *,
+    project_dir: pathlib.Path,
+    project_name: str,
+    out_dir: pathlib.Path,
+    arch: str | None = None,
+    prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
+    variant: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> pathlib.Path:
+    """Build an offline bundle from an imported machine-profile project via install.sh --stage."""
+
+    def _progress(step: str, detail: str = "") -> None:
+        if progress_callback:
+            progress_callback(step, detail)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bundle_glob = "anolis-*.tar.gz"
+    before = {p.name for p in out_dir.glob(bundle_glob)}
+    with tempfile.TemporaryDirectory(prefix="anolis-stage-") as td:
+        tmp = pathlib.Path(td)
+        _progress("materialize", "Copying machine-profile project for install.sh --stage")
+        mat = materialize_imported_project_dir(project_dir, tmp, variant=variant)
+        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        cmd = ["bash", str(install_sh), "--stage", str(out_dir), "--project", str(mat.project_dir)]
+        if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
+            cmd += ["--prefix", str(prefix)]
+        if variant:
+            cmd += ["--variant", variant]
+        if arch:
+            cmd += ["--arch", arch]
+        _progress("stage", f"Building offline bundle (runtime v{mat.runtime_version})")
+        result = LocalExecutor().run(cmd, timeout=INSTALL_TIMEOUT_S)
+        if result.returncode != 0:
+            tail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-15:])
+            raise DeployError(f"install.sh --stage failed (exit {result.returncode}):\n{tail}")
+    produced = [p for p in out_dir.glob(bundle_glob) if p.name not in before]
+    if not produced:
+        raise DeployError(f"install.sh --stage produced no bundle tarball in {out_dir}")
+    return max(produced, key=lambda p: p.stat().st_mtime)
 
 
 def stage_bundle(

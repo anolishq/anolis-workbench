@@ -10,6 +10,28 @@ from anolis_workbench.core import launcher as launcher_module
 from anolis_workbench.core import projects as projects_module
 
 
+def _reject_imported(handler, name: str, action: str) -> bool:
+    """Imported (machine-profile) projects are deploy-only in v1 (#226):
+    dev-launch paths would need host-local binary paths the canonical profile
+    deliberately doesn't carry (that mapping is the #255 sidecar follow-on)."""
+    try:
+        fmt = projects_module.project_format(name)
+    except FileNotFoundError:
+        handler._json(404, {"error": f"Project '{name}' not found"})
+        return True
+    if fmt == projects_module.FORMAT_MACHINE_PROFILE:
+        handler._json(
+            409,
+            {
+                "error": f"Project '{name}' is an imported machine profile — {action} is not "
+                "available for imported projects. Use Deploy (install.sh) instead.",
+                "code": "imported_project",
+            },
+        )
+        return True
+    return False
+
+
 def status(handler, *, host: str, port: int) -> None:
     payload = launcher_module.get_status()
     payload["composer"] = {
@@ -27,6 +49,8 @@ def preflight(handler, name: str) -> None:
     if err:
         handler._json(400, {"error": err})
         return
+    if _reject_imported(handler, name, "preflight"):
+        return
     try:
         system = projects_module.get_project(name)
     except FileNotFoundError:
@@ -41,6 +65,8 @@ def launch_project(handler, name: str) -> None:
     err = projects_module.validate_name(name)
     if err:
         handler._json(400, {"error": err})
+        return
+    if _reject_imported(handler, name, "dev-launch"):
         return
     try:
         system = projects_module.get_project(name)
@@ -62,6 +88,8 @@ def stop_project(handler, name: str) -> None:
     if err:
         handler._json(400, {"error": err})
         return
+    if _reject_imported(handler, name, "stop"):
+        return
     try:
         projects_module.get_project(name)
     except FileNotFoundError:
@@ -75,6 +103,8 @@ def restart_project(handler, name: str) -> None:
     err = projects_module.validate_name(name)
     if err:
         handler._json(400, {"error": err})
+        return
+    if _reject_imported(handler, name, "restart"):
         return
     try:
         projects_module.get_project(name)
@@ -95,6 +125,8 @@ def export_project(handler, name: str) -> None:
     err = projects_module.validate_name(name)
     if err:
         handler._json(400, {"error": err})
+        return
+    if _reject_imported(handler, name, ".anpkg export"):
         return
     try:
         projects_module.get_project(name)

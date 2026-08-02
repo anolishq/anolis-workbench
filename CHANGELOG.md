@@ -15,6 +15,29 @@ Historical note:
 
 ### Added
 
+- Import an existing machine-profile project (#226): `POST /api/projects/import`
+  (plus a Home-page card and the previously dead Onboarding entry) copies a
+  canonical machine-profile directory (`machine-profile.yaml` + `config/` +
+  `behaviors/`) into the workspace **byte-for-byte** with a `workbench.json`
+  sidecar — a second project format the workbench carries verbatim and never
+  re-renders. `safety.estop_topology` and ALL `runtime_profiles` variants
+  survive untouched (the renderer safety-drop, variant collapse and
+  invented-pins defects cannot occur on this path). Deploys hand the directory
+  straight to install.sh — component pins are read verbatim from the profile
+  (no release lookups, offline-clean materialize) — and the Commission bundle
+  export gains a **runtime-variant selector** (`install.sh --variant`, the
+  workbench half of #225). Import-time validation hard-fails on
+  schema/missing-reference errors and surfaces everything else (non-inert
+  manual variant, unknown kinds, envelope mismatches, project-dir-name
+  mismatch) as persisted warnings. Imported projects are read-only in the
+  composer (`ProfileView`); save/preflight/dev-launch/.anpkg return 409 —
+  edit the profile in its source repository and re-import.
+  Import sources are confined to an allowlist of roots (default: the
+  operator's home directory plus the workbench data dir; override with
+  `ANOLIS_IMPORT_ROOTS`), checked on the fully-resolved path so a symlink
+  cannot escape them — the workbench can be operated over LAN, so a
+  caller-supplied path must not reach anywhere on the host.
+
 - `GET /api/provider-schemas` (#270, part of the #271 arc): serves the vendored
   provider `--config-schema` envelopes (executable profile v1 §2) verbatim —
   the provider-owned contracts the composer will render config forms from.

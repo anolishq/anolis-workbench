@@ -13,13 +13,11 @@ import pathlib
 import re
 import zipfile
 from datetime import datetime, timezone
-from importlib import resources
 from typing import Any
 
-import jsonschema
 import yaml
 
-from anolis_workbench.core import migrations, releases
+from anolis_workbench.core import machine_profile, migrations, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import renderer as renderer_module
 
@@ -30,7 +28,6 @@ class ExportError(RuntimeError):
 
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 _MACHINE_ID_RE = re.compile(r"[^a-z0-9-]+")
-_MACHINE_PROFILE_SCHEMA_CACHE: "dict[str, Any] | None" = None
 
 logger = logging.getLogger(__name__)
 
@@ -64,14 +61,14 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     redaction_applied = _redact_runtime_secrets(runtime_payload)
     runtime_text = yaml.safe_dump(runtime_payload, sort_keys=False)
 
-    machine_profile = _build_machine_profile(
+    profile = _build_machine_profile(
         system=system,
         project_name=project_name,
         provider_ids=provider_ids,
         behavior_rel_paths=behavior_rel_paths,
     )
-    _validate_machine_profile(machine_profile)
-    machine_profile_text = yaml.safe_dump(machine_profile, sort_keys=False)
+    _validate_machine_profile(profile)
+    machine_profile_text = yaml.safe_dump(profile, sort_keys=False)
 
     exported_at = _deterministic_exported_at(system)
     provenance = {
@@ -321,21 +318,12 @@ def _build_machine_profile(
 
 
 def _validate_machine_profile(profile: dict[str, Any]) -> None:
-    global _MACHINE_PROFILE_SCHEMA_CACHE
-    if _MACHINE_PROFILE_SCHEMA_CACHE is None:
-        schema_file = resources.files("anolis_workbench").joinpath("schemas").joinpath("machine-profile.schema.json")
-        try:
-            payload = json.loads(schema_file.read_text(encoding="utf-8"))
-        except FileNotFoundError as exc:
-            raise ExportError("Bundled machine-profile schema not found in package data") from exc
-        if not isinstance(payload, dict):
-            raise ExportError("Bundled machine-profile schema root must be an object")
-        _MACHINE_PROFILE_SCHEMA_CACHE = payload
-    validator = jsonschema.Draft7Validator(_MACHINE_PROFILE_SCHEMA_CACHE)
-    errors = sorted(validator.iter_errors(profile), key=lambda e: list(e.path))
+    try:
+        errors = machine_profile.schema_errors(profile)
+    except (machine_profile.ProfileError, FileNotFoundError) as exc:
+        raise ExportError(f"Bundled machine-profile schema unavailable: {exc}") from exc
     if errors:
-        msgs = "; ".join(f"{'.' + '.'.join(str(p) for p in e.path) if e.path else '$'}: {e.message}" for e in errors)
-        raise ExportError(f"Generated machine-profile failed schema validation: {msgs}")
+        raise ExportError(f"Generated machine-profile failed schema validation: {'; '.join(errors)}")
 
 
 def _machine_id_from_name(name: str) -> str:

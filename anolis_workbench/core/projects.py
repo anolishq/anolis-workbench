@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import jsonschema
 
-from anolis_workbench.core import migrations, provider_schemas, renderer
+from anolis_workbench.core import machine_profile, migrations, provider_schemas, renderer
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import validator as semantic_validator
 
@@ -20,6 +20,16 @@ SYSTEM_SCHEMA_PATH = paths_module.SYSTEM_SCHEMA_PATH
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _SYSTEM_SCHEMA_CACHE: dict | None = None
 
+SIDECAR_NAME = machine_profile.SIDECAR_NAME
+
+FORMAT_SYSTEM = "system"
+FORMAT_MACHINE_PROFILE = "machine-profile"
+
+# Only these are copied on import (issue #226): the profile plus everything it
+# can reference. docs/, config-release/, workbench/ etc. stay in the source repo,
+# and import REFUSES a profile whose references fall outside this set.
+_IMPORT_COPY = machine_profile.IMPORT_COPY
+
 
 class ProjectValidationError(ValueError):
     """Raised when a composer system document fails validation."""
@@ -27,6 +37,18 @@ class ProjectValidationError(ValueError):
     def __init__(self, errors: list[dict[str, str]]) -> None:
         super().__init__("Project validation failed")
         self.errors = errors
+
+
+class ImportValidationError(ValueError):
+    """Raised when a machine-profile directory fails import validation."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("Import validation failed")
+        self.errors = errors
+
+
+class ReadOnlyProjectError(ValueError):
+    """Raised when a write path is attempted on an imported (verbatim) project."""
 
 
 def validate_name(name: str) -> "str | None":
@@ -233,6 +255,33 @@ def cleanup_stale_running_files() -> None:
 # ---------------------------------------------------------------------------
 
 
+def sidecar_path(name: str) -> pathlib.Path:
+    return project_dir(name) / SIDECAR_NAME
+
+
+def _read_sidecar(pdir: pathlib.Path) -> dict | None:
+    return machine_profile.read_sidecar(pdir)
+
+
+def _dir_format(pdir: pathlib.Path) -> str | None:
+    """Project format for a workspace dir, or None if it isn't a project."""
+    sidecar = _read_sidecar(pdir)
+    if sidecar and sidecar.get("format") == FORMAT_MACHINE_PROFILE:
+        return FORMAT_MACHINE_PROFILE
+    if (pdir / "system.json").is_file():
+        return FORMAT_SYSTEM
+    if (pdir / machine_profile.PROFILE_FILENAME).is_file():
+        return FORMAT_MACHINE_PROFILE
+    return None
+
+
+def project_format(name: str) -> str:
+    fmt = _dir_format(project_dir(name))
+    if fmt is None:
+        raise FileNotFoundError(f"Project '{name}' not found")
+    return fmt
+
+
 def list_projects() -> list:
     if not SYSTEMS_ROOT.exists():
         return []
@@ -240,18 +289,44 @@ def list_projects() -> list:
     for d in sorted(SYSTEMS_ROOT.iterdir()):
         if not d.is_dir():
             continue
-        sj = d / "system.json"
-        if not sj.exists():
-            continue
-        try:
-            data = json.loads(sj.read_text(encoding="utf-8"))
-            result.append({"name": d.name, "meta": data.get("meta", {})})
-        except (json.JSONDecodeError, OSError):
-            pass
+        fmt = _dir_format(d)
+        if fmt == FORMAT_SYSTEM:
+            try:
+                data = json.loads((d / "system.json").read_text(encoding="utf-8"))
+                result.append({"name": d.name, "format": fmt, "meta": data.get("meta", {})})
+            except (json.JSONDecodeError, OSError):
+                pass
+        elif fmt == FORMAT_MACHINE_PROFILE:
+            sidecar = _read_sidecar(d) or {}
+            meta = sidecar.get("meta") if isinstance(sidecar.get("meta"), dict) else {}
+            result.append({"name": d.name, "format": fmt, "meta": meta})
     return result
 
 
+def _get_imported_project(name: str) -> dict:
+    pdir = project_dir(name)
+    sidecar = _read_sidecar(pdir) or {}
+    try:
+        profile = machine_profile.load_profile(pdir)
+    except machine_profile.ProfileError as exc:
+        profile = {}
+        warnings = [str(exc)]
+    else:
+        raw_warnings = sidecar.get("warnings")
+        warnings = raw_warnings if isinstance(raw_warnings, list) else []
+    return {
+        "format": FORMAT_MACHINE_PROFILE,
+        "meta": sidecar.get("meta") if isinstance(sidecar.get("meta"), dict) else {"name": name},
+        "profile": profile,
+        "warnings": warnings,
+    }
+
+
 def get_project(name: str) -> dict:
+    # Imported projects are carried verbatim: parsed for display only, never
+    # migrated, never written back.
+    if _dir_format(project_dir(name)) == FORMAT_MACHINE_PROFILE:
+        return _get_imported_project(name)
     path = system_json_path(name)
     if not path.exists():
         raise FileNotFoundError(f"Project '{name}' not found")
@@ -269,7 +344,71 @@ def get_project(name: str) -> dict:
     return system
 
 
+def import_project(source_path: str, name: str | None = None) -> tuple[dict, list[str]]:
+    """Import a canonical machine-profile directory as a verbatim project (#226).
+
+    Copies the profile plus everything it references byte-for-byte and writes
+    the workbench sidecar. `name` defaults to the source directory's name.
+    Returns (project meta, import warnings).
+    """
+    # Canonicalize + allowlist-check the caller-supplied path BEFORE any
+    # filesystem use; everything below works on the returned safe path.
+    source = machine_profile.resolve_import_source(source_path)
+    profile_dir_name = source.name
+    if profile_dir_name == "":  # e.g. "/" — deploy needs a real project dir name
+        raise ImportValidationError([f"Cannot import {source}: not a project directory"])
+
+    if name is None:
+        name = profile_dir_name
+    name_error = validate_name(name)
+    if name_error:
+        raise ValueError(name_error)
+    if project_dir(name).exists():
+        raise ValueError(f"Project '{name}' already exists")
+
+    report = machine_profile.validate_project_dir(source, profile_dir_name)
+    if not report.ok:
+        raise ImportValidationError(report.errors)
+
+    pdir = project_dir(name)
+    # Claim the directory FIRST (exist_ok=False): a concurrent same-name import
+    # must lose here, before the cleanup branch below can delete a live project.
+    try:
+        pdir.mkdir(parents=True)
+    except FileExistsError as exc:
+        raise ValueError(f"Project '{name}' already exists") from exc
+    try:
+        for entry in machine_profile.copy_entries(report.profile or {}):
+            src = source / entry
+            if src.is_file():
+                shutil.copy2(src, pdir / entry)
+            elif src.is_dir():
+                shutil.copytree(src, pdir / entry, copy_function=shutil.copy2)
+        meta = {
+            "name": name,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "imported_from": str(source),
+            "profile_dir_name": profile_dir_name,
+        }
+        sidecar = {
+            "schema_version": 1,
+            "format": FORMAT_MACHINE_PROFILE,
+            "meta": meta,
+            "warnings": report.warnings,
+        }
+        sidecar_path(name).write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+    except Exception:
+        shutil.rmtree(pdir, ignore_errors=True)
+        raise
+    return meta, report.warnings
+
+
 def save_project(name: str, system: dict) -> None:
+    if _dir_format(project_dir(name)) == FORMAT_MACHINE_PROFILE:
+        raise ReadOnlyProjectError(
+            f"Project '{name}' was imported from a machine profile and is carried "
+            "verbatim — edit it in its source repository and re-import."
+        )
     validation_errors = validate_system_payload(system)
     if validation_errors:
         raise ProjectValidationError(validation_errors)
@@ -320,6 +459,20 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         ignore=shutil.ignore_patterns("running.json", "logs"),
     )
     try:
+        if _dir_format(project_dir(new_name)) == FORMAT_MACHINE_PROFILE:
+            # Verbatim copy — only the sidecar meta is workbench-owned.
+            sidecar = _read_sidecar(project_dir(new_name)) or {
+                "schema_version": 1,
+                "format": FORMAT_MACHINE_PROFILE,
+                "warnings": [],
+            }
+            raw_meta = sidecar.get("meta")
+            meta = raw_meta if isinstance(raw_meta, dict) else {}
+            meta["name"] = new_name
+            meta["created"] = datetime.now(timezone.utc).isoformat()
+            sidecar["meta"] = meta
+            sidecar_path(new_name).write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+            return get_project(new_name)
         system = get_project(new_name)
         system["meta"]["name"] = new_name
         system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
