@@ -148,6 +148,14 @@ def _variant_errors(
             f"'{canonical.MANUAL_VARIANT}' variant and refuses a profile without one."
         )
 
+    # Every declared variant needs a document, or the profile ends up naming a
+    # config file nothing writes — which blocks EVERY deploy of the project and
+    # is invisible in the UI, since a variant with no document is not rendered.
+    for variant in sorted(set(declared) - set(variants)):
+        errors.append(
+            f"Runtime variant '{variant}' is declared in the machine-profile but has no configuration in this document."
+        )
+
     for variant, doc in variants.items():
         if not isinstance(doc, dict):
             errors.append(f"Runtime variant '{variant}' is not a mapping.")

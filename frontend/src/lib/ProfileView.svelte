@@ -9,7 +9,6 @@
   let { doc }: { doc: ProjectDocument } = $props();
 
   const profile = $derived(doc.profile ?? {});
-  const warnings = $derived(Array.isArray(doc.warnings) ? doc.warnings : []);
 
   function asRecord(value: unknown): UnknownRecord {
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -39,17 +38,6 @@
       <div><code>{importedFrom}</code></div>
     {/if}
   </div>
-
-  {#if warnings.length > 0}
-    <div class="error-banner">
-      <p>Import warnings</p>
-      <ul>
-        {#each warnings as warning, i (i)}
-          <li>{warning}</li>
-        {/each}
-      </ul>
-    </div>
-  {/if}
 
   <section class="form-section">
     <h3>Machine</h3>

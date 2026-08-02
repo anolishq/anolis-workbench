@@ -31,6 +31,20 @@
   const missingPins = $derived(
     requiredKinds.filter((kind) => !doc.profile?.components?.providers?.[kind]?.version),
   );
+
+  /**
+   * Pins for kinds no variant runs any more.
+   *
+   * install.sh fetches a binary for EVERY entry in components.providers and
+   * fails the whole bundle when an asset is missing, so a stale pin is not
+   * cosmetic. It is kept rather than auto-removed because the pin carries
+   * `repo` — a fork or an air-gapped mirror — but it needs a way out.
+   */
+  const stalePins = $derived(
+    Object.keys(doc.profile?.components?.providers ?? {})
+      .filter((kind) => !requiredKinds.includes(kind))
+      .sort(),
+  );
   const runtimePinned = $derived(Boolean(doc.profile?.components?.runtime?.version));
 
   function inputTarget(event: Event): HTMLInputElement {
@@ -50,6 +64,12 @@
   function setRuntimePin(version: string): void {
     const c = components();
     c.runtime = { repo: c.runtime?.repo ?? "anolishq/anolis", version: version.trim() };
+    onChanged();
+  }
+
+  function removeProviderPin(kind: string): void {
+    const pins = doc.profile?.components?.providers;
+    if (pins) delete pins[kind];
     onChanged();
   }
 
@@ -116,6 +136,26 @@
     />
     <span class="field-note">{profile?.components?.runtime?.repo ?? "anolishq/anolis"}</span>
   </div>
+
+  {#each stalePins as kind (kind)}
+    <div class="form-group" data-testid={`stale-pin-${kind}`}>
+      <label for={`pin-${kind}`}>{kind} version</label>
+      <input
+        id={`pin-${kind}`}
+        type="text"
+        readonly
+        style="font-family:monospace"
+        value={profile?.components?.providers?.[kind]?.version ?? ""}
+      />
+      <button type="button" class="btn-remove-provider" onclick={() => removeProviderPin(kind)}
+        >✕ Remove pin</button
+      >
+      <span class="field-note"
+        >No runtime variant runs <code>{kind}</code> any more. install.sh still downloads a binary for
+        every pin and fails the bundle if that release is missing.</span
+      >
+    </div>
+  {/each}
 
   {#each requiredKinds as kind (kind)}
     <div class="form-group">

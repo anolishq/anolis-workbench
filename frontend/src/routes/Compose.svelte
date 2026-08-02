@@ -52,6 +52,14 @@
   );
   const showAdvisory = $derived(running && runningProject === projectName);
 
+  // Persisted notes — import checks, and the migrator's record of what it could
+  // NOT carry over (a dropped provider, an automation variant left behind).
+  // These describe data the user lost, so they are shown for every project, not
+  // just imported ones.
+  const warnings = $derived(
+    Array.isArray(system?.warnings) ? system.warnings.filter((w) => typeof w === "string") : [],
+  );
+
   let saving = $state<boolean>(false);
   let saveError = $state<string>("");
   let saveErrors = $state<Array<{ path?: string; message?: string }>>([]);
@@ -158,6 +166,17 @@
     <div class="workspace-advisory">
       Runtime is currently running from this project. Save edits now; changes take effect only after
       relaunch from Commission.
+    </div>
+  {/if}
+
+  {#if warnings.length > 0}
+    <div class="workspace-advisory" data-testid="project-warnings">
+      <p>Notes about this project</p>
+      <ul>
+        {#each warnings as warning, i (i)}
+          <li>{warning}</li>
+        {/each}
+      </ul>
     </div>
   {/if}
 

@@ -211,18 +211,28 @@ def _assert_no_crlf(project_dir: pathlib.Path, profile: dict) -> None:
     `\r`. A CRLF machine-profile makes it fail to resolve the `manual` variant,
     and a CRLF runtime config silently bypasses the LAN-exposure bind gate. The
     workbench writes LF, but an imported project is carried byte-for-byte."""
+    # Only what install.sh reads with awk: the profile (variant lookup) and the
+    # runtime configs (bind/auth lookup). Provider configs go through pyyaml and
+    # behaviours are byte-copied, so a CR in those is harmless.
+    awk_parsed = [project_dir / machine_profile.PROFILE_FILENAME]
+    runtime_profiles = profile.get("runtime_profiles")
+    if isinstance(runtime_profiles, dict):
+        for rel in runtime_profiles.values():
+            if isinstance(rel, str) and machine_profile.containment_error(rel) is None:
+                awk_parsed.append(project_dir / rel)
+
     offenders = []
-    for path in [project_dir / machine_profile.PROFILE_FILENAME, *_install_sh_config_files(project_dir, profile)]:
+    for path in awk_parsed:
         try:
-            if b"\r\n" in path.read_bytes():
+            if b"\r" in path.read_bytes():
                 offenders.append(path.relative_to(project_dir).as_posix())
         except OSError:
             continue
     if offenders:
         raise DeployError(
-            f"these files use Windows (CRLF) line endings: {', '.join(sorted(offenders))}. "
-            "install.sh parses them with awk, which does not strip the carriage return — the "
-            "runtime variant would not resolve and the LAN-exposure check would be skipped. "
+            f"these files contain carriage returns: {', '.join(sorted(offenders))}. "
+            "install.sh reads them with awk, which does not strip a CR — the runtime variant "
+            "would not resolve and the LAN-exposure check would be silently skipped. "
             "Convert them to LF before deploying."
         )
 

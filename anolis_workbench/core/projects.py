@@ -1,10 +1,12 @@
 """Project CRUD and filesystem helpers for Anolis Workbench."""
 
+import functools
 import json
 import os
 import pathlib
 import re
 import shutil
+import threading
 from datetime import datetime, timezone
 
 import jsonschema
@@ -18,6 +20,28 @@ TEMPLATES_ROOT = paths_module.TEMPLATES_ROOT
 SYSTEM_SCHEMA_PATH = paths_module.SYSTEM_SCHEMA_PATH
 
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+# The server is threaded, and every write path here is read-modify-write over a
+# whole project directory — the profile, its variant configs and its provider
+# configs have to agree with each other. Interleaving two of them produces a
+# profile declaring a variant whose file another save just retired, which blocks
+# EVERY deploy of the project and cannot be repaired from the UI (a variant with
+# no document is invisible there). Coarse and correct beats clever here: these
+# operations are user-initiated and rare.
+_WRITE_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    """Run a project-mutating operation under the workspace write lock."""
+
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        with _WRITE_LOCK:
+            return fn(*args, **kwargs)
+
+    return _wrapped
+
+
 _SYSTEM_SCHEMA_CACHE: dict | None = None
 
 SIDECAR_NAME = machine_profile.SIDECAR_NAME
@@ -475,7 +499,8 @@ def get_project(name: str) -> dict:
     Imported projects are parsed for display only and never written back;
     authored ones round-trip through save_project.
     """
-    if _dir_format(project_dir(name)) == FORMAT_MACHINE_PROFILE:
+    fmt = _dir_format(project_dir(name))
+    if fmt == FORMAT_MACHINE_PROFILE:
         pdir = project_dir(name)
         try:
             document = canonical.read_project(pdir)
@@ -483,13 +508,14 @@ def get_project(name: str) -> dict:
             return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
         return document
-    if _dir_format(project_dir(name)) == FORMAT_SYSTEM:
+    if fmt == FORMAT_SYSTEM:
         # Listed (hiding it would look like deletion) but not migratable, so
         # serve the degraded shape rather than 404ing a project the UI shows.
         return _degraded_project(name)
     raise FileNotFoundError(f"Project '{name}' not found")
 
 
+@_serialized
 def import_project(source_path: str, name: str | None = None) -> tuple[dict, list[str]]:
     """Import a canonical machine-profile directory as a verbatim project (#226).
 
@@ -557,6 +583,7 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
     return meta, report.warnings
 
 
+@_serialized
 def save_project(name: str, document: dict) -> None:
     """Persist an authored canonical project document."""
     pdir = project_dir(name)
@@ -589,7 +616,15 @@ def save_project(name: str, document: dict) -> None:
     meta.setdefault("name", name)
     meta["profile_dir_name"] = document.get("profile", {}).get("machine_id") or meta.get("profile_dir_name")
     sidecar["meta"] = meta
-    sidecar["warnings"] = canonical_validator.project_warnings(document)
+    # Keep warnings the migrator recorded (a dropped provider, an automation
+    # variant that could not be carried) — they describe data the user LOST and
+    # must not be erased by the first save. Only the advisory set this function
+    # owns is recomputed.
+    advisory = set(canonical_validator.project_warnings({**document, "profile": {}, "variants": {}}))
+    previous = sidecar.get("warnings")
+    carried = [w for w in previous if isinstance(w, str)] if isinstance(previous, list) else []
+    recomputed = canonical_validator.project_warnings(document)
+    sidecar["warnings"] = [w for w in carried if w not in advisory and w not in recomputed] + recomputed
     canonical.write_sidecar(pdir, sidecar)
 
 
@@ -659,6 +694,7 @@ def _validate_canonical_provider_configs(document: dict) -> list[dict[str, str]]
     return errors
 
 
+@_serialized
 def create_project_from_template(name: str, template: str) -> dict:
     """Copy a canonical template directory and re-key it onto this project."""
     if project_dir(name).exists():
@@ -707,6 +743,7 @@ def create_project_from_template(name: str, template: str) -> dict:
     return get_project(name)
 
 
+@_serialized
 def rename_project(old_name: str, new_name: str) -> None:
     """Rename the workspace directory.
 
@@ -731,6 +768,7 @@ def rename_project(old_name: str, new_name: str) -> None:
         canonical.write_sidecar(pdir, sidecar)
 
 
+@_serialized
 def duplicate_project(source_name: str, new_name: str) -> dict:
     src = project_dir(source_name)
     if not src.exists():
@@ -775,6 +813,7 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
     return get_project(new_name)
 
 
+@_serialized
 def delete_project(name: str) -> None:
     if not project_dir(name).exists():
         raise FileNotFoundError(f"Project '{name}' not found")

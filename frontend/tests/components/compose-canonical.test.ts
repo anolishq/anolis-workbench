@@ -268,3 +268,50 @@ describe("component pins are authored data", () => {
     });
   });
 });
+
+describe("project warnings", () => {
+  it("are shown for an authored project, not just an imported one", () => {
+    // The migrator records what it could NOT carry — a dropped provider, an
+    // automation variant left behind. Those are authored projects, so rendering
+    // warnings only for imports meant real data loss had no surface at all.
+    const doc = createProjectDocument("demo");
+    doc.warnings = ["Provider 'ezo0' has no kind; it was dropped from the migrated project."];
+
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: reactive(doc),
+        providerSchemas: null,
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    });
+
+    expect(screen.getByTestId("project-warnings")).toHaveTextContent("ezo0");
+  });
+});
+
+describe("stale component pins", () => {
+  it("are surfaced with a way to remove them", async () => {
+    // install.sh downloads a binary for EVERY pin and fails the bundle when the
+    // release is missing, so a pin no variant runs is a hard deploy failure —
+    // and it used to have no editor at all.
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", { provider: { name: "sim0" } });
+    doc.profile.components!.providers!.ezo = {
+      repo: "anolishq/anolis-provider-ezo",
+      version: "0.3.4",
+    };
+    const reactiveDoc = reactive(doc);
+
+    render(ProfileForm, { props: { doc: reactiveDoc, onChanged: vi.fn() } });
+
+    expect(screen.getByTestId("stale-pin-ezo")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: /Remove pin/ }));
+
+    expect(reactiveDoc.profile.components?.providers?.ezo).toBeUndefined();
+    // The pin a variant DOES run is untouched.
+    expect(reactiveDoc.profile.components?.providers?.sim).toBeDefined();
+  });
+});

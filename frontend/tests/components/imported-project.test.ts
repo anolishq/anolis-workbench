@@ -44,7 +44,7 @@ function importedDoc(): ProjectDocument {
 }
 
 describe("ProfileView.svelte", () => {
-  it("renders the verbatim banner, variants, safety block and warnings", () => {
+  it("renders the verbatim banner, variants and safety block", () => {
     render(ProfileView, { props: { doc: importedDoc() } });
 
     expect(screen.getByText(/carried/)).toBeInTheDocument();
@@ -52,7 +52,6 @@ describe("ProfileView.svelte", () => {
     expect(screen.getByText("manual")).toBeInTheDocument();
     expect(screen.getByText("automation")).toBeInTheDocument();
     expect(screen.getByText("power_cut")).toBeInTheDocument();
-    expect(screen.getByText(/sample warning/)).toBeInTheDocument();
     expect(screen.getByText(/v0.1.39/)).toBeInTheDocument();
   });
 });
@@ -72,6 +71,9 @@ describe("Compose.svelte (imported project)", () => {
 
     expect(screen.getByText(/Edit it in its source repository/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Save/ })).not.toBeInTheDocument();
+    // Warnings render once, for every project — Compose owns them now, so an
+    // authored (e.g. migrated) project gets them too.
+    expect(screen.getByTestId("project-warnings")).toHaveTextContent("sample warning");
   });
 });
 
@@ -188,7 +190,9 @@ describe("Home.svelte import card", () => {
 
     // The per-error detail is the whole value of the validation matrix — it
     // must reach the operator, not just the generic headline.
-    expect(await screen.findByText(/Referenced file missing: config\/provider-ezo\.yaml/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Referenced file missing: config\/provider-ezo\.yaml/),
+    ).toBeInTheDocument();
     expect(onNavigate).not.toHaveBeenCalled();
   });
 });

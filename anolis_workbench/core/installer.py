@@ -1,8 +1,8 @@
 """Workspace project authoring for Anolis provisioning.
 
-Creates ready-to-launch workbench projects from bundled templates or a
-custom system.json. Deployment (binaries, /opt/anolis, systemd) is
-delegated to the canonical anolis install.sh — see core/deploy.py.
+Creates ready-to-launch workbench projects from bundled templates or an
+existing canonical project directory. Deployment (binaries, /opt/anolis,
+systemd) is delegated to the canonical anolis install.sh — see core/deploy.py.
 """
 
 from __future__ import annotations

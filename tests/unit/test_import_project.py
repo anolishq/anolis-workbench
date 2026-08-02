@@ -491,5 +491,19 @@ def test_materialize_refuses_crlf_configs(
     profile.write_bytes(profile.read_bytes().replace(b"\n", b"\r\n"))
     projects.import_project(str(source_dir), "rig-a")
 
-    with pytest.raises(deploy.DeployError, match="CRLF"):
+    with pytest.raises(deploy.DeployError, match="carriage returns"):
         deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+
+
+def test_materialize_allows_crlf_where_install_sh_does_not_use_awk(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Behaviour trees are byte-copied and provider configs go through pyyaml,
+    so a CR in those is harmless — blocking them would strand an imported
+    project with a message that is false and no way to clear it."""
+    behavior = next((source_dir / "behaviors").glob("*.xml"))
+    behavior.write_bytes(behavior.read_bytes().replace(b"\n", b"\r\n"))
+    projects.import_project(str(source_dir), "rig-a")
+
+    mat = deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+    assert (mat.project_dir / "behaviors" / behavior.name).is_file()

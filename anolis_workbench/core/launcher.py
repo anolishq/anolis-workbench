@@ -541,7 +541,7 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     host = canonical.host_paths({"host_paths": system.get("host_paths")})
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's paths).")
+        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
     cmd = [str(runtime_exe), "--config", launch_config]
 
     proc = subprocess.Popen(
@@ -613,7 +613,7 @@ def stop() -> None:
 def restart(name: str, project_dir: pathlib.Path) -> None:
     """Kill and relaunch using the already-rendered YAML on disk.
 
-    Does NOT re-render from current system.json — uses the YAML already on disk.
+    Does NOT re-read the project from disk — uses the YAML already on disk.
     """
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
@@ -642,7 +642,7 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     host = canonical.host_paths({"host_paths": system.get("host_paths")})
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's paths).")
+        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
     launch_config = str(
         project_dir / canonical.LAUNCH_DIR / "launch" / canonical.variant_filename(launch_variant(system))
     )

@@ -231,3 +231,84 @@ def test_rename_keeps_the_deploy_identity_and_does_not_self_collide(_systems_roo
     # ...which is exactly why the name it freed up must stay blocked.
     with pytest.raises(ValueError, match="already uses"):
         projects.create_project_from_template("rig-a", "sim-quickstart")
+
+
+def test_a_declared_variant_with_no_configuration_is_rejected(_systems_root: pathlib.Path) -> None:
+    """The profile is a manifest: a variant it declares but nothing writes leaves
+    a config file that does not exist, which blocks EVERY deploy of the project —
+    and is invisible in the UI, since a variant with no document is not rendered."""
+    document = _load_template("sim-quickstart")
+    document["profile"]["runtime_profiles"]["telemetry"] = canonical.variant_relpath("telemetry")
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("phantom", document)
+    assert any("has no configuration" in err.get("message", "") for err in exc_info.value.errors)
+
+
+def test_concurrent_saves_cannot_declare_a_variant_they_did_not_write(
+    _systems_root: pathlib.Path,
+) -> None:
+    """The server is threaded and every save is a read-modify-write over the whole
+    project. Interleaving two of them used to leave the profile declaring a
+    variant whose file the other save had just retired."""
+    import copy
+    import threading
+
+    import yaml
+
+    projects.create_project_from_template("rig", "sim-quickstart")
+    base = projects.get_project("rig")
+
+    def with_variant(name: str) -> dict:
+        document = copy.deepcopy(base)
+        document["variants"][name] = copy.deepcopy(document["variants"][canonical.MANUAL_VARIANT])
+        document["profile"]["runtime_profiles"][name] = canonical.variant_relpath(name)
+        return document
+
+    barrier = threading.Barrier(2)
+
+    def save(name: str) -> None:
+        barrier.wait()
+        try:
+            projects.save_project("rig", with_variant(name))
+        except projects.ProjectValidationError:
+            pass
+
+    threads = [threading.Thread(target=save, args=(n,)) for n in ("telemetry", "automation")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    pdir = projects.project_dir("rig")
+    profile = yaml.safe_load((pdir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8"))
+    for variant, rel in profile["runtime_profiles"].items():
+        assert (pdir / rel).is_file(), f"profile declares {variant} but {rel} is missing"
+
+
+def test_migration_warnings_survive_the_first_save(_systems_root: pathlib.Path) -> None:
+    """They record what the migration could NOT carry — a dropped provider, an
+    automation variant left behind. Erasing them on the first save means the
+    only notice of real data loss disappears before the user reads it."""
+    import json
+
+    legacy = json.loads(
+        (pathlib.Path(__file__).parent.parent / "fixtures" / "v2-templates" / "bioreactor-manual.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    del legacy["topology"]["providers"]["ezo0"]["kind"]
+    pdir = _systems_root / "legacy"
+    pdir.mkdir(parents=True)
+    (pdir / "system.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    document = projects.get_project("legacy")
+    assert any("has no kind" in w for w in document["warnings"])
+
+    document["profile"]["components"] = {
+        "runtime": {"repo": "anolishq/anolis", "version": "0.1.39"},
+        "providers": {"bread": {"repo": "anolishq/anolis-provider-bread", "version": "0.3.8"}},
+    }
+    projects.save_project("legacy", document)
+
+    assert any("has no kind" in w for w in projects.get_project("legacy")["warnings"])

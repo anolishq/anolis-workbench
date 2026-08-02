@@ -226,6 +226,33 @@ def runtime_config_errors(doc: Any) -> list[str]:
 # see — the exact bytes `write_project` is about to serialize.
 _FALSEY_ENABLED = ("", "false", "no", "off", "n")
 
+# awk's defaults, which Python's do NOT match: records split on "\n" alone
+# (str.splitlines also breaks on \x0b \x0c \x1c-\x1e \x85 \u2028 \u2029 and a
+# lone \r), and fields split on spaces and tabs alone (str.split also splits on
+# \r \v \f \xa0 ...). Differential testing over thousands of generated configs
+# found real decision mismatches from exactly these two differences.
+_AWK_FS = re.compile(r"[ \t]+")
+
+
+def _awk_records(text: str, *, strip_cr: bool) -> list[str]:
+    """Lines as awk sees them.
+
+    `strip_cr` mirrors a real asymmetry in install.sh: its inertness pass opens
+    with `sub(/\r$/, "")`, its block-value reader does NOT. So on a CRLF file the
+    latter sees `http:\r`, never matches the block, and reports an empty bind —
+    which silently passes the LAN-exposure gate. Reproducing that faithfully is
+    the point: `deploy._assert_no_crlf` is what refuses such a file.
+    """
+    lines = text.split("\n")
+    if not strip_cr:
+        return lines
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
+def _awk_fields(line: str) -> list[str]:
+    stripped = line.strip(" \t")
+    return _AWK_FS.split(stripped) if stripped else []
+
 
 def inertness_violation(doc: Any) -> str | None:
     """Why this runtime config is not inert, or None.
@@ -248,12 +275,11 @@ def inertness_violation_text(text: str) -> str | None:
     save for no real reason.
     """
     in_block = False
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\r")
+    for line in _awk_records(text, strip_cr=True):
         if line.startswith("automation:"):
             in_block = True
-            rest = line[len("automation:") :].strip()
-            rest = re.sub(r"\s*#.*", "", rest).strip()
+            rest = re.sub(r"^automation:[ \t]*", "", line)
+            rest = re.sub(r"[ \t]*#.*", "", rest)
             if rest != "":
                 return f"automation is not a plain block mapping ({rest})"
             continue
@@ -261,14 +287,16 @@ def inertness_violation_text(text: str) -> str | None:
             in_block = False
         if not in_block:
             continue
-        fields = line.split()
+        fields = _awk_fields(line)
         if not fields:
             continue
         if fields[0] == "enabled:":
             value = fields[1] if len(fields) > 1 else ""
-            unquoted = value.replace('"', "").replace("'", "").lower()
-            if unquoted not in _FALSEY_ENABLED:
-                return f"automation.enabled={value}"
+            # awk mutates the value in place before printing, so the reason it
+            # reports carries the UNQUOTED text.
+            unquoted = value.replace('"', "").replace("'", "")
+            if unquoted.lower() not in _FALSEY_ENABLED:
+                return f"automation.enabled={unquoted}"
         elif fields[0] == "mode_transition_hooks:":
             return "mode_transition_hooks present"
     return None
@@ -282,15 +310,16 @@ def http_value_text(text: str, key: str) -> str:
     value install.sh recognises and one it does not.
     """
     in_block = False
-    for line in text.splitlines():
+    for line in _awk_records(text, strip_cr=False):
+        fields = _awk_fields(line)
         if line[:1].isalpha():
-            in_block = line.split()[:1] == ["http:"]
+            in_block = fields[:1] == ["http:"]
+        if not in_block or not fields:
             continue
-        if not in_block:
-            continue
-        fields = line.split()
-        if len(fields) >= 2 and fields[0] == f"{key}:":
-            return fields[1]
+        if fields[0] == f"{key}:":
+            # awk prints $2 and exits on the FIRST match — a bare `key:` yields
+            # the empty string rather than falling through to a later line.
+            return fields[1] if len(fields) > 1 else ""
     return ""
 
 
@@ -508,9 +537,12 @@ def write_project(project_dir: Path, document: dict[str, Any]) -> None:
 
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / CONFIG_DIR).mkdir(exist_ok=True)
-    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
+    # Configs first, THEN the profile that references them: the profile is the
+    # manifest, so a save interrupted half-way must leave it pointing only at
+    # files that exist. Pruning last, for the same reason.
     for path, doc in targets:
         _write_yaml_atomic(path, doc)
+    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
 
     _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets}, previously_owned)
 
@@ -575,13 +607,23 @@ def _prune_orphans(
         path for path in previously_owned if path.parent == (project_dir / CONFIG_DIR).resolve()
     }
     retired_dir = project_dir / LAUNCH_DIR / "retired"
-    for path in sorted(candidates - keep):
-        if not path.is_file():
+    config_dir = project_dir / CONFIG_DIR
+    for resolved in sorted(candidates - keep):
+        # Act on the path INSIDE the project, never the symlink target: moving
+        # the resolved path would drag a file out of the user's home and leave a
+        # dangling link that breaks install.sh's config render.
+        path = config_dir / resolved.name
+        if path.is_symlink() or not path.is_file():
             continue
         if not any(path.match(pattern) for pattern in _INSTALL_SH_CONFIG_GLOBS):
             continue
         retired_dir.mkdir(parents=True, exist_ok=True)
-        path.replace(retired_dir / path.name)
+        target = retired_dir / path.name
+        suffix = 1
+        while target.exists():  # never clobber an earlier retirement
+            target = retired_dir / f"{path.name}.{suffix}"
+            suffix += 1
+        path.replace(target)
 
 
 def _load_yaml(path: Path) -> Any:

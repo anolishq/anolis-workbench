@@ -631,3 +631,34 @@ def test_deploy_tokens_reject_traversal_and_bare_relative_args() -> None:
     doc = _runtime_doc("rig-a")
     doc["providers"][0]["args"] = ["--config", "config/provider-bread.bread0.yaml"]
     assert any("bare relative path" in p for p in canonical.assert_deploy_tokens("rig-a", doc))
+
+
+def test_retiring_an_orphan_never_clobbers_an_earlier_one(tmp_path: pathlib.Path) -> None:
+    """Two rounds of retirement must not silently overwrite the first file."""
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    stray = pdir / "config" / "provider-bread.spare0.yaml"
+
+    stray.write_text("version one\n", encoding="utf-8")
+    canonical.write_project(pdir, _document())
+    stray.write_text("version two\n", encoding="utf-8")
+    canonical.write_project(pdir, _document())
+
+    retired = sorted(p.read_text(encoding="utf-8").strip() for p in (pdir / canonical.LAUNCH_DIR / "retired").iterdir())
+    assert retired == ["version one", "version two"]
+
+
+def test_retiring_an_orphan_does_not_follow_a_symlink_out_of_the_project(tmp_path: pathlib.Path) -> None:
+    """Moving the RESOLVED path would drag a file out of the user's home and
+    leave a dangling link that breaks install.sh's config render."""
+    outside = tmp_path / "elsewhere" / "provider-bread.note.yaml"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("mine\n", encoding="utf-8")
+
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    (pdir / "config" / "provider-bread.note.yaml").symlink_to(outside)
+
+    canonical.write_project(pdir, _document())
+
+    assert outside.read_text(encoding="utf-8") == "mine\n"
