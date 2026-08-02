@@ -276,6 +276,19 @@ def _meta_of(sidecar: dict) -> dict:
     return meta if isinstance(meta, dict) else {}
 
 
+def is_authored(name: str) -> bool:
+    """Whether the workbench authored this project (vs. imported it).
+
+    Since #255 every project is machine-profile FORMAT, so format can no longer
+    tell the two apart — `authored` is the only distinction, and callers that
+    gate on "is this an import" must ask this instead.
+    """
+    pdir = project_dir(name)
+    if _dir_format(pdir) is None:
+        raise FileNotFoundError(f"Project '{name}' not found")
+    return canonical.is_authored(_read_sidecar(pdir))
+
+
 def _dir_format(pdir: pathlib.Path, *, migrate: bool = True) -> str | None:
     """Project format for a workspace dir, or None if it isn't a project.
 

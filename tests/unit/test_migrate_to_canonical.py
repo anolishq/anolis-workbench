@@ -17,12 +17,14 @@ import yaml
 
 from anolis_workbench.core import canonical, canonical_validator, migrations, renderer
 
-TEMPLATES = pathlib.Path(__file__).parent.parent.parent / "anolis_workbench" / "templates"
+# The bundled templates are canonical dirs now (#255); these are the last
+# system.json templates, frozen so the migration path stays covered.
+LEGACY_TEMPLATES = pathlib.Path(__file__).parent.parent / "fixtures" / "v2-templates"
 TEMPLATE_NAMES = ("sim-quickstart", "bioreactor-manual", "mixed-bus-mock")
 
 
 def _legacy_project(tmp_path: pathlib.Path, template: str, mutate=None) -> tuple[pathlib.Path, dict]:
-    system = json.loads((TEMPLATES / template / "system.json").read_text(encoding="utf-8"))
+    system = json.loads((LEGACY_TEMPLATES / f"{template}.json").read_text(encoding="utf-8"))
     if mutate is not None:
         mutate(system)
     pdir = tmp_path / template

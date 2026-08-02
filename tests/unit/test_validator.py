@@ -18,7 +18,13 @@ from anolis_workbench.core import validator
 
 
 def _load_template(name: str) -> dict:
-    tpl_path = pathlib.Path(__file__).parent.parent.parent / "anolis_workbench" / "templates" / name / "system.json"
+    """A frozen system.json template.
+
+    validator.py speaks the retired document (#255 moved cross-provider checks
+    into canonical_validator.py); it survives only until the legacy
+    save path is deleted, so its tests read the frozen fixtures.
+    """
+    tpl_path = pathlib.Path(__file__).parent.parent / "fixtures" / "v2-templates" / f"{name}.json"
     return json.loads(tpl_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 

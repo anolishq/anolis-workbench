@@ -166,7 +166,7 @@ def test_duplicate_imported_is_verbatim(systems_root: pathlib.Path, source_dir: 
 
 
 # ---------------------------------------------------------------------------
-# materialize_imported_project_dir
+# materialize_project_dir (imported projects)
 # ---------------------------------------------------------------------------
 
 
@@ -179,12 +179,12 @@ def test_materialize_is_byte_identical_and_offline(
     projects.import_project(str(source_dir), "rig-a")
 
     def _no_network(*args: object, **kwargs: object) -> None:
-        raise AssertionError("materialize_imported_project_dir must not touch the network")
+        raise AssertionError("materialize_project_dir must not touch the network")
 
     monkeypatch.setattr(deploy.requests, "get", _no_network)
     monkeypatch.setattr(deploy.releases.requests, "get", _no_network)
 
-    mat = deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+    mat = deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
 
     # Keyed on the ORIGINAL canonical dir name, not the workbench name.
     assert mat.project_dir == tmp_path / "out" / "imported-profile"
@@ -202,7 +202,7 @@ def test_materialize_hard_fails_without_components(
     projects.import_project(str(source_dir), "rig-a")
 
     with pytest.raises(deploy.DeployError, match="components"):
-        deploy.materialize_imported_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out")
 
 
 def test_materialize_rejects_unknown_variant(
@@ -210,7 +210,7 @@ def test_materialize_rejects_unknown_variant(
 ) -> None:
     projects.import_project(str(source_dir), "rig-a")
     with pytest.raises(deploy.DeployError, match="variant 'warp'"):
-        deploy.materialize_imported_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out", variant="warp")
+        deploy.materialize_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out", variant="warp")
 
 
 def test_install_args_variant() -> None:
@@ -302,7 +302,7 @@ def test_materialize_refuses_uncarriable_reference(
         encoding="utf-8",
     )
     with pytest.raises(deploy.DeployError, match="cannot carry"):
-        deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +331,7 @@ def test_materialize_rejects_traversal_in_sidecar_dir_name(
     sidecar_file.write_text(json.dumps(sidecar), encoding="utf-8")
 
     with pytest.raises(deploy.DeployError, match="invalid project directory name"):
-        deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
     assert not (tmp_path / "escaped").exists()
 
 
@@ -340,8 +340,8 @@ def test_materialize_is_idempotent_into_the_same_dest(
 ) -> None:
     projects.import_project(str(source_dir), "rig-a")
     out = tmp_path / "out"
-    first = deploy.materialize_imported_project_dir(systems_root / "rig-a", out)
-    second = deploy.materialize_imported_project_dir(systems_root / "rig-a", out)
+    first = deploy.materialize_project_dir(systems_root / "rig-a", out)
+    second = deploy.materialize_project_dir(systems_root / "rig-a", out)
     assert _tree_digests(first.project_dir) == _tree_digests(second.project_dir)
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from anolis_workbench.core import machine_profile, provider_schemas
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
@@ -201,20 +199,23 @@ def serve_provider_schemas(handler) -> None:
 
 
 def serve_templates(handler) -> None:
+    """Bundled canonical project templates (#255)."""
     tpl_root = paths_module.TEMPLATES_ROOT
     if not tpl_root.exists():
         handler._json(200, [])
         return
     result = []
     for directory in sorted(tpl_root.iterdir()):
-        if not directory.is_dir():
-            continue
-        sj = directory / "system.json"
-        if not sj.exists():
+        if not directory.is_dir() or not (directory / machine_profile.PROFILE_FILENAME).is_file():
             continue
         try:
-            data = json.loads(sj.read_text(encoding="utf-8"))
-            result.append({"id": directory.name, "meta": data.get("meta", {})})
-        except (json.JSONDecodeError, OSError):
-            pass
+            profile = machine_profile.load_profile(directory)
+        except machine_profile.ProfileError:
+            continue
+        result.append(
+            {
+                "id": directory.name,
+                "meta": {"name": profile.get("display_name") or directory.name},
+            }
+        )
     handler._json(200, result)

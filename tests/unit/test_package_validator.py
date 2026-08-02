@@ -3,25 +3,48 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import pathlib
 import zipfile
+from typing import Callable
 
 import pytest
 import yaml
 
-from anolis_workbench.core import exporter, package_validator
+from anolis_workbench.core import canonical, exporter, package_validator
 
 
-def test_validate_package_accepts_valid_archive(tmp_path: pathlib.Path) -> None:
-    project_dir = _make_project(tmp_path, "valid-package")
+@pytest.fixture()
+def make_project(canonical_project: Callable[..., pathlib.Path], tmp_path: pathlib.Path):
+    """A canonical project whose exported package carries a redacted token."""
+
+    def _make(_tmp_path: pathlib.Path, name: str) -> pathlib.Path:
+        pdir = canonical_project(tmp_path / name, machine_id=name)
+        variant = pdir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+        doc = yaml.safe_load(variant.read_text(encoding="utf-8"))
+        doc["telemetry"] = {
+            "enabled": True,
+            "influxdb": {
+                "url": "http://localhost:8086",
+                "org": "anolis",
+                "bucket": "anolis",
+                "token": "fixture-secret",
+            },
+        }
+        variant.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        return pdir
+
+    return _make
+
+
+def test_validate_package_accepts_valid_archive(make_project, tmp_path: pathlib.Path) -> None:
+    project_dir = make_project(tmp_path, "valid-package")
     package_path = tmp_path / "valid-package.anpkg"
     exporter.build_package(project_dir=project_dir, out_path=package_path)
     package_validator.validate_package(package_path)
 
 
-def test_validate_package_rejects_checksum_drift(tmp_path: pathlib.Path) -> None:
-    project_dir = _make_project(tmp_path, "checksum-drift")
+def test_validate_package_rejects_checksum_drift(make_project, tmp_path: pathlib.Path) -> None:
+    project_dir = make_project(tmp_path, "checksum-drift")
     package_path = tmp_path / "checksum-drift.anpkg"
     exporter.build_package(project_dir=project_dir, out_path=package_path)
 
@@ -36,8 +59,8 @@ def test_validate_package_rejects_checksum_drift(tmp_path: pathlib.Path) -> None
         package_validator.validate_package(extract_dir)
 
 
-def test_validate_package_rejects_secret_leak_even_with_updated_checksums(tmp_path: pathlib.Path) -> None:
-    project_dir = _make_project(tmp_path, "secret-drift")
+def test_validate_package_rejects_secret_leak_even_with_updated_checksums(make_project, tmp_path: pathlib.Path) -> None:
+    project_dir = make_project(tmp_path, "secret-drift")
     package_path = tmp_path / "secret-drift.anpkg"
     exporter.build_package(project_dir=project_dir, out_path=package_path)
 
@@ -55,8 +78,8 @@ def test_validate_package_rejects_secret_leak_even_with_updated_checksums(tmp_pa
         package_validator.validate_package(extract_dir)
 
 
-def test_validate_package_rejects_provider_path_escape(tmp_path: pathlib.Path) -> None:
-    project_dir = _make_project(tmp_path, "escape-drift")
+def test_validate_package_rejects_provider_path_escape(make_project, tmp_path: pathlib.Path) -> None:
+    project_dir = make_project(tmp_path, "escape-drift")
     package_path = tmp_path / "escape-drift.anpkg"
     exporter.build_package(project_dir=project_dir, out_path=package_path)
 
@@ -72,80 +95,6 @@ def test_validate_package_rejects_provider_path_escape(tmp_path: pathlib.Path) -
 
     with pytest.raises(package_validator.PackageValidationError, match="path escapes package root"):
         package_validator.validate_package(extract_dir)
-
-
-def _make_project(tmp_path: pathlib.Path, name: str) -> pathlib.Path:
-    project = tmp_path / name
-    project.mkdir(parents=True, exist_ok=True)
-
-    system = {
-        "schema_version": 1,
-        "meta": {
-            "name": name,
-            "created": "2026-04-16T19:01:02+00:00",
-            "template": "fixture",
-        },
-        "topology": {
-            "runtime": {
-                "name": name,
-                "http_port": 8080,
-                "http_bind": "127.0.0.1",
-                "cors_origins": ["http://localhost:3000"],
-                "cors_allow_credentials": False,
-                "shutdown_timeout_ms": 2000,
-                "startup_timeout_ms": 30000,
-                "polling_interval_ms": 500,
-                "log_level": "info",
-                "telemetry": {
-                    "enabled": True,
-                    "influxdb": {
-                        "url": "http://localhost:8086",
-                        "org": "anolis",
-                        "bucket": "anolis",
-                        "token": "fixture-secret",
-                    },
-                },
-                "automation_enabled": True,
-                "behavior_tree_path": "behaviors/local.xml",
-                "providers": [
-                    {
-                        "id": "sim0",
-                        "kind": "sim",
-                        "timeout_ms": 5000,
-                        "hello_timeout_ms": 2000,
-                        "ready_timeout_ms": 10000,
-                        "restart_policy": {"enabled": False},
-                    }
-                ],
-            },
-            "providers": {
-                "sim0": {
-                    "kind": "sim",
-                    "provider_name": "sim0",
-                    "startup_policy": "degraded",
-                    "simulation_mode": "non_interacting",
-                    "tick_rate_hz": 10.0,
-                    "devices": [
-                        {"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0},
-                    ],
-                }
-            },
-        },
-        "paths": {
-            "runtime_executable": "build/dev-release/core/anolis-runtime",
-            "providers": {
-                "sim0": {
-                    "executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim",
-                }
-            },
-        },
-    }
-
-    behavior_dir = project / "behaviors"
-    behavior_dir.mkdir(parents=True, exist_ok=True)
-    (behavior_dir / "local.xml").write_text("<root />\n", encoding="utf-8")
-    (project / "system.json").write_text(json.dumps(system, indent=2), encoding="utf-8")
-    return project
 
 
 def _recompute_checksums(package_root: pathlib.Path) -> None:

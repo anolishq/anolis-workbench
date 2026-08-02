@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
-import yaml
 
-from anolis_workbench.core import installer
+from anolis_workbench.core import canonical, installer, machine_profile
 
 # ---------------------------------------------------------------------------
 # detect_platform
@@ -17,8 +15,9 @@ from anolis_workbench.core import installer
 
 class TestProvisionProject:
     def test_creates_project_with_patched_paths(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """provision_project should patch paths and produce valid project files."""
-        # Set up systems root in tmp
+        """A provisioned project is the canonical artifact set, re-keyed onto
+        its own machine_id, with ONLY the sidecar's host paths pointed at the
+        install prefix — the configs keep the deploy tokens install.sh rewrites."""
         systems_root = tmp_path / "systems"
         systems_root.mkdir()
         monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems_root)
@@ -34,31 +33,32 @@ class TestProvisionProject:
         )
 
         assert project_dir == systems_root / "test-project"
-        assert project_dir.exists()
+        document = canonical.read_project(project_dir)
 
-        # Check system.json has patched paths
-        system = json.loads((project_dir / "system.json").read_text())
-        assert system["paths"]["runtime_executable"] == str(prefix / "bin" / "anolis-runtime")
-        assert system["paths"]["providers"]["bread0"]["executable"] == str(prefix / "bin" / "anolis-provider-bread")
-        assert system["paths"]["providers"]["ezo0"]["executable"] == str(prefix / "bin" / "anolis-provider-ezo")
-        # Hardware wiring lives in the provider-native config and must be untouched
-        # by the executable-path patching.
-        assert system["topology"]["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "/dev/i2c-1"
-        assert "bus_path" not in system["paths"]["providers"]["bread0"]
+        # Host binary paths (the dev-launch residual) point at the prefix...
+        host = document["host_paths"]
+        assert host["runtime_executable"] == str(prefix / "bin" / "anolis-runtime")
+        assert host["providers"]["bread0"]["executable"] == str(prefix / "bin" / "anolis-provider-bread")
+        assert host["providers"]["ezo0"]["executable"] == str(prefix / "bin" / "anolis-provider-ezo")
 
-        # Check meta was updated
-        assert system["meta"]["name"] == "test-project"
+        # ...and the canonical configs do NOT: they stay prefix-agnostic.
+        manual = document["variants"][canonical.MANUAL_VARIANT]
+        for entry in manual["providers"]:
+            assert str(prefix) not in entry["command"]
+            assert canonical.command_kind(entry["command"]) in {"bread", "ezo"}
 
-        # Check rendered configs exist
-        assert (project_dir / "anolis-runtime.yaml").exists()
-        assert (project_dir / "providers" / "bread0.yaml").exists()
-        assert (project_dir / "providers" / "ezo0.yaml").exists()
+        # Re-keyed onto the new project, or it would deploy into the template's dir.
+        assert document["profile"]["machine_id"] == "test-project"
+        assert all(
+            "/projects/test-project/" in arg for entry in manual["providers"] for arg in entry["args"] if "../" in arg
+        )
+        assert document["meta"]["name"] == "test-project"
 
-        # Check anolis-runtime.yaml has correct command paths
-        runtime_yaml = yaml.safe_load((project_dir / "anolis-runtime.yaml").read_text())
-        provider_entries = runtime_yaml.get("providers", [])
-        for entry in provider_entries:
-            assert str(prefix / "bin") in entry["command"]
+        # Hardware wiring is provider-owned config and must survive untouched.
+        assert document["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "/dev/i2c-1"
+
+        assert (project_dir / canonical.provider_config_relpath("bread", "bread0")).is_file()
+        assert (project_dir / canonical.provider_config_relpath("ezo", "ezo0")).is_file()
 
     def test_raises_on_existing_project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         systems_root = tmp_path / "systems"
@@ -86,7 +86,8 @@ class TestProvisionProject:
         (systems_root / "force-test" / "old-file.txt").write_text("old")
 
         project_dir = installer.provision_project("bioreactor-manual", "force-test", prefix, force=True)
-        assert (project_dir / "system.json").exists()
+        assert (project_dir / machine_profile.PROFILE_FILENAME).exists()
+        assert not (project_dir / "old-file.txt").exists()
 
 
 # ---------------------------------------------------------------------------

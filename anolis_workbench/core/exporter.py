@@ -6,6 +6,7 @@ tools/package.py should call build_package().
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -17,9 +18,8 @@ from typing import Any
 
 import yaml
 
-from anolis_workbench.core import machine_profile, migrations, releases
+from anolis_workbench.core import canonical, machine_profile
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import renderer as renderer_module
 
 
 class ExportError(RuntimeError):
@@ -33,26 +33,38 @@ logger = logging.getLogger(__name__)
 
 
 def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
-    """Build a deterministic .anpkg zip archive from a commissioned project."""
+    """Build a deterministic .anpkg zip archive from a canonical project.
+
+    Sources every artifact from disk (#255) rather than re-rendering: the
+    profile IS the project's, so the pins it carries are the ones exported —
+    no release lookups, no synthesis. The package keeps its v1 layout, which
+    differs from the project layout and is a shipped contract.
+    """
     out_path = out_path.resolve()  # canonicalize before any path operations
     project_root = project_dir.resolve()
-    system_path = project_root / "system.json"
-    if not system_path.is_file():
-        raise ExportError(f"Project file not found: {system_path}")
+    if not (project_root / machine_profile.PROFILE_FILENAME).is_file():
+        raise ExportError(f"Project file not found: {project_root / machine_profile.PROFILE_FILENAME}")
 
-    system = _load_system_json(system_path)
     project_name = project_root.name
-    rendered = renderer_module.render(system, project_name)
-    runtime_yaml = rendered.get("anolis-runtime.yaml")
-    if not isinstance(runtime_yaml, str) or runtime_yaml.strip() == "":
-        raise ExportError("Renderer did not produce anolis-runtime.yaml")
+    try:
+        document = canonical.read_project(project_root)
+    except (machine_profile.ProfileError, canonical.CanonicalError) as exc:
+        raise ExportError(str(exc)) from exc
 
-    runtime_payload = yaml.safe_load(runtime_yaml) or {}
+    profile = copy.deepcopy(document["profile"])
+    runtime_payload = copy.deepcopy(launcher_variant(document))
     if not isinstance(runtime_payload, dict):
-        raise ExportError("Rendered runtime YAML root must be a mapping/object")
+        raise ExportError("Project has no runtime variant to export")
 
     provider_ids = _rewrite_provider_args(runtime_payload)
-    provider_files = _collect_provider_files(rendered, project_root, provider_ids)
+    provider_files: dict[str, bytes] = {}
+    for pid in provider_ids:
+        entry = document["providers"].get(pid)
+        config = entry.get("config") if isinstance(entry, dict) else None
+        if not isinstance(config, dict):
+            raise ExportError(f"Provider config not found for {pid}")
+        provider_files[f"providers/{pid}.yaml"] = yaml.safe_dump(config, sort_keys=False).encode("utf-8")
+
     behavior_rel_paths = _rewrite_and_collect_behaviors(
         runtime_payload=runtime_payload,
         project_dir=project_root,
@@ -61,16 +73,28 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     redaction_applied = _redact_runtime_secrets(runtime_payload)
     runtime_text = yaml.safe_dump(runtime_payload, sort_keys=False)
 
-    profile = _build_machine_profile(
-        system=system,
-        project_name=project_name,
-        provider_ids=provider_ids,
-        behavior_rel_paths=behavior_rel_paths,
-    )
+    # The package's own layout: providers live at providers/<pid>.yaml and
+    # behaviors under runtime/behaviors/, so re-point the profile at them.
+    profile["providers"] = {pid: {"config": f"providers/{pid}.yaml"} for pid in provider_ids}
+    profile["runtime_profiles"] = {"manual": "runtime/anolis-runtime.yaml"}
+    if behavior_rel_paths:
+        profile["behaviors"] = sorted(behavior_rel_paths.keys())
+    else:
+        profile.pop("behaviors", None)
     _validate_machine_profile(profile)
     machine_profile_text = yaml.safe_dump(profile, sort_keys=False)
 
-    exported_at = _deterministic_exported_at(system)
+    exported_at = _deterministic_exported_at({"meta": document.get("meta", {})})
+    # Package format v1 has a single runtime config, so a multi-variant project
+    # exports its inert `manual` variant only. Say so rather than letting the
+    # recipient assume the package is the whole machine.
+    omitted = sorted(v for v in (document.get("variants") or {}) if v != canonical.MANUAL_VARIANT)
+    if omitted:
+        logger.warning(
+            "exporting only the '%s' variant; %s not carried (package format v1 holds one runtime config)",
+            canonical.MANUAL_VARIANT,
+            ", ".join(omitted),
+        )
     provenance = {
         "exported_at": exported_at,
         "schema_versions": {
@@ -79,6 +103,8 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
         },
         "package_format_version": 1,
         "source_project": project_name,
+        "exported_variant": canonical.MANUAL_VARIANT,
+        "omitted_variants": omitted,
         "redaction_policy": {
             "telemetry_influxdb_token_removed": redaction_applied,
             "deploy_time_env_var": "INFLUXDB_TOKEN",
@@ -91,10 +117,7 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
         "runtime/anolis-runtime.yaml": runtime_text.encode("utf-8"),
         "meta/provenance.json": provenance_text.encode("utf-8"),
     }
-
-    for rel_path, content in provider_files.items():
-        files[rel_path] = content
-
+    files.update(provider_files)
     for rel_path, source_path in behavior_rel_paths.items():
         files[rel_path] = source_path.read_bytes()
 
@@ -103,15 +126,11 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     _write_zip_deterministic(files=files, out_path=out_path)
 
 
-def _load_system_json(system_path: pathlib.Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(system_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise ExportError(f"Failed reading {system_path}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ExportError("system.json root must be an object")
-    payload, _ = migrations.migrate_system(payload)  # defensive: tolerate a v1 doc on disk
-    return payload
+def launcher_variant(document: dict[str, Any]) -> dict[str, Any] | None:
+    """The variant a package exports: the inert `manual` one."""
+    variants = document.get("variants") or {}
+    doc = variants.get(canonical.MANUAL_VARIANT)
+    return doc if isinstance(doc, dict) else None
 
 
 def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
@@ -147,28 +166,6 @@ def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
         entry["args"] = args
 
     return provider_ids
-
-
-def _collect_provider_files(
-    rendered: dict[str, str],
-    project_dir: pathlib.Path,
-    provider_ids: list[str],
-) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
-    for provider_id in provider_ids:
-        rel = f"providers/{provider_id}.yaml"
-        rendered_text = rendered.get(rel)
-        if isinstance(rendered_text, str) and rendered_text.strip() != "":
-            files[rel] = rendered_text.encode("utf-8")
-            continue
-
-        fallback = project_dir / rel
-        if fallback.is_file():
-            files[rel] = fallback.read_bytes()
-            continue
-
-        raise ExportError(f"Provider config not found for {provider_id}: expected '{rel}'")
-    return files
 
 
 def _rewrite_and_collect_behaviors(
@@ -235,88 +232,6 @@ def _redact_runtime_secrets(runtime_payload: dict[str, Any]) -> bool:
     return redacted
 
 
-def _build_machine_profile(
-    *,
-    system: dict[str, Any],
-    project_name: str,
-    provider_ids: list[str],
-    behavior_rel_paths: dict[str, pathlib.Path],
-) -> dict[str, Any]:
-    meta = system.get("meta")
-    display_name = project_name
-    if isinstance(meta, dict):
-        raw = meta.get("name")
-        if isinstance(raw, str) and raw.strip() != "":
-            display_name = raw.strip()
-
-    machine_id = _machine_id_from_name(project_name)
-    providers = {provider_id: {"config": f"providers/{provider_id}.yaml"} for provider_id in provider_ids}
-
-    # Resolve pinned component versions from the latest GitHub releases so the
-    # exported profile can drive `install.sh --project` directly; Renovate
-    # bumps the pins in the project config afterwards. Provider instances map
-    # to a component by their `kind` (repo anolishq/anolis-provider-<kind>);
-    # offline / unreleased kinds degrade to local-build and are left out of
-    # components.
-    topo_providers = system.get("topology", {}).get("providers", {})
-    if not isinstance(topo_providers, dict):
-        topo_providers = {}
-    compatibility_providers: dict[str, Any] = {}
-    components_providers: dict[str, Any] = {}
-    for provider_id in provider_ids:
-        entry = topo_providers.get(provider_id)
-        kind = entry.get("kind") if isinstance(entry, dict) else None
-        version: str | None = None
-        if isinstance(kind, str) and kind != "":
-            repo = releases.provider_repo(kind)
-            version = releases.latest_release_version(repo)
-            if version is not None:
-                compatibility_providers[provider_id] = {"strategy": "pinned-ref", "version": version}
-                components_providers[kind] = {"repo": repo, "version": version}
-        if version is None:
-            compatibility_providers[provider_id] = {"strategy": "local-build", "version": "unspecified"}
-            logger.warning(
-                "no released component for provider %s (kind %s: offline or unreleased); "
-                "exported machine-profile pins it as local-build and omits it from components",
-                provider_id,
-                kind,
-            )
-    runtime_version = releases.latest_release_version(releases.RUNTIME_REPO)
-
-    payload: dict[str, Any] = {
-        "schema_version": 1,
-        "machine_id": machine_id,
-        "display_name": display_name,
-        "runtime_profiles": {
-            "manual": "runtime/anolis-runtime.yaml",
-        },
-        "providers": providers,
-        "validation": {
-            "expected_providers": provider_ids,
-        },
-        "compatibility": {
-            "runtime": {
-                "config_contract": "01-runtime-config",
-                "http_contract": "02-runtime-http",
-            },
-            "providers": compatibility_providers,
-        },
-    }
-    if behavior_rel_paths:
-        payload["behaviors"] = sorted(behavior_rel_paths.keys())
-    if runtime_version is not None and components_providers:
-        payload["components"] = {
-            "runtime": {"repo": releases.RUNTIME_REPO, "version": runtime_version},
-            "providers": components_providers,
-        }
-    else:
-        logger.warning(
-            "exported machine-profile has no components section (offline or no released "
-            "components); fill in components.runtime/providers before using install.sh --project"
-        )
-    return payload
-
-
 def _validate_machine_profile(profile: dict[str, Any]) -> None:
     try:
         errors = machine_profile.schema_errors(profile)
@@ -324,17 +239,6 @@ def _validate_machine_profile(profile: dict[str, Any]) -> None:
         raise ExportError(f"Bundled machine-profile schema unavailable: {exc}") from exc
     if errors:
         raise ExportError(f"Generated machine-profile failed schema validation: {'; '.join(errors)}")
-
-
-def _machine_id_from_name(name: str) -> str:
-    lowered = name.strip().lower().replace("_", "-")
-    cleaned = _MACHINE_ID_RE.sub("-", lowered)
-    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    if cleaned == "":
-        cleaned = "machine"
-    if not cleaned[0].isalnum():
-        cleaned = f"m-{cleaned}"
-    return cleaned
 
 
 def _deterministic_exported_at(system: dict[str, Any]) -> str:
