@@ -65,14 +65,20 @@
   }
 
   function setCorsOrigins(raw: string): void {
-    setIn(
-      "http",
-      "cors_allowed_origins",
-      raw
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
+    const origins = raw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (origins.length > 0) {
+      setIn("http", "cors_allowed_origins", origins);
+      return;
+    }
+    // The runtime schema requires a non-empty list when http is enabled, so an
+    // empty box has to mean "no CORS section" — writing [] makes the project
+    // unsaveable with an error that names neither the rule nor the fix.
+    const config = (doc.variants[name] ??= {});
+    if (config.http) delete config.http.cors_allowed_origins;
+    onChanged();
   }
 
   function setRuntimeExecutable(value: string): void {

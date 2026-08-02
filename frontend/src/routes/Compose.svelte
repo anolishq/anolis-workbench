@@ -108,7 +108,12 @@
     delete rest[AUTOMATION_VARIANT];
     doc.profile.runtime_profiles = rest;
     if (typeof behaviorRef === "string") {
-      const rel = behaviorRef.split("/").slice(-2).join("/");
+      // Strip the token prefix rather than counting segments: a relpath is not
+      // always two deep, and getting it wrong leaves the behaviour declared in
+      // the profile with no variant using it — which blocks the save AND every
+      // deploy of the project, with no UI able to clear it.
+      const prefix = projectPathToken(doc.profile.machine_id, "");
+      const rel = behaviorRef.startsWith(prefix) ? behaviorRef.slice(prefix.length) : behaviorRef;
       doc.profile.behaviors = (doc.profile.behaviors ?? []).filter((b) => b !== rel);
       if (doc.profile.behaviors.length === 0) delete doc.profile.behaviors;
     }

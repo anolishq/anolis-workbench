@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import yaml
+
 from anolis_workbench.core import canonical, machine_profile
 
 
@@ -298,34 +300,37 @@ def _port_errors(variants: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _is_loopback_bind(value: str) -> bool:
-    text = value.strip().strip("[]")
-    return text == "localhost" or text == "::1" or text.startswith("127.")
-
-
 def _bind_errors(variants: dict[str, Any]) -> list[str]:
     """A non-loopback bind without auth is refused by install.sh — but LATE.
 
-    Its check runs in the config phase, AFTER the binaries have already been
-    replaced on the target, so the operator is left mid-install. Catch it at
-    save time instead, while it is still a one-field fix.
+    Its check runs in the config phase, AFTER the binaries on the target have
+    been replaced, so the operator is left mid-install. Catch it at save time
+    while it is still a one-field fix.
+
+    Read from the SERIALIZED text, because install.sh's reader is an awk that
+    takes the raw field: it never strips quotes, so `bind: ""` and
+    `bind: "[::1]"` are values it cannot recognise as loopback, and
+    `auth_enabled: 'true'` is not the string `true` it compares against.
     """
     errors: list[str] = []
     for variant, doc in sorted(variants.items()):
         if not isinstance(doc, dict):
             continue
-        http = doc.get("http")
-        if not isinstance(http, dict):
+        text = yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
+        bind = canonical.http_value_text(text, "bind")
+        # install.sh: `case "${bind:-127.0.0.1}" in 127.* | ::1 | localhost)`.
+        # The default only applies when the field is absent entirely.
+        if bind == "" or bind == "localhost" or bind == "::1" or bind.startswith("127."):
             continue
-        bind = http.get("bind")
-        if not isinstance(bind, str) or bind == "" or _is_loopback_bind(bind):
+        if canonical.http_value_text(text, "auth_enabled") == "true":
             continue
-        if http.get("auth_enabled") or http.get("allow_insecure_bind"):
+        if canonical.http_value_text(text, "allow_insecure_bind") == "true":
             continue
         errors.append(
-            f"Runtime variant '{variant}' binds HTTP to '{bind}', which is reachable off-host, "
-            "with authentication disabled. Set http.auth_enabled (or keep bind on 127.0.0.1 and "
-            "let install.sh do the LAN rewrite, which turns authentication on for you)."
+            f"Runtime variant '{variant}' binds HTTP to {bind}, which install.sh does not read as "
+            "loopback, with authentication disabled. Set http.auth_enabled: true, or keep bind on "
+            "an unquoted 127.0.0.1 and let install.sh do the LAN rewrite (which turns "
+            "authentication on for you)."
         )
     return errors
 

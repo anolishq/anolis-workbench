@@ -5,7 +5,26 @@ import { AUTOMATION_VARIANT, MANUAL_VARIANT } from "../../src/lib/canonical";
 import ProfileForm from "../../src/lib/ProfileForm.svelte";
 import RuntimeForm from "../../src/lib/RuntimeForm.svelte";
 import Compose from "../../src/routes/Compose.svelte";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import ProviderList from "../../src/lib/ProviderList.svelte";
+import type { ProviderSchemasResponse } from "../../src/lib/contracts";
 import { createProjectDocument, createRuntimeStatus, jsonResponse, withProvider } from "./helpers";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+function schemasResponseForPins(): ProviderSchemasResponse {
+  const load = (kind: string) =>
+    JSON.parse(
+      readFileSync(
+        resolve(HERE, `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`),
+        "utf-8",
+      ),
+    );
+  return { schema_version: 1, providers: { sim: load("sim"), bread: load("bread") } };
+}
 import { reactive } from "./helpers.svelte";
 
 describe("RuntimeForm.svelte (canonical runtime config)", () => {
@@ -169,5 +188,83 @@ describe("Compose.svelte (automation variant is reversible)", () => {
     expect(doc.variants[AUTOMATION_VARIANT]).toBeUndefined();
     expect(doc.profile.runtime_profiles[AUTOMATION_VARIANT]).toBeUndefined();
     expect(doc.profile.behaviors).toBeUndefined();
+  });
+});
+
+describe("regressions found reviewing the fixes", () => {
+  it("removing the automation variant clears behaviours at ANY path depth", async () => {
+    // Reconstructing the relpath by counting segments only worked for a
+    // two-deep path; anything else left the behaviour declared with no variant
+    // using it, which blocks the save AND every deploy, unclearable from the UI.
+    for (const rel of ["behaviors/main.xml", "behaviors/sub/dir/tree.xml", "tree.xml"]) {
+      const doc = reactive(createProjectDocument("demo"));
+      const { unmount } = render(Compose, {
+        props: {
+          projectName: "demo",
+          system: doc,
+          providerSchemas: null,
+          runtimeStatus: createRuntimeStatus(),
+          onDirty: vi.fn(),
+          onSaved: vi.fn(),
+        },
+      });
+
+      await fireEvent.click(screen.getByRole("button", { name: /Automation variant/ }));
+      await fireEvent.input(screen.getByPlaceholderText("behaviors/main.xml"), {
+        target: { value: rel },
+      });
+      await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(doc.profile.behaviors).toEqual([rel]);
+
+      await fireEvent.click(screen.getByRole("button", { name: /Remove automation variant/ }));
+      expect(doc.profile.behaviors, `left dangling for ${rel}`).toBeUndefined();
+      unmount();
+    }
+  });
+
+  it("clearing the CORS box omits the key instead of writing an invalid []", async () => {
+    // The runtime schema requires a non-empty list when http is enabled, so []
+    // makes the project unsaveable with an error naming neither rule nor fix.
+    const doc = reactive(createProjectDocument("demo"));
+    doc.variants[MANUAL_VARIANT].http!.cors_allowed_origins = ["http://localhost:3000"];
+    // Scope to THIS render: other suites in this file mount Compose, which
+    // renders a RuntimeForm of its own.
+    const { container } = render(RuntimeForm, { props: { doc, onChanged: vi.fn() } });
+
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toContain("http://localhost:3000");
+    await fireEvent.input(textarea, { target: { value: "  \n  " } });
+
+    // Assert on the serialized form: a Svelte $state proxy still answers
+    // `toHaveProperty` for a deleted key, but the value that gets PUT does not.
+    expect(Object.keys(doc.variants[MANUAL_VARIANT].http ?? {})).not.toContain(
+      "cors_allowed_origins",
+    );
+  });
+});
+
+describe("component pins are authored data", () => {
+  it("changing a provider's kind does not drop the old kind's pin", async () => {
+    // A pin carries `repo` — a fork or an air-gapped mirror. Dropping it means
+    // a later re-pin silently substitutes the upstream repo.
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", { provider: { name: "sim0" } });
+    doc.profile.components!.providers!.sim = {
+      repo: "myorg/anolis-provider-sim",
+      version: "0.9.1",
+    };
+    const reactiveDoc = reactive(doc);
+
+    render(ProviderList, {
+      props: { doc: reactiveDoc, providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+    });
+
+    const kindSelect = document.querySelector(".provider-kind-select") as HTMLSelectElement;
+    await fireEvent.change(kindSelect, { target: { value: "bread" } });
+
+    expect(reactiveDoc.profile.components?.providers?.sim).toEqual({
+      repo: "myorg/anolis-provider-sim",
+      version: "0.9.1",
+    });
   });
 });

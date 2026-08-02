@@ -447,3 +447,49 @@ def test_import_name_defaults_to_the_source_directory_name(
 def test_import_rejects_an_invalid_project_name(systems_root: pathlib.Path, source_dir: pathlib.Path) -> None:
     with pytest.raises(ValueError, match="Project name"):
         projects.import_project(str(source_dir), "../escape")
+
+
+def test_importing_one_source_twice_warns_about_the_shared_deploy_directory(
+    systems_root: pathlib.Path, source_dir: pathlib.Path
+) -> None:
+    """Both projects keep the source's directory name, and install.sh removes
+    that directory before installing. The copies are byte-identical so this is
+    benign today — but it stops being benign if one is hand-edited."""
+    _, first = projects.import_project(str(source_dir), "rig-a")
+    assert not any("also uses" in w for w in first)
+
+    _, second = projects.import_project(str(source_dir), "rig-b")
+    assert any("also uses" in w and "rig-a" in w for w in second), second
+
+
+def test_materialize_refuses_a_non_inert_manual_variant(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Imported projects never pass through save-time validation, so deploy is
+    the only place that can catch this before install.sh does on the target."""
+    manual = source_dir / "config" / "anolis-runtime.bioreactor.manual.yaml"
+    manual.write_text(
+        manual.read_text(encoding="utf-8").replace(
+            "automation:\n  enabled: false", "automation:\n  enabled: false\n  mode_transition_hooks: []"
+        ),
+        encoding="utf-8",
+    )
+    projects.import_project(str(source_dir), "rig-a")
+
+    with pytest.raises(deploy.DeployError, match="not inert"):
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+
+
+def test_materialize_refuses_crlf_configs(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """install.sh parses these with awk, which does not strip the carriage
+    return: the runtime variant fails to resolve and the LAN-exposure check is
+    silently skipped. An imported project is copied byte-for-byte, so the
+    workbench's own LF writing does not cover this."""
+    profile = source_dir / "machine-profile.yaml"
+    profile.write_bytes(profile.read_bytes().replace(b"\n", b"\r\n"))
+    projects.import_project(str(source_dir), "rig-a")
+
+    with pytest.raises(deploy.DeployError, match="CRLF"):
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")

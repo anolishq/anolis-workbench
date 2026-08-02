@@ -91,9 +91,12 @@ export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigD
  *
  * Mirrors install.sh's install-time gate, which refuses a non-inert `manual`
  * variant. That gate is an awk pass over the raw YAML, so it is blunter than a
- * structural reading and this has to match its bluntness: `automation:` present
- * but empty dies, the scan is not depth-anchored (a hook or flag nested at any
- * depth counts), and `enabled` is compared as text so only `false` is inert.
+ * structural reading: `automation:` present but empty dies, and the scan is not
+ * depth-anchored (a hook or flag nested at any depth counts).
+ *
+ * ADVISORY ONLY — this runs on the parsed document, so it cannot see an
+ * `enabled:` that appears as a wrapped line of a multi-line string. The
+ * authoritative gate runs server-side over the serialized text.
  */
 export function inertnessViolation(doc: RuntimeConfigDoc | null | undefined): string | null {
   if (!doc || !("automation" in doc)) return null;
@@ -110,6 +113,19 @@ export function inertnessViolation(doc: RuntimeConfigDoc | null | undefined): st
   return nestedAutomationViolation(automation, "automation");
 }
 
+/**
+ * install.sh un-quotes and lowercases the field, then compares it against a
+ * false-ish set — so `'false'` and `no` are inert to it while `0` is not.
+ * Mirrored from the awk in tools/install.sh.
+ */
+const FALSEY_ENABLED = ["", "false", "no", "off", "n"];
+
+function isFalseyEnabled(value: unknown): boolean {
+  if (value === false) return true;
+  if (typeof value !== "string") return false;
+  return FALSEY_ENABLED.includes(value.replace(/["']/g, "").toLowerCase());
+}
+
 function nestedAutomationViolation(node: unknown, path: string): string | null {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
@@ -122,8 +138,8 @@ function nestedAutomationViolation(node: unknown, path: string): string | null {
 
   const record = node as UnknownRecord;
   if ("mode_transition_hooks" in record) return `${path}.mode_transition_hooks is present`;
-  if ("enabled" in record && record.enabled !== false) {
-    return `${path}.enabled is ${JSON.stringify(record.enabled)}; only false is inert to install.sh`;
+  if ("enabled" in record && !isFalseyEnabled(record.enabled)) {
+    return `${path}.enabled is ${JSON.stringify(record.enabled)}, which install.sh reads as enabled`;
   }
   for (const [key, value] of Object.entries(record)) {
     if (key === "enabled" || key === "mode_transition_hooks") continue;

@@ -151,22 +151,6 @@
     if (compat) delete compat[id];
   }
 
-  /** Drop pins for kinds nothing runs any more, so install.sh stops fetching them. */
-  function pruneUnusedPins(): void {
-    const pins = asObject(doc.profile?.components?.providers);
-    if (!pins) return;
-    const inUse = new Set(
-      Object.values(doc.variants ?? {}).flatMap((config) =>
-        (config.providers ?? [])
-          .map((entry) => commandKind(entry.command))
-          .filter((kind): kind is string => kind !== null),
-      ),
-    );
-    for (const kind of Object.keys(pins)) {
-      if (!inUse.has(kind)) delete pins[kind];
-    }
-  }
-
   function addProvider(): void {
     if (kinds.length === 0) return;
     const kind = kinds.includes("sim") ? "sim" : kinds[0];
@@ -197,7 +181,6 @@
       }
     }
     delete doc.host_paths?.providers?.[id];
-    pruneUnusedPins();
     onChanged();
   }
 
@@ -235,7 +218,10 @@
     doc.providers ??= {};
     doc.providers[id] = { kind: newKind, config: seedConfig(newKind, id) };
     // The old kind's compatibility entry describes a provider this instance no
-    // longer is.
+    // longer is. Component PINS are left alone: they are authored data (a fork
+    // or an air-gapped mirror lives in `repo`), and install.sh only warns about
+    // one nothing runs — whereas dropping it silently re-points a later
+    // re-pin at the upstream repo.
     compatEntries()[id] = { strategy: "local-build", version: "unspecified" };
     declare(id, newKind, compatEntries()[id]);
     for (const config of Object.values(doc.variants ?? {})) {
@@ -243,7 +229,6 @@
         if (entry.id === id) retarget(entry, id, newKind);
       }
     }
-    pruneUnusedPins();
     doc.host_paths ??= {};
     doc.host_paths.providers ??= {};
     doc.host_paths.providers[id] = { executable: "" };

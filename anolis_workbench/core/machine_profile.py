@@ -327,16 +327,18 @@ def validate_project_dir(source_dir: Path, profile_dir_name: str) -> ImportRepor
 
 
 def _manual_inertness_warnings(path: Path, ref: str) -> list[str]:
+    """The same gate every other path uses, so an import cannot be told its
+    manual variant is fine when install.sh will refuse it."""
+    from anolis_workbench.core import canonical  # local: canonical imports this module
+
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
-        return [f"Could not parse manual variant {ref}: {exc}"]
-    if not isinstance(doc, dict):
-        return [f"Manual variant {ref} is not a mapping"]
-    automation = doc.get("automation")
-    if isinstance(automation, dict) and automation.get("enabled"):
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"Could not read manual variant {ref}: {exc}"]
+    violation = canonical.inertness_violation_text(text)
+    if violation is not None:
         return [
-            f"Manual variant {ref} has automation.enabled set — install.sh's "
+            f"Manual variant {ref} is not inert ({violation}) — install.sh's "
             "verify-inert gate will REFUSE this profile at deploy time."
         ]
     return []

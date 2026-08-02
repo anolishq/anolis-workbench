@@ -302,20 +302,42 @@ def test_write_prunes_configs_the_profile_no_longer_references(tmp_path: pathlib
     assert (pdir / "config" / "provider-ezo.ezo0.yaml").is_file()
 
 
-def test_write_never_deletes_a_file_the_profile_did_not_own(tmp_path: pathlib.Path) -> None:
-    """Users keep staged configs and notes next to the ones in use. A save must
-    reclaim only what THIS project previously referenced — deleting anything
-    else is data loss the user never asked for and cannot undo."""
+def test_write_retires_a_stray_config_install_sh_would_consume(tmp_path: pathlib.Path) -> None:
+    """install.sh's stage renderer GLOBS config/provider-*.yaml and
+    config/anolis-runtime.*.yaml and hard-fails on one it cannot resolve, so a
+    stray matching file breaks every deploy even though nothing references it.
+    It is moved aside, not deleted — out of install.sh's view, still on disk."""
     pdir = tmp_path / "rig-a"
     canonical.write_project(pdir, _document())
     spare = pdir / "config" / "provider-bread.spare0.yaml"
     spare.write_text("staged: true\n", encoding="utf-8")
-    notes = pdir / "config" / "notes.yaml"
-    notes.write_text("note: keep me\n", encoding="utf-8")
 
     canonical.write_project(pdir, _document())
 
-    assert spare.read_text(encoding="utf-8") == "staged: true\n"
+    assert not spare.exists()
+    retired = pdir / "config" / "provider-bread.spare0.yaml.orphaned.bak"
+    assert retired.read_text(encoding="utf-8") == "staged: true\n"
+
+
+def test_write_leaves_alone_what_install_sh_never_looks_at(tmp_path: pathlib.Path) -> None:
+    """Anything outside install.sh's globs is the user's, including behaviour
+    trees the workbench cannot recreate."""
+    pdir = tmp_path / "rig-a"
+    document = _document()
+    document["profile"]["behaviors"] = ["behaviors/main.xml"]
+    canonical.write_project(pdir, document)
+    behavior = pdir / "behaviors" / "main.xml"
+    behavior.parent.mkdir(exist_ok=True)
+    behavior.write_text("<root />\n", encoding="utf-8")
+    notes = pdir / "config" / "notes.yaml"
+    notes.write_text("note: keep me\n", encoding="utf-8")
+
+    # Removing the automation variant drops the behaviours entry — the exact
+    # sequence that must NOT take the hand-authored .xml with it.
+    document["profile"].pop("behaviors")
+    canonical.write_project(pdir, document)
+
+    assert behavior.read_text(encoding="utf-8") == "<root />\n"
     assert notes.read_text(encoding="utf-8") == "note: keep me\n"
 
 
@@ -567,10 +589,15 @@ def test_machine_id_is_length_capped() -> None:
         ({"enabled": False}, True),
         ({"enabled": False, "behavior_tree": "behaviors/main.xml"}, True),
         ({"enabled": True}, False),
-        # install.sh compares the SERIALIZED text against "false", so every one
-        # of these reads as enabled there.
-        ({"enabled": "false"}, False),
+        # install.sh un-quotes and lowercases the field, then compares against a
+        # false-ish set — so these ARE inert to it and must not be blocked.
+        ({"enabled": "false"}, True),
+        ({"enabled": "False"}, True),
+        ({"enabled": "no"}, True),
+        ({"enabled": "off"}, True),
+        # ...but a number is not in that set.
         ({"enabled": 0}, False),
+        ({"enabled": 1}, False),
         ({"mode_transition_hooks": []}, False),
         # Its scan is not depth-anchored: a flag or hook nested anywhere in the
         # automation block trips it.

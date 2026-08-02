@@ -211,23 +211,23 @@ def test_loopback_binds_are_not_flagged(_systems_root: pathlib.Path) -> None:
         assert projects.validate_project_payload(document) == [], bind
 
 
-def test_two_projects_cannot_share_a_machine_id(_systems_root: pathlib.Path) -> None:
-    """install.sh `rm -rf`s {prefix}/projects/<machine_id> before installing, so
-    a collision means deploying one project destroys the other's config on the
+def test_two_projects_cannot_share_a_deploy_directory(_systems_root: pathlib.Path) -> None:
+    """install.sh `rm -rf`s {prefix}/projects/<dir> before installing, so a
+    collision means deploying one project destroys the other's config on the
     rig. `Rig_A` and `rig-a` slugify identically, so this is easy to hit."""
     projects.create_project_from_template("Rig_A", "sim-quickstart")
 
-    with pytest.raises(ValueError, match="already used by project"):
+    with pytest.raises(ValueError, match="already uses"):
         projects.create_project_from_template("rig-a", "sim-quickstart")
-    with pytest.raises(ValueError, match="already used by project"):
+    with pytest.raises(ValueError, match="already uses"):
         projects.duplicate_project("Rig_A", "rig-a")
 
 
-def test_rename_keeps_the_machine_id_and_does_not_self_collide(_systems_root: pathlib.Path) -> None:
+def test_rename_keeps_the_deploy_identity_and_does_not_self_collide(_systems_root: pathlib.Path) -> None:
     projects.create_project_from_template("Rig_A", "sim-quickstart")
     projects.rename_project("Rig_A", "Rig_A_old")
     # The deploy identity deliberately survives a rename...
     assert projects.get_project("Rig_A_old")["profile"]["machine_id"] == "rig-a"
     # ...which is exactly why the name it freed up must stay blocked.
-    with pytest.raises(ValueError, match="already used by project"):
+    with pytest.raises(ValueError, match="already uses"):
         projects.create_project_from_template("rig-a", "sim-quickstart")

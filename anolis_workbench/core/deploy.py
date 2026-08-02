@@ -125,6 +125,21 @@ def materialize_project_dir(
         raise DeployError(f"invalid project directory name {profile_dir_name!r} in the imported project sidecar")
 
     _assert_path_tokens_name(project_dir, profile, profile_dir_name)
+    _assert_no_crlf(project_dir, profile)
+
+    # install.sh refuses a non-inert `manual` variant at fresh install. Imported
+    # projects never pass through save-time validation, so this is the only
+    # place that catches it before the target does.
+    manual_rel = runtime_profiles.get(canonical.MANUAL_VARIANT)
+    manual_path = project_dir / manual_rel if isinstance(manual_rel, str) else None
+    if manual_path is not None and manual_path.is_file():
+        violation = canonical.inertness_violation_text(manual_path.read_text(encoding="utf-8"))
+        if violation is not None:
+            raise DeployError(
+                f"the 'manual' runtime variant is not inert ({violation}). install.sh refuses to "
+                "install a variant that boots into automation — author automation into a separate "
+                "variant."
+            )
 
     out = dest / profile_dir_name
     out.mkdir(parents=True, exist_ok=True)
@@ -155,12 +170,10 @@ def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_d
     install.sh side, so it has to happen here.
     """
     named: set[str] = set()
-    for rel in machine_profile.referenced_files(profile):
-        if machine_profile.containment_error(rel) is not None:
-            continue
-        path = project_dir / rel
-        if not path.is_file():
-            continue
+    # install.sh's renderer is GLOB-driven, not profile-driven, so scan what it
+    # scans: a stray config the profile never mentions is still rendered, and
+    # its token would still be rewritten.
+    for path in _install_sh_config_files(project_dir, profile):
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -173,6 +186,44 @@ def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_d
             f"project configs reference project directory {', '.join(repr(w) for w in wrong)} "
             f"but this project deploys as '{profile_dir_name}'. install.sh keys its path rewrites "
             "on the token, so the installed configs would point at a directory that does not exist."
+        )
+
+
+def _install_sh_config_files(project_dir: pathlib.Path, profile: dict) -> list[pathlib.Path]:
+    """Every file install.sh will read out of the project: what its config/
+    globs pick up, plus anything else the profile references."""
+    found: set[pathlib.Path] = set()
+    config_dir = project_dir / canonical.CONFIG_DIR
+    if config_dir.is_dir():
+        for pattern in ("anolis-runtime.*.yaml", "provider-*.yaml"):
+            found.update(path for path in config_dir.glob(pattern) if path.is_file())
+    for rel in machine_profile.referenced_files(profile):
+        if machine_profile.containment_error(rel) is not None:
+            continue
+        path = project_dir / rel
+        if path.is_file():
+            found.add(path)
+    return sorted(found)
+
+
+def _assert_no_crlf(project_dir: pathlib.Path, profile: dict) -> None:
+    """install.sh reads the profile and configs with awk, which does not strip
+    `\r`. A CRLF machine-profile makes it fail to resolve the `manual` variant,
+    and a CRLF runtime config silently bypasses the LAN-exposure bind gate. The
+    workbench writes LF, but an imported project is carried byte-for-byte."""
+    offenders = []
+    for path in [project_dir / machine_profile.PROFILE_FILENAME, *_install_sh_config_files(project_dir, profile)]:
+        try:
+            if b"\r\n" in path.read_bytes():
+                offenders.append(path.relative_to(project_dir).as_posix())
+        except OSError:
+            continue
+    if offenders:
+        raise DeployError(
+            f"these files use Windows (CRLF) line endings: {', '.join(sorted(offenders))}. "
+            "install.sh parses them with awk, which does not strip the carriage return — the "
+            "runtime variant would not resolve and the LAN-exposure check would be skipped. "
+            "Convert them to LF before deploying."
         )
 
 

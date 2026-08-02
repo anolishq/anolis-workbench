@@ -42,7 +42,9 @@ describe("deploy tokens", () => {
   it("rejects a command whose two kind captures disagree", () => {
     // install.sh rewrites using the SECOND capture and re-derives the kind from
     // the result, so such a token resolves to something the filename doesn't say.
-    expect(commandKind("../anolis-provider-bread/build/dev-release/anolis-provider-ezo")).toBeNull();
+    expect(
+      commandKind("../anolis-provider-bread/build/dev-release/anolis-provider-ezo"),
+    ).toBeNull();
   });
 
   it("rejects host paths and anything that is not a token", () => {
@@ -76,15 +78,10 @@ describe("inertnessViolation", () => {
   });
 
   it("flags every shape install.sh treats as enabled", () => {
-    // install.sh's gate compares the SERIALIZED text against "false", so a real
-    // boolean false is the only inert value.
-    expect(inertnessViolation({ automation: { enabled: true } })).toMatch(/only false is inert/);
-    expect(inertnessViolation({ automation: { enabled: "false" as never } })).toMatch(
-      /only false is inert/,
-    );
-    expect(inertnessViolation({ automation: { enabled: 0 as never } })).toMatch(
-      /only false is inert/,
-    );
+    // install.sh un-quotes and lowercases the field, then compares it against a
+    // false-ish set — verified by running its awk directly.
+    expect(inertnessViolation({ automation: { enabled: true } })).toMatch(/reads as enabled/);
+    expect(inertnessViolation({ automation: { enabled: 0 as never } })).toMatch(/reads as enabled/);
     expect(inertnessViolation({ automation: { mode_transition_hooks: [] } })).toMatch(
       /mode_transition_hooks/,
     );
@@ -137,5 +134,17 @@ describe("activeVariant / pinnedKinds", () => {
   it("lists the kinds install.sh will fetch binaries for", () => {
     expect(pinnedKinds(doc)).toEqual(["bread", "ezo"]);
     expect(pinnedKinds(null)).toEqual([]);
+  });
+});
+
+describe("quoted false-ish spellings", () => {
+  it("accepts everything install.sh accepts", () => {
+    // Blocking these would refuse a config install.sh is perfectly happy with.
+    for (const enabled of [false, "false", "False", "no", "off", ""]) {
+      expect(
+        inertnessViolation({ automation: { enabled: enabled as never } }),
+        `should be inert: ${JSON.stringify(enabled)}`,
+      ).toBeNull();
+    }
   });
 });

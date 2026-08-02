@@ -276,38 +276,68 @@ def _meta_of(sidecar: dict) -> dict:
     return meta if isinstance(meta, dict) else {}
 
 
-def machine_ids_in_use(exclude: str | None = None) -> dict[str, str]:
-    """machine_id -> the project that owns it, across the workspace."""
+def deploy_dir_name(pdir: pathlib.Path) -> str | None:
+    """The directory this project installs into on the target.
+
+    Must match `deploy.materialize_project_dir`: the sidecar's
+    `profile_dir_name` wins, because an imported project legitimately keeps its
+    source directory name while its machine_id says something else.
+    """
+    sidecar = machine_profile.read_sidecar(pdir) or {}
+    meta = sidecar.get("meta")
+    if isinstance(meta, dict):
+        name = meta.get("profile_dir_name")
+        if isinstance(name, str) and name:
+            return name
+    try:
+        profile = machine_profile.load_profile(pdir)
+    except (machine_profile.ProfileError, FileNotFoundError, OSError):
+        return None
+    machine_id = profile.get("machine_id")
+    return machine_id if isinstance(machine_id, str) and machine_id else None
+
+
+def deploy_dirs_in_use(exclude: str | None = None) -> dict[str, str]:
+    """deploy directory name -> the project that owns it, across the workspace."""
     owners: dict[str, str] = {}
     if not SYSTEMS_ROOT.exists():
         return owners
     for d in sorted(SYSTEMS_ROOT.iterdir()):
         if not d.is_dir() or d.name == exclude:
             continue
-        try:
-            profile = machine_profile.load_profile(d)
-        except (machine_profile.ProfileError, FileNotFoundError, OSError):
-            continue
-        machine_id = profile.get("machine_id")
-        if isinstance(machine_id, str) and machine_id:
-            owners.setdefault(machine_id, d.name)
+        name = deploy_dir_name(d)
+        if name is not None:
+            owners.setdefault(name, d.name)
     return owners
 
 
-def _assert_machine_id_free(machine_id: str, name: str) -> None:
-    """install.sh `rm -rf`s `{prefix}/projects/<machine_id>` before installing.
+def deploy_dir_conflict(deploy_name: str, name: str) -> str | None:
+    """The project already using this deploy directory, as a message, or None."""
+    owner = deploy_dirs_in_use(exclude=name).get(deploy_name)
+    if owner is None:
+        return None
+    return (
+        f"This project deploys into '{deploy_name}', which project '{owner}' also uses. "
+        "install.sh removes that directory before installing, so deploying one replaces "
+        "the other's installed config."
+    )
 
-    Two workspace projects sharing a machine_id therefore fight over the same
-    directory on the rig: deploying one wipes the other's deployed config. The
-    names can collide easily (`Rig_A` and `rig-a` slugify identically, and a
-    rename deliberately keeps the old id), so refuse it here.
+
+def _assert_deploy_dir_free(deploy_name: str, name: str) -> None:
+    """install.sh `rm -rf`s `{prefix}/projects/<dir>` before installing.
+
+    Two workspace projects that deploy into the same directory therefore fight
+    over it on the rig: deploying one wipes the other's installed config. The
+    collision is easy to reach — `Rig_A` and `rig-a` slugify identically, a
+    rename deliberately keeps the old identity, and importing one source twice
+    carries the same directory name both times.
     """
-    owner = machine_ids_in_use(exclude=name).get(machine_id)
+    owner = deploy_dirs_in_use(exclude=name).get(deploy_name)
     if owner is not None:
         raise ValueError(
-            f"Machine ID '{machine_id}' is already used by project '{owner}'. "
-            "Two projects cannot share one machine ID — deploying either would "
-            "overwrite the other on the target. Choose a different project name."
+            f"This project would deploy into '{deploy_name}', which project '{owner}' already "
+            "uses. Two projects cannot share one deploy directory — installing either would "
+            "overwrite the other on the target. Choose a different name."
         )
 
 
@@ -453,6 +483,10 @@ def get_project(name: str) -> dict:
             return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
         return document
+    if _dir_format(project_dir(name)) == FORMAT_SYSTEM:
+        # Listed (hiding it would look like deletion) but not migratable, so
+        # serve the degraded shape rather than 404ing a project the UI shows.
+        return _degraded_project(name)
     raise FileNotFoundError(f"Project '{name}' not found")
 
 
@@ -481,6 +515,14 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:
         raise ImportValidationError(report.errors)
+
+    # Importing one source twice gives both projects the same deploy directory.
+    # Imported projects are carried verbatim so the two are byte-identical, which
+    # makes this benign today — but say so, because it stops being benign the
+    # moment someone hand-edits one of them.
+    conflict = deploy_dir_conflict(profile_dir_name, name)
+    if conflict is not None:
+        report.warnings.append(conflict)
 
     pdir = project_dir(name)
     # Claim the directory FIRST (exist_ok=False): a concurrent same-name import
@@ -624,7 +666,7 @@ def create_project_from_template(name: str, template: str) -> dict:
     tpl_dir = TEMPLATES_ROOT / template
     if not (tpl_dir / machine_profile.PROFILE_FILENAME).is_file():
         raise FileNotFoundError(f"Template '{template}' not found")
-    _assert_machine_id_free(canonical.machine_id_from_name(name), name)
+    _assert_deploy_dir_free(canonical.machine_id_from_name(name), name)
 
     pdir = project_dir(name)
     try:
@@ -695,8 +737,11 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         raise FileNotFoundError(f"Project '{source_name}' not found")
     if project_dir(new_name).exists():
         raise ValueError(f"Project '{new_name}' already exists")
+    # An authored copy is re-keyed below, so it must not land on a name already
+    # in use. An imported copy keeps its source directory name by design (#226
+    # carries it verbatim) — that is recorded as a warning, not refused.
     if canonical.is_authored(_read_sidecar(src)):
-        _assert_machine_id_free(canonical.machine_id_from_name(new_name), new_name)
+        _assert_deploy_dir_free(canonical.machine_id_from_name(new_name), new_name)
 
     shutil.copytree(
         src,
@@ -718,6 +763,11 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
         if canonical.is_authored(sidecar):
             meta["profile_dir_name"] = canonical.machine_id_from_name(new_name)
         sidecar["meta"] = meta
+        if not canonical.is_authored(sidecar):
+            conflict = deploy_dir_conflict(deploy_dir_name(pdir) or new_name, new_name)
+            if conflict is not None:
+                warnings = sidecar.get("warnings")
+                sidecar["warnings"] = ([*warnings] if isinstance(warnings, list) else []) + [conflict]
         canonical.write_sidecar(pdir, sidecar)
     except Exception:
         shutil.rmtree(project_dir(new_name), ignore_errors=True)

@@ -218,62 +218,80 @@ def runtime_config_errors(doc: Any) -> list[str]:
     ]
 
 
-def inertness_violation(doc: dict[str, Any]) -> str | None:
+# install.sh's inertness gate is an AWK PASS OVER THE RAW YAML, not a structural
+# read of the parsed document, and mirroring it structurally drifts in both
+# directions: it misses an `enabled:` that only appears as a wrapped line of a
+# multi-line string, and it wrongly flags `enabled: 'false'`, which the awk
+# un-quotes and accepts. So the mirror runs over the same text install.sh will
+# see — the exact bytes `write_project` is about to serialize.
+_FALSEY_ENABLED = ("", "false", "no", "off", "n")
+
+
+def inertness_violation(doc: Any) -> str | None:
     """Why this runtime config is not inert, or None.
 
-    Mirrors install.sh's install-time gate, which refuses a non-inert `manual`
-    variant. That gate is an awk pass over the raw YAML, so it is blunter than
-    a structural reading and this has to match its bluntness or the workbench
-    authors files that install.sh then rejects at `sudo` time:
-
-    - `automation:` present but null or empty is "not a plain block mapping"
-      and dies. (safe_dump writes a bare `automation:` key as `null`, so this
-      is reachable just by round-tripping such a config through the workbench.)
-    - the awk is not depth-anchored: an `enabled:` or `mode_transition_hooks:`
-      ANYWHERE inside the automation block trips it, however deeply nested.
-    - `enabled` is compared as text, so 0/"false"/any non-empty string count.
+    install.sh REFUSES a non-inert `manual` variant at install time, so the
+    workbench must never author one. Checked against the serialized form,
+    because that is what its awk reads.
     """
-    if "automation" not in doc:
-        return None
-    automation = doc.get("automation")
-    if automation is None:
-        return "automation is present but empty (install.sh requires a plain block mapping)"
-    if not isinstance(automation, dict):
-        return f"automation must be a mapping (install.sh fails to render {automation!r})"
-    if not automation:
-        return "automation is an empty mapping (install.sh requires a plain block mapping)"
+    if not isinstance(doc, dict):
+        return f"runtime config must be a mapping (install.sh fails to render {doc!r})"
+    return inertness_violation_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False))
 
-    violation = _nested_automation_violation(automation, "automation")
-    if violation is not None:
-        return violation
+
+def inertness_violation_text(text: str) -> str | None:
+    """A faithful port of install.sh's `_automation_inert_violation` awk.
+
+    Line-oriented and un-anchored by design — that IS the gate. Keeping the two
+    in step matters more than being structurally clever, because a disagreement
+    means either a rig that dies at `sudo` or a config the composer refuses to
+    save for no real reason.
+    """
+    in_block = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip("\r")
+        if line.startswith("automation:"):
+            in_block = True
+            rest = line[len("automation:") :].strip()
+            rest = re.sub(r"\s*#.*", "", rest).strip()
+            if rest != "":
+                return f"automation is not a plain block mapping ({rest})"
+            continue
+        if line[:1].isalpha():
+            in_block = False
+        if not in_block:
+            continue
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] == "enabled:":
+            value = fields[1] if len(fields) > 1 else ""
+            unquoted = value.replace('"', "").replace("'", "").lower()
+            if unquoted not in _FALSEY_ENABLED:
+                return f"automation.enabled={value}"
+        elif fields[0] == "mode_transition_hooks:":
+            return "mode_transition_hooks present"
     return None
 
 
-def _nested_automation_violation(node: Any, path: str) -> str | None:
-    """install.sh's inertness awk scans the whole automation block, not just its
-    top level — so a hook or an enabled flag buried in a sub-mapping counts."""
-    if isinstance(node, dict):
-        if "mode_transition_hooks" in node:
-            return f"{path}.mode_transition_hooks is present"
-        if "enabled" in node:
-            enabled = node["enabled"]
-            # install.sh compares the SERIALIZED text against "false", so the
-            # only inert value is a real boolean false — 0, "false" and every
-            # other scalar read as enabled there.
-            if enabled is not False:
-                return f"{path}.enabled is {enabled!r}; only `false` is inert to install.sh"
-        for key, value in node.items():
-            if key in ("enabled", "mode_transition_hooks"):
-                continue
-            nested = _nested_automation_violation(value, f"{path}.{key}")
-            if nested is not None:
-                return nested
-    elif isinstance(node, list):
-        for index, item in enumerate(node):
-            nested = _nested_automation_violation(item, f"{path}[{index}]")
-            if nested is not None:
-                return nested
-    return None
+def http_value_text(text: str, key: str) -> str:
+    """A faithful port of install.sh's `_yaml_block_value(cfg, http, key)`.
+
+    Returns the RAW field as its awk sees it — quotes included, `\\r` not
+    stripped — because that is precisely what makes the difference between a
+    value install.sh recognises and one it does not.
+    """
+    in_block = False
+    for line in text.splitlines():
+        if line[:1].isalpha():
+            in_block = line.split()[:1] == ["http:"]
+            continue
+        if not in_block:
+            continue
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == f"{key}:":
+            return fields[1]
+    return ""
 
 
 def pinned_kinds(profile: dict[str, Any]) -> set[str]:
@@ -512,28 +530,55 @@ def _owned_paths(project_dir: Path, profile: dict[str, Any]) -> set[Path]:
     }
 
 
+# What install.sh's stage renderer GLOBS out of config/ (tools/install.sh).
+# Its view is glob-driven, not profile-driven, so anything matching these is
+# consumed whether or not the profile mentions it.
+_INSTALL_SH_CONFIG_GLOBS = ("anolis-runtime.*.yaml", "provider-*.yaml")
+
+
+def orphaned_config_files(project_dir: Path, profile: dict[str, Any]) -> list[Path]:
+    """Files install.sh would consume that this profile no longer declares."""
+    config_dir = project_dir / CONFIG_DIR
+    if not config_dir.is_dir():
+        return []
+    referenced = _owned_paths(project_dir, profile)
+    found: set[Path] = set()
+    for pattern in _INSTALL_SH_CONFIG_GLOBS:
+        found.update(path.resolve() for path in config_dir.glob(pattern) if path.is_file())
+    return sorted(found - referenced)
+
+
 def _prune_orphans(
     project_dir: Path,
     profile: dict[str, Any],
     just_written: set[Path],
     previously_owned: set[Path],
 ) -> None:
-    """Reclaim config files this project used to reference and no longer does.
+    """Retire config files install.sh would pick up but the profile no longer declares.
 
-    Renaming or removing a provider has to remove its old config, or install.sh
-    (which globs `config/provider-*.yaml`) would install a provider config for
-    something the runtime never launches.
+    This has to happen, and it has to be scoped tightly, for two opposing
+    reasons. install.sh's stage renderer GLOBS `config/anolis-runtime.*.yaml`
+    and `config/provider-*.yaml` and hard-fails on any of them it cannot
+    resolve — so a config left behind by a rename breaks every deploy, even
+    though nothing references it. But `referenced_files` also covers behaviour
+    trees and validation scripts, which the workbench never writes and cannot
+    recreate — pruning by that set would delete a hand-authored .xml the moment
+    its variant was removed.
 
-    Deliberately scoped to files the PREVIOUS profile referenced: a save must
-    never delete a file the workbench did not put there, and users do keep
-    staged configs and notes alongside the ones in use. `just_written` is
-    unioned into the keep-set so a file this same save produced can never be
-    pruned by a path-normalization mismatch.
+    So: only files inside `config/` that match install.sh's own globs, and they
+    are RENAMED rather than deleted. A `.orphaned.bak` suffix takes them out of
+    install.sh's view without destroying anything.
     """
     keep = set(just_written) | _owned_paths(project_dir, profile)
-    for path in sorted(previously_owned - keep):
-        if path.is_file():
-            path.unlink()
+    candidates = set(orphaned_config_files(project_dir, profile)) | {
+        path for path in previously_owned if path.parent == (project_dir / CONFIG_DIR).resolve()
+    }
+    for path in sorted(candidates - keep):
+        if not path.is_file():
+            continue
+        if not any(path.match(pattern) for pattern in _INSTALL_SH_CONFIG_GLOBS):
+            continue
+        path.replace(path.with_suffix(path.suffix + ".orphaned.bak"))
 
 
 def _load_yaml(path: Path) -> Any:
