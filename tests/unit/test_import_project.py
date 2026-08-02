@@ -166,7 +166,7 @@ def test_duplicate_imported_is_verbatim(systems_root: pathlib.Path, source_dir: 
 
 
 # ---------------------------------------------------------------------------
-# materialize_imported_project_dir
+# materialize_project_dir (imported projects)
 # ---------------------------------------------------------------------------
 
 
@@ -179,12 +179,12 @@ def test_materialize_is_byte_identical_and_offline(
     projects.import_project(str(source_dir), "rig-a")
 
     def _no_network(*args: object, **kwargs: object) -> None:
-        raise AssertionError("materialize_imported_project_dir must not touch the network")
+        raise AssertionError("materialize_project_dir must not touch the network")
 
     monkeypatch.setattr(deploy.requests, "get", _no_network)
     monkeypatch.setattr(deploy.releases.requests, "get", _no_network)
 
-    mat = deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+    mat = deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
 
     # Keyed on the ORIGINAL canonical dir name, not the workbench name.
     assert mat.project_dir == tmp_path / "out" / "imported-profile"
@@ -202,7 +202,7 @@ def test_materialize_hard_fails_without_components(
     projects.import_project(str(source_dir), "rig-a")
 
     with pytest.raises(deploy.DeployError, match="components"):
-        deploy.materialize_imported_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out")
 
 
 def test_materialize_rejects_unknown_variant(
@@ -210,7 +210,7 @@ def test_materialize_rejects_unknown_variant(
 ) -> None:
     projects.import_project(str(source_dir), "rig-a")
     with pytest.raises(deploy.DeployError, match="variant 'warp'"):
-        deploy.materialize_imported_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out", variant="warp")
+        deploy.materialize_project_dir(projects.SYSTEMS_ROOT / "rig-a", tmp_path / "out", variant="warp")
 
 
 def test_install_args_variant() -> None:
@@ -234,10 +234,20 @@ def test_derive_kinds_from_components_and_filenames(source_dir: pathlib.Path) ->
     assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": "bread", "ezo0": "ezo"}
 
 
-def test_derive_kinds_unknown_without_components(source_dir: pathlib.Path) -> None:
+def test_derive_kinds_falls_back_to_the_config_filename(source_dir: pathlib.Path) -> None:
+    """Without pins the kind still has to resolve: a migrated project has no
+    components yet (they are authored data), and reading every provider back as
+    an unknown kind would block the very save that fills the pins in."""
     profile = machine_profile.load_profile(source_dir)
     del profile["components"]
-    assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": None, "ezo0": None}
+    assert machine_profile.derive_kinds(profile, source_dir) == {"bread0": "bread", "ezo0": "ezo"}
+
+
+def test_derive_kinds_is_none_when_the_filename_says_nothing(source_dir: pathlib.Path) -> None:
+    profile = machine_profile.load_profile(source_dir)
+    del profile["components"]
+    profile["providers"]["bread0"]["config"] = "config/mystery.yaml"
+    assert machine_profile.derive_kinds(profile, source_dir)["bread0"] is None
 
 
 def test_validate_project_dir_reports_missing_dir(tmp_path: pathlib.Path) -> None:
@@ -302,7 +312,7 @@ def test_materialize_refuses_uncarriable_reference(
         encoding="utf-8",
     )
     with pytest.raises(deploy.DeployError, match="cannot carry"):
-        deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +341,7 @@ def test_materialize_rejects_traversal_in_sidecar_dir_name(
     sidecar_file.write_text(json.dumps(sidecar), encoding="utf-8")
 
     with pytest.raises(deploy.DeployError, match="invalid project directory name"):
-        deploy.materialize_imported_project_dir(systems_root / "rig-a", tmp_path / "out")
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
     assert not (tmp_path / "escaped").exists()
 
 
@@ -340,8 +350,8 @@ def test_materialize_is_idempotent_into_the_same_dest(
 ) -> None:
     projects.import_project(str(source_dir), "rig-a")
     out = tmp_path / "out"
-    first = deploy.materialize_imported_project_dir(systems_root / "rig-a", out)
-    second = deploy.materialize_imported_project_dir(systems_root / "rig-a", out)
+    first = deploy.materialize_project_dir(systems_root / "rig-a", out)
+    second = deploy.materialize_project_dir(systems_root / "rig-a", out)
     assert _tree_digests(first.project_dir) == _tree_digests(second.project_dir)
 
 
@@ -437,3 +447,63 @@ def test_import_name_defaults_to_the_source_directory_name(
 def test_import_rejects_an_invalid_project_name(systems_root: pathlib.Path, source_dir: pathlib.Path) -> None:
     with pytest.raises(ValueError, match="Project name"):
         projects.import_project(str(source_dir), "../escape")
+
+
+def test_importing_one_source_twice_warns_about_the_shared_deploy_directory(
+    systems_root: pathlib.Path, source_dir: pathlib.Path
+) -> None:
+    """Both projects keep the source's directory name, and install.sh removes
+    that directory before installing. The copies are byte-identical so this is
+    benign today — but it stops being benign if one is hand-edited."""
+    _, first = projects.import_project(str(source_dir), "rig-a")
+    assert not any("also uses" in w for w in first)
+
+    _, second = projects.import_project(str(source_dir), "rig-b")
+    assert any("also uses" in w and "rig-a" in w for w in second), second
+
+
+def test_materialize_refuses_a_non_inert_manual_variant(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Imported projects never pass through save-time validation, so deploy is
+    the only place that can catch this before install.sh does on the target."""
+    manual = source_dir / "config" / "anolis-runtime.bioreactor.manual.yaml"
+    manual.write_text(
+        manual.read_text(encoding="utf-8").replace(
+            "automation:\n  enabled: false", "automation:\n  enabled: false\n  mode_transition_hooks: []"
+        ),
+        encoding="utf-8",
+    )
+    projects.import_project(str(source_dir), "rig-a")
+
+    with pytest.raises(deploy.DeployError, match="not inert"):
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+
+
+def test_materialize_refuses_crlf_configs(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """install.sh parses these with awk, which does not strip the carriage
+    return: the runtime variant fails to resolve and the LAN-exposure check is
+    silently skipped. An imported project is copied byte-for-byte, so the
+    workbench's own LF writing does not cover this."""
+    profile = source_dir / "machine-profile.yaml"
+    profile.write_bytes(profile.read_bytes().replace(b"\n", b"\r\n"))
+    projects.import_project(str(source_dir), "rig-a")
+
+    with pytest.raises(deploy.DeployError, match="carriage returns"):
+        deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+
+
+def test_materialize_allows_crlf_where_install_sh_does_not_use_awk(
+    systems_root: pathlib.Path, source_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Behaviour trees are byte-copied and provider configs go through pyyaml,
+    so a CR in those is harmless — blocking them would strand an imported
+    project with a message that is false and no way to clear it."""
+    behavior = next((source_dir / "behaviors").glob("*.xml"))
+    behavior.write_bytes(behavior.read_bytes().replace(b"\n", b"\r\n"))
+    projects.import_project(str(source_dir), "rig-a")
+
+    mat = deploy.materialize_project_dir(systems_root / "rig-a", tmp_path / "out")
+    assert (mat.project_dir / "behaviors" / behavior.name).is_file()

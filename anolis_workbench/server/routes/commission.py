@@ -11,15 +11,18 @@ from anolis_workbench.core import projects as projects_module
 
 
 def _reject_imported(handler, name: str, action: str) -> bool:
-    """Imported (machine-profile) projects are deploy-only in v1 (#226):
-    dev-launch paths would need host-local binary paths the canonical profile
-    deliberately doesn't carry (that mapping is the #255 sidecar follow-on)."""
+    """Imported projects are deploy-only in v1 (#226): dev-launch needs
+    host-local binary paths that a canonical profile deliberately doesn't carry.
+
+    Keyed on `authored`, NOT on format: since #255 every project is
+    machine-profile format, so a format check here would reject them all.
+    """
     try:
-        fmt = projects_module.project_format(name)
+        authored = projects_module.is_authored(name)
     except FileNotFoundError:
         handler._json(404, {"error": f"Project '{name}' not found"})
         return True
-    if fmt == projects_module.FORMAT_MACHINE_PROFILE:
+    if not authored:
         handler._json(
             409,
             {

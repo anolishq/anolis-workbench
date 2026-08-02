@@ -1,29 +1,46 @@
 <script lang="ts">
+  import {
+    activeVariant,
+    commandKind,
+    providerCommandToken,
+    providerConfigRelpath,
+    projectPathToken,
+  } from "./canonical";
   import type {
-    ProviderRuntimeEntry,
+    ProjectDocument,
     ProviderSchemasResponse,
-    SystemConfig,
+    RuntimeProviderEntry,
     UnknownRecord,
   } from "./contracts";
   import SchemaForm from "./schema-form/SchemaForm.svelte";
   import { asObject, defaultsFor, properties, type SchemaNode } from "./schema-form/schema";
 
   /**
-   * ProviderList.svelte — provider list with add/remove/kind-switch (#270).
+   * ProviderList.svelte — provider list with add/remove/kind-switch.
+   *
    * Provider config is rendered schema-driven from the vendored
-   * --config-schema envelopes; this component has no per-kind knowledge.
-   * Mutates system.topology.runtime.providers, system.topology.providers,
-   * system.paths.providers.
+   * --config-schema envelopes (#270); this component has no per-kind knowledge.
+   *
+   * A provider exists in THREE places that must agree (#255): the machine
+   * profile declares it and names its config file, each runtime variant lists
+   * it under `providers[]`, and the document carries its config. Add/remove/
+   * rename here keep all three in step — a save that breaks the agreement is
+   * rejected by the backend, and would be rejected by install.sh after that.
    */
   let {
-    system,
+    doc,
+    variant,
     providerSchemas,
     onChanged,
   }: {
-    system: SystemConfig;
+    doc: ProjectDocument;
+    variant?: string;
     providerSchemas: ProviderSchemasResponse | null;
     onChanged: () => void;
   } = $props();
+
+  const variantName = $derived(variant ?? activeVariant(doc));
+  const machineId = $derived(doc.profile?.machine_id ?? "");
 
   // The set of composable kinds IS the set of vendored envelopes.
   const kinds = $derived(Object.keys(providerSchemas?.providers ?? {}).sort());
@@ -39,39 +56,33 @@
       }),
     ) as Record<string, string>,
   );
-  const providers = $derived(
-    (system?.topology?.runtime?.providers ?? []) as ProviderRuntimeEntry[],
+
+  const entries = $derived(
+    (doc.variants?.[variantName]?.providers ?? []) as RuntimeProviderEntry[],
   );
 
-  // A loaded document guarantees {kind, config} per entry (migrate-on-load),
-  // but tolerate hand-edited files: ensure every entry has a config object.
-  $effect(() => {
-    const topo = asObject(system?.topology?.providers);
-    if (!topo) return;
-    for (const entry of Object.values(topo)) {
-      const record = asObject(entry);
-      if (record && asObject(record.config) === null) record.config = {};
-    }
-  });
-
-  // ── helpers ────────────────────────────────────────────────────────────────
+  /** Kinds the profile pins. install.sh refuses a command that resolves to an unpinned kind. */
+  const pinned = $derived(new Set(Object.keys(doc.profile?.components?.providers ?? {})));
 
   function inputTarget(event: Event): HTMLInputElement {
     return event.currentTarget as HTMLInputElement;
   }
 
+  function kindOf(id: string): string {
+    return doc.providers?.[id]?.kind ?? "";
+  }
+
   function genId(kind: string): string {
-    const existing = (system.topology.runtime.providers ?? [])
-      .filter((p) => p.id.startsWith(kind))
-      .map((p) => parseInt(p.id.slice(kind.length), 10))
+    const existing = Object.keys(doc.providers ?? {})
+      .filter((id) => id.startsWith(kind))
+      .map((id) => parseInt(id.slice(kind.length), 10))
       .filter((n) => !isNaN(n));
     const next = existing.length ? Math.max(...existing) + 1 : 0;
     return `${kind}${next}`;
   }
 
   function envelopeSchema(kind: string): SchemaNode | null {
-    const schema = providerSchemas?.providers?.[kind]?.schema;
-    return asObject(schema);
+    return asObject(providerSchemas?.providers?.[kind]?.schema);
   }
 
   /**
@@ -101,54 +112,133 @@
     return config;
   }
 
+  /** A runtime entry whose command and args are canonical deploy tokens. */
+  function runtimeEntry(id: string, kind: string): RuntimeProviderEntry {
+    return {
+      id,
+      command: providerCommandToken(kind),
+      args: ["--config", projectPathToken(machineId, providerConfigRelpath(kind, id))],
+      timeout_ms: 5000,
+      hello_timeout_ms: 3000,
+      ready_timeout_ms: 10000,
+      restart_policy: { enabled: false },
+    };
+  }
+
+  /** Re-point an existing entry's command/args after an id or kind change. */
+  function retarget(entry: RuntimeProviderEntry, id: string, kind: string): void {
+    entry.id = id;
+    entry.command = providerCommandToken(kind);
+    entry.args = ["--config", projectPathToken(machineId, providerConfigRelpath(kind, id))];
+  }
+
+  function compatEntries(): UnknownRecord {
+    doc.profile.compatibility ??= {};
+    return ((doc.profile.compatibility as UnknownRecord).providers ??= {}) as UnknownRecord;
+  }
+
+  /** `carry` preserves an authored compatibility entry across a rename. */
+  function declare(id: string, kind: string, carry?: unknown): void {
+    doc.profile.providers ??= {};
+    doc.profile.providers[id] = { config: providerConfigRelpath(kind, id) };
+    const compat = compatEntries();
+    compat[id] = carry ?? compat[id] ?? { strategy: "local-build", version: "unspecified" };
+  }
+
+  function undeclare(id: string): void {
+    delete doc.profile?.providers?.[id];
+    const compat = asObject((doc.profile?.compatibility as UnknownRecord)?.providers);
+    if (compat) delete compat[id];
+  }
+
   function addProvider(): void {
     if (kinds.length === 0) return;
     const kind = kinds.includes("sim") ? "sim" : kinds[0];
     const id = genId(kind);
-    system.topology.runtime.providers = [
-      ...(system.topology.runtime.providers ?? []),
-      {
-        id,
-        kind,
-        timeout_ms: 5000,
-        hello_timeout_ms: 3000,
-        ready_timeout_ms: 10000,
-        restart_policy: { enabled: false },
-      },
-    ];
-    system.topology.providers = system.topology.providers ?? {};
-    system.topology.providers[id] = { kind, config: seedConfig(kind, id) };
-    system.paths.providers = system.paths.providers ?? {};
-    system.paths.providers[id] = { executable: "" };
+
+    declare(id, kind);
+    doc.providers ??= {};
+    doc.providers[id] = { kind, config: seedConfig(kind, id) };
+    // Added to the variant being edited only; other variants deliberately run
+    // their own provider sets.
+    const config = (doc.variants[variantName] ??= {});
+    config.providers = [...(config.providers ?? []), runtimeEntry(id, kind)];
+
+    doc.host_paths ??= {};
+    doc.host_paths.providers ??= {};
+    doc.host_paths.providers[id] = { executable: "" };
     onChanged();
   }
 
   function removeProvider(id: string): void {
-    const runtimeProviders = system.topology.runtime.providers ?? [];
-    system.topology.runtime.providers = runtimeProviders.filter((p) => p.id !== id);
-    delete system.topology.providers?.[id];
-    if (system.paths.providers) delete system.paths.providers[id];
+    undeclare(id);
+    delete doc.providers?.[id];
+    // Removed from EVERY variant: a variant may not run a provider the profile
+    // no longer declares.
+    for (const config of Object.values(doc.variants ?? {})) {
+      if (Array.isArray(config.providers)) {
+        config.providers = config.providers.filter((p) => p.id !== id);
+      }
+    }
+    delete doc.host_paths?.providers?.[id];
     onChanged();
   }
 
-  function renameId(oldId: string, newId: string): void {
-    if (system.topology.providers?.[oldId] !== undefined) {
-      system.topology.providers[newId] = system.topology.providers[oldId];
-      delete system.topology.providers[oldId];
+  function renameProvider(oldId: string, newId: string): void {
+    const kind = kindOf(oldId);
+    const instance = doc.providers?.[oldId];
+    if (instance) {
+      doc.providers[newId] = instance;
+      delete doc.providers[oldId];
+      // The provider-native config names the instance too.
+      const provider = asObject(instance.config?.provider);
+      if (provider && provider.name === oldId) provider.name = newId;
     }
-    if (system.paths?.providers?.[oldId] !== undefined) {
-      system.paths.providers[newId] = system.paths.providers[oldId];
-      delete system.paths.providers[oldId];
+    // The compatibility entry is AUTHORED data with no other editor in the UI —
+    // re-keying an id must carry it, not reset it to local-build/unspecified.
+    const carried = compatEntries()[oldId];
+    undeclare(oldId);
+    declare(newId, kind, carried);
+
+    for (const config of Object.values(doc.variants ?? {})) {
+      for (const entry of config.providers ?? []) {
+        if (entry.id === oldId) retarget(entry, newId, kind);
+      }
     }
+
+    const hosts = doc.host_paths?.providers;
+    if (hosts && hosts[oldId] !== undefined) {
+      hosts[newId] = hosts[oldId];
+      delete hosts[oldId];
+    }
+    onChanged();
   }
 
-  function changeKind(provEntry: ProviderRuntimeEntry, newKind: string): void {
-    const id = provEntry.id;
-    provEntry.kind = newKind;
-    system.topology.providers = system.topology.providers ?? {};
-    system.topology.providers[id] = { kind: newKind, config: seedConfig(newKind, id) };
-    system.paths.providers = system.paths.providers ?? {};
-    system.paths.providers[id] = { executable: "" };
+  function changeKind(id: string, newKind: string): void {
+    doc.providers ??= {};
+    doc.providers[id] = { kind: newKind, config: seedConfig(newKind, id) };
+    // The old kind's compatibility entry describes a provider this instance no
+    // longer is. Component PINS are left alone: they are authored data (a fork
+    // or an air-gapped mirror lives in `repo`), and install.sh only warns about
+    // one nothing runs — whereas dropping it silently re-points a later
+    // re-pin at the upstream repo.
+    compatEntries()[id] = { strategy: "local-build", version: "unspecified" };
+    declare(id, newKind, compatEntries()[id]);
+    for (const config of Object.values(doc.variants ?? {})) {
+      for (const entry of config.providers ?? []) {
+        if (entry.id === id) retarget(entry, id, newKind);
+      }
+    }
+    doc.host_paths ??= {};
+    doc.host_paths.providers ??= {};
+    doc.host_paths.providers[id] = { executable: "" };
+    onChanged();
+  }
+
+  function setHostExecutable(id: string, value: string): void {
+    doc.host_paths ??= {};
+    doc.host_paths.providers ??= {};
+    doc.host_paths.providers[id] = { ...(doc.host_paths.providers[id] ?? {}), executable: value };
     onChanged();
   }
 
@@ -175,13 +265,14 @@
   {/if}
 
   <div class="provider-list">
-    {#each providers as prov (prov.id)}
+    {#each entries as prov (prov.id)}
       {@const id = prov.id}
-      {@const isKnownKind = kinds.includes(prov.kind)}
-      {@const cfgEntry = asObject(system?.topology?.providers?.[id])}
-      {@const cfgValue = cfgEntry ? asObject(cfgEntry.config) : null}
-      {@const schema = envelopeSchema(prov.kind)}
-      {@const provPaths = asObject(system?.paths?.providers?.[id]) ?? {}}
+      {@const kind = kindOf(id)}
+      {@const isKnownKind = kinds.includes(kind)}
+      {@const cfgValue = asObject(doc.providers?.[id]?.config)}
+      {@const schema = envelopeSchema(kind)}
+      {@const hostExe = doc.host_paths?.providers?.[id]?.executable ?? ""}
+      {@const resolvedKind = commandKind(prov.command)}
 
       <div class="provider-row">
         <!-- Header: id, kind, remove -->
@@ -198,28 +289,26 @@
                 inputTarget(e).value = id;
                 return;
               }
-              if (providers.some((p) => p.id === newId)) {
+              if (doc.providers?.[newId] !== undefined) {
                 inputTarget(e).value = id;
                 alert(`Provider ID "${newId}" is already in use.`);
                 return;
               }
-              renameId(id, newId);
-              prov.id = newId;
-              onChanged();
+              renameProvider(id, newId);
             }}
           />
 
           <select
             class="provider-kind-select"
-            value={prov.kind}
+            value={kind}
             disabled={kinds.length === 0}
-            onchange={(e: Event) => changeKind(prov, inputTarget(e).value)}
+            onchange={(e: Event) => changeKind(id, inputTarget(e).value)}
           >
             {#if !isKnownKind}
-              <option value={prov.kind}>Unknown ({prov.kind})</option>
+              <option value={kind}>Unknown ({kind || "none"})</option>
             {/if}
-            {#each kinds as kind (kind)}
-              <option value={kind}>{kindLabels[kind] ?? kind}</option>
+            {#each kinds as k (k)}
+              <option value={k}>{kindLabels[k] ?? k}</option>
             {/each}
           </select>
 
@@ -230,8 +319,15 @@
 
         {#if !isKnownKind && providerSchemas !== null}
           <div class="bus-note note-warning">
-            No config schema is vendored for provider kind "{prov.kind}". Pick a known kind or
-            remove this provider before saving.
+            No config schema is vendored for provider kind "{kind}". Pick a known kind or remove
+            this provider before saving.
+          </div>
+        {/if}
+
+        {#if resolvedKind !== null && pinned.size > 0 && !pinned.has(resolvedKind)}
+          <div class="bus-note note-warning" data-testid="unpinned-kind-warning">
+            Kind "{resolvedKind}" is not in this machine's pinned components, so install.sh has no
+            binary to fetch for it. Resolve component pins before deploying.
           </div>
         {/if}
 
@@ -352,21 +448,20 @@
           {/if}
         </div>
 
-        <!-- Executable path -->
+        <!-- Host executable path (dev-launch only; never deployed) -->
         <div class="form-group">
           <label>Executable path</label>
           <input
             type="text"
             spellcheck="false"
             style="font-family:monospace"
-            value={provPaths.executable ?? ""}
-            oninput={(e: Event) => {
-              system.paths.providers = system.paths.providers ?? {};
-              system.paths.providers[id] = system.paths.providers[id] ?? {};
-              system.paths.providers[id].executable = inputTarget(e).value;
-              onChanged();
-            }}
+            value={hostExe}
+            oninput={(e: Event) => setHostExecutable(id, inputTarget(e).value)}
           />
+          <span class="field-note"
+            >Host path, used for dev-launch only. Deploys use <code>{prov.command ?? ""}</code>,
+            which install.sh rewrites to the installed binary.</span
+          >
         </div>
 
         <!-- Schema-driven provider configuration -->

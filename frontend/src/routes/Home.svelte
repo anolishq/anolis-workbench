@@ -217,9 +217,9 @@
           {#each projects as project (project.name)}
             <li class="home-project-item">
               <span
-                >{project.name}{#if project.format === "machine-profile"}
+                >{project.name}{#if project.authored === false}
                   <span class="badge" title="Imported machine profile — carried verbatim"
-                    >profile</span
+                    >imported</span
                   >{/if}</span
               >
               <button

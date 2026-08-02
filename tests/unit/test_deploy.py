@@ -3,23 +3,26 @@
 from __future__ import annotations
 
 import pathlib
+from typing import Callable
 
 import pytest
 import requests
 import yaml
 
-from anolis_workbench.core import deploy, releases
+from anolis_workbench.core import canonical, deploy, releases
 from anolis_workbench.core.executor import Executor, RunResult
 
 
 @pytest.fixture(autouse=True)
 def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Seed the release cache and block network so tests never hit GitHub."""
-    monkeypatch.setattr(
-        releases,
-        "_RELEASE_CACHE",
-        {"anolishq/anolis": "0.1.27", "anolishq/anolis-provider-sim": "0.2.5"},
-    )
+    """Seed the release cache and block network so tests never hit GitHub.
+
+    Since #255 nothing on the deploy path resolves a version — pins are read
+    from the project's own machine-profile — so this exists for `run_rollback`,
+    which legitimately needs the latest install.sh, and as a tripwire proving
+    the rest of the path stays offline.
+    """
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {"anolishq/anolis": "0.1.27"})
 
     def _no_network(*args: object, **kwargs: object) -> None:
         raise requests.RequestException("network disabled in tests")
@@ -28,77 +31,14 @@ def _stub_release_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy.requests, "get", _no_network)
 
 
-def _make_system() -> dict:
-    return {
-        "schema_version": 2,
-        "meta": {"name": "Deploy Fixture"},
-        "topology": {
-            "runtime": {
-                "name": "anolis-main",
-                "http_port": 8080,
-                "http_bind": "127.0.0.1",
-                "polling_interval_ms": 500,
-                "automation_enabled": True,
-                "behavior_tree_path": "behaviors/local.xml",
-                "providers": [{"id": "sim0", "kind": "sim", "timeout_ms": 5000, "restart_policy": {"enabled": False}}],
-            },
-            "providers": {
-                "sim0": {
-                    "kind": "sim",
-                    "config": {
-                        "provider": {"name": "sim0"},
-                        "startup_policy": "degraded",
-                        "devices": [{"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0}],
-                        "simulation": {"mode": "non_interacting", "tick_rate_hz": 10.0},
-                    },
-                }
-            },
-        },
-        "paths": {
-            "runtime_executable": "build/dev-release/core/anolis-runtime",
-            "providers": {"sim0": {"executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim"}},
-        },
-    }
-
-
-def _make_v1_system() -> dict:
-    """The pre-#270 document shape — materialize must migrate it defensively."""
-    return {
-        "schema_version": 1,
-        "meta": {"name": "Deploy Fixture"},
-        "topology": {
-            "runtime": {
-                "name": "anolis-main",
-                "http_port": 8080,
-                "http_bind": "127.0.0.1",
-                "polling_interval_ms": 500,
-                "automation_enabled": True,
-                "behavior_tree_path": "behaviors/local.xml",
-                "providers": [{"id": "sim0", "kind": "sim", "timeout_ms": 5000, "restart_policy": {"enabled": False}}],
-            },
-            "providers": {
-                "sim0": {
-                    "kind": "sim",
-                    "provider_name": "sim0",
-                    "startup_policy": "degraded",
-                    "simulation_mode": "non_interacting",
-                    "tick_rate_hz": 10.0,
-                    "devices": [{"id": "tempctl0", "type": "tempctl", "initial_temp": 25.0}],
-                }
-            },
-        },
-        "paths": {
-            "runtime_executable": "build/dev-release/core/anolis-runtime",
-            "providers": {"sim0": {"executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim"}},
-        },
-    }
-
-
-def _make_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
-    ws = tmp_path / "workspace"
-    (ws / "behaviors").mkdir(parents=True)
-    (ws / "behaviors" / "local.xml").write_text("<root />\n", encoding="utf-8")
-    return ws
+@pytest.fixture()
+def project_dir(canonical_project: Callable[..., pathlib.Path], tmp_path: pathlib.Path) -> pathlib.Path:
+    """An authored canonical project — the only thing deploy accepts now."""
+    return canonical_project(
+        tmp_path / "workspace",
+        machine_id="deploy-fixture",
+        behavior="behaviors/local.xml",
+    )
 
 
 class RecordingExecutor(Executor):
@@ -129,120 +69,92 @@ class RecordingExecutor(Executor):
 # ---------------------------------------------------------------------------
 
 
-def test_materialize_produces_install_sh_layout(tmp_path: pathlib.Path) -> None:
-    ws = _make_workspace(tmp_path)
-    mat = deploy.materialize_project_dir(
-        system=_make_system(),
-        project_name="deploy-fixture",
-        workspace_dir=ws,
-        dest=tmp_path / "out",
-    )
+def test_materialize_produces_install_sh_layout(project_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    mat = deploy.materialize_project_dir(project_dir, tmp_path / "out")
     pd = mat.project_dir
+    # Keyed on machine_id, which is what install.sh's ../anolis-projects/
+    # path rewrites resolve against — NOT the (renamable) workbench name.
     assert pd.name == "deploy-fixture"
     assert (pd / "machine-profile.yaml").is_file()
     assert (pd / "config" / "anolis-runtime.manual.yaml").is_file()
-    assert (pd / "config" / "provider-sim0.yaml").is_file()
+    assert (pd / "config" / "anolis-runtime.automation.yaml").is_file()
+    assert (pd / "config" / "provider-sim.sim0.yaml").is_file()
     assert (pd / "behaviors" / "local.xml").is_file()
     assert mat.runtime_version == "0.1.27"
     assert mat.provider_kinds == {"sim0": "sim"}
 
 
-def test_materialize_accepts_v1_document(tmp_path: pathlib.Path) -> None:
-    """A v1 system.json reaching deploy directly is migrated, and its rendered
-    provider config matches the native-shape render (addresses/fields aside,
-    the sim fixture has no dual-form fields, so parity is exact)."""
-    ws = _make_workspace(tmp_path)
-    mat_v1 = deploy.materialize_project_dir(
-        system=_make_v1_system(),
-        project_name="deploy-v1",
-        workspace_dir=ws,
-        dest=tmp_path / "out-v1",
-    )
-    mat_v2 = deploy.materialize_project_dir(
-        system=_make_system(),
-        project_name="deploy-v1",
-        workspace_dir=ws,
-        dest=tmp_path / "out-v2",
-    )
-    v1_cfg = yaml.safe_load((mat_v1.project_dir / "config" / "provider-sim0.yaml").read_text(encoding="utf-8"))
-    v2_cfg = yaml.safe_load((mat_v2.project_dir / "config" / "provider-sim0.yaml").read_text(encoding="utf-8"))
-    assert v1_cfg == v2_cfg
-
-
-def test_materialize_writes_production_paths(tmp_path: pathlib.Path) -> None:
-    ws = _make_workspace(tmp_path)
-    mat = deploy.materialize_project_dir(
-        system=_make_system(),
-        project_name="deploy-fixture",
-        workspace_dir=ws,
-        dest=tmp_path / "out",
-    )
+def test_materialize_carries_deploy_tokens_untouched(project_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    """The workbench does NOT rewrite paths to production ones — install.sh
+    owns that rewrite. Materialize is an honest copy, so what ships is exactly
+    what was authored, tokens and all."""
+    mat = deploy.materialize_project_dir(project_dir, tmp_path / "out")
     runtime = yaml.safe_load((mat.project_dir / "config" / "anolis-runtime.manual.yaml").read_text())
     entry = runtime["providers"][0]
-    assert entry["command"] == "/opt/anolis/bin/anolis-provider-sim"
-    assert entry["args"] == ["--config", "/opt/anolis/config/providers/sim0.yaml"]
-    assert runtime["automation"]["behavior_tree"] == "/opt/anolis/projects/deploy-fixture/behaviors/local.xml"
-    # bind is left as authored — install.sh owns the bind rewrite
+    assert entry["command"] == canonical.provider_command_token("sim")
+    assert entry["args"] == [
+        "--config",
+        "../anolis-projects/projects/deploy-fixture/config/provider-sim.sim0.yaml",
+    ]
+    assert canonical.command_kind(entry["command"]) == "sim"
+    # bind is left as authored — install.sh owns the LAN-exposure rewrite, and
+    # it only fires on an UNQUOTED 127.0.0.1.
     assert runtime["http"]["bind"] == "127.0.0.1"
+    manual_text = (mat.project_dir / "config" / "anolis-runtime.manual.yaml").read_text()
+    assert "bind: 127.0.0.1\n" in manual_text
 
 
-def test_materialize_machine_profile_pins_components(tmp_path: pathlib.Path) -> None:
-    ws = _make_workspace(tmp_path)
-    mat = deploy.materialize_project_dir(
-        system=_make_system(),
-        project_name="deploy-fixture",
-        workspace_dir=ws,
-        dest=tmp_path / "out",
-    )
+def test_materialize_keeps_automation_out_of_the_manual_variant(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """install.sh REFUSES a non-inert manual variant, so automation lives in
+    its own variant. (Before #255 the composer wrote it into the only config
+    and every automation deploy was rejected at the target.)"""
+    mat = deploy.materialize_project_dir(project_dir, tmp_path / "out")
+    manual = yaml.safe_load((mat.project_dir / "config" / "anolis-runtime.manual.yaml").read_text())
+    automation = yaml.safe_load((mat.project_dir / "config" / "anolis-runtime.automation.yaml").read_text())
+
+    assert canonical.inertness_violation(manual) is None
+    assert automation["automation"]["enabled"] is True
+    expected = "../anolis-projects/projects/deploy-fixture/behaviors/local.xml"
+    assert automation["automation"]["behavior_tree"] == expected
+
+
+def test_materialize_uses_the_projects_own_pins_and_never_the_network(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins are AUTHORED data. The old path resolved them from live GitHub
+    lookups at deploy time, which could bump the runtime under a running rig
+    and made deploying impossible offline."""
+    monkeypatch.setattr(releases, "_RELEASE_CACHE", {})
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("materialize must not resolve versions from the network")
+
+    monkeypatch.setattr(releases, "latest_release_version", _boom)
+
+    mat = deploy.materialize_project_dir(project_dir, tmp_path / "out")
     profile = yaml.safe_load((mat.project_dir / "machine-profile.yaml").read_text())
     assert profile["components"]["runtime"] == {"repo": "anolishq/anolis", "version": "0.1.27"}
     assert profile["components"]["providers"]["sim"] == {
         "repo": "anolishq/anolis-provider-sim",
         "version": "0.2.5",
     }
-    assert profile["runtime_profiles"]["manual"] == "config/anolis-runtime.manual.yaml"
-    assert profile["providers"]["sim0"]["config"] == "config/provider-sim0.yaml"
-    assert profile["behaviors"] == ["behaviors/local.xml"]
+    assert mat.runtime_version == "0.1.27"
 
 
-def test_materialize_fails_without_kind(tmp_path: pathlib.Path) -> None:
-    system = _make_system()
-    # Provider declared in the runtime but absent from the topology → no kind.
-    del system["topology"]["providers"]["sim0"]
-    with pytest.raises(deploy.DeployError, match="no kind"):
-        deploy.materialize_project_dir(
-            system=system,
-            project_name="deploy-fixture",
-            workspace_dir=_make_workspace(tmp_path),
-            dest=tmp_path / "out",
-        )
+def test_materialize_fails_on_missing_behavior_file(project_dir: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    (project_dir / "behaviors" / "local.xml").unlink()
+    with pytest.raises(deploy.DeployError, match="missing files"):
+        deploy.materialize_project_dir(project_dir, tmp_path / "out")
 
 
-def test_materialize_fails_offline(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        releases,
-        "_RELEASE_CACHE",
-        {"anolishq/anolis": None, "anolishq/anolis-provider-sim": None},
-    )
-    with pytest.raises(deploy.DeployError, match="released component versions"):
-        deploy.materialize_project_dir(
-            system=_make_system(),
-            project_name="deploy-fixture",
-            workspace_dir=_make_workspace(tmp_path),
-            dest=tmp_path / "out",
-        )
-
-
-def test_materialize_fails_on_missing_behavior_file(tmp_path: pathlib.Path) -> None:
-    ws = tmp_path / "workspace"
-    ws.mkdir()
-    with pytest.raises(deploy.DeployError, match="Behavior tree file not found"):
-        deploy.materialize_project_dir(
-            system=_make_system(),
-            project_name="deploy-fixture",
-            workspace_dir=ws,
-            dest=tmp_path / "out",
-        )
+def test_materialize_fails_without_pins(canonical_project: Callable[..., pathlib.Path], tmp_path: pathlib.Path) -> None:
+    """A migrated project has no pins yet — deploy must refuse it rather than
+    invent them (#255 decision 1)."""
+    unpinned = canonical_project(tmp_path / "unpinned", machine_id="unpinned", pin_components=False)
+    with pytest.raises(deploy.DeployError, match="components"):
+        deploy.materialize_project_dir(unpinned, tmp_path / "out")
 
 
 # ---------------------------------------------------------------------------
@@ -289,13 +201,12 @@ def _stub_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deploy, "fetch_install_sh", _fake_fetch)
 
 
-def test_deploy_local_runs_install_sh_project(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_local_runs_install_sh_project(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
     result = deploy.deploy_local(
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
         no_start=True,
         executor=executor,
     )
@@ -313,13 +224,12 @@ def test_deploy_local_runs_install_sh_project(tmp_path: pathlib.Path, monkeypatc
     assert "--prefix" not in cmd  # default prefix omitted
 
 
-def test_deploy_local_passes_custom_prefix(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_local_passes_custom_prefix(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
     deploy.deploy_local(
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
         prefix=pathlib.Path("/srv/anolis"),
         executor=executor,
     )
@@ -328,59 +238,57 @@ def test_deploy_local_passes_custom_prefix(tmp_path: pathlib.Path, monkeypatch: 
     assert cmd[cmd.index("--prefix") + 1] == "/srv/anolis"
 
 
-def test_deploy_local_threads_with_telemetry_export(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_local_threads_with_telemetry_export(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Telemetry-export provisioning is delegated to install.sh (anolishq/anolis#137);
     # workbench requests it via the flag, and only when asked.
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
     deploy.deploy_local(
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
         with_telemetry_export=True,
         executor=executor,
     )
     assert "--with-telemetry-export" in executor.commands[0]["cmd"]
 
 
-def test_deploy_local_omits_telemetry_flag_by_default(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_local_omits_telemetry_flag_by_default(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
     deploy.deploy_local(
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
         executor=executor,
     )
     assert "--with-telemetry-export" not in executor.commands[0]["cmd"]
 
 
-def test_deploy_local_raises_on_install_failure(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_local_raises_on_install_failure(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor(returncode=1)
     with pytest.raises(deploy.DeployError, match="install.sh failed"):
         deploy.deploy_local(
-            system=_make_system(),
+            project_dir=project_dir,
             project_name="deploy-fixture",
-            workspace_dir=_make_workspace(tmp_path),
             executor=executor,
         )
 
 
-def test_deploy_remote_pushes_config_and_runs(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deploy_remote_pushes_config_and_runs(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
     result = deploy.deploy_remote(
         executor=executor,
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
     )
     assert result.runtime_version == "0.1.27"
     pushed = set(executor.files)
     assert "/tmp/anolis-deploy/deploy-fixture/machine-profile.yaml" in pushed
     assert "/tmp/anolis-deploy/deploy-fixture/config/anolis-runtime.manual.yaml" in pushed
-    assert "/tmp/anolis-deploy/deploy-fixture/config/provider-sim0.yaml" in pushed
+    assert "/tmp/anolis-deploy/deploy-fixture/config/provider-sim.sim0.yaml" in pushed
     assert "/tmp/anolis-deploy/deploy-fixture/behaviors/local.xml" in pushed
     assert "/tmp/anolis-deploy/install.sh" in pushed
     call = executor.commands[-1]
@@ -436,7 +344,7 @@ def test_run_rollback_raises_offline(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stage_bundle_invokes_stage_and_returns_tarball(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_fetch(monkeypatch)
     out_dir = tmp_path / "bundles"
@@ -450,9 +358,8 @@ def test_stage_bundle_invokes_stage_and_returns_tarball(
 
     monkeypatch.setattr(deploy, "LocalExecutor", _StagingExecutor)
     tarball = deploy.stage_bundle(
-        system=_make_system(),
+        project_dir=project_dir,
         project_name="deploy-fixture",
-        workspace_dir=_make_workspace(tmp_path),
         out_dir=out_dir,
         arch="arm64",
     )
@@ -463,7 +370,9 @@ def test_stage_bundle_invokes_stage_and_returns_tarball(
     assert cmd[cmd.index("--arch") + 1] == "arm64"
 
 
-def test_stage_bundle_raises_when_no_tarball(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_bundle_raises_when_no_tarball(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _stub_fetch(monkeypatch)
 
     class _NoopExecutor(RecordingExecutor):
@@ -472,8 +381,49 @@ def test_stage_bundle_raises_when_no_tarball(tmp_path: pathlib.Path, monkeypatch
     monkeypatch.setattr(deploy, "LocalExecutor", _NoopExecutor)
     with pytest.raises(deploy.DeployError, match="produced no bundle"):
         deploy.stage_bundle(
-            system=_make_system(),
+            project_dir=project_dir,
             project_name="deploy-fixture",
-            workspace_dir=_make_workspace(tmp_path),
             out_dir=tmp_path / "bundles",
         )
+
+
+def test_materialize_refuses_when_tokens_name_another_project(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """install.sh rewrites `../anolis-projects/projects/<X>/` using the TOKEN's
+    own <X>, but installs under the directory it is handed. When they disagree
+    the install SUCCEEDS and the rig is broken — configs resolve to a path
+    nothing was written to — so it has to be caught here."""
+    variant = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("/projects/deploy-fixture/", "/projects/some-other-rig/"),
+        encoding="utf-8",
+    )
+    with pytest.raises(deploy.DeployError, match="some-other-rig"):
+        deploy.materialize_project_dir(project_dir, tmp_path / "out")
+
+
+def test_stage_bundle_does_not_pass_variant_to_install_sh(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """install.sh's bundle assembly always stages `manual` and ignores the flag.
+    Passing it would tell the operator they had chosen something they had not."""
+    _stub_fetch(monkeypatch)
+    out_dir = tmp_path / "bundles"
+    recorded: list[list[str]] = []
+
+    class _StagingExecutor(RecordingExecutor):
+        def run(self, cmd, *, input=None, sudo=False, timeout=None):
+            recorded.append(list(cmd))
+            (out_dir / "anolis-deploy-fixture-0.1.27-arm64.tar.gz").write_bytes(b"tar")
+            return RunResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(deploy, "LocalExecutor", _StagingExecutor)
+    deploy.stage_bundle(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        out_dir=out_dir,
+        arch="arm64",
+        variant="automation",
+    )
+    assert "--variant" not in recorded[0]

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import deploy, installer, migrations, releases
+from anolis_workbench.core import deploy, installer, releases
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
@@ -29,19 +28,19 @@ def _parse_args() -> argparse.Namespace:
     )
     install_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name to create (default: bioreactor-v1).",
+        default=None,
+        help="Project name to create (defaults to the template name).",
     )
     install_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for project creation (default: bioreactor-manual).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     install_parser.add_argument(
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     install_parser.add_argument(
         "--install-prefix",
@@ -92,19 +91,19 @@ def _parse_args() -> argparse.Namespace:
     )
     bundle_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name for the bundle (default: bioreactor-v1).",
+        default=None,
+        help="Project name for the bundle (defaults to the template name).",
     )
     bundle_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for config rendering (default: bioreactor-manual).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     bundle_parser.add_argument(
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     bundle_parser.add_argument(
         "--arch",
@@ -137,19 +136,19 @@ def _parse_args() -> argparse.Namespace:
     )
     remote_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name to create on the target (default: bioreactor-v1).",
+        default=None,
+        help="Project name to create on the target (defaults to the template name).",
     )
     remote_parser.add_argument(
         "--template",
-        default="bioreactor-manual",
-        help="Template to use for project creation (default: bioreactor-manual).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     remote_parser.add_argument(
         "--system",
         type=Path,
         default=None,
-        help="Path to a custom system.json (mutually exclusive with --template).",
+        help="Path to a canonical project directory (mutually exclusive with --template).",
     )
     remote_parser.add_argument(
         "--install-prefix",
@@ -310,7 +309,7 @@ def _validate_system_template(args: argparse.Namespace) -> bool:
 
     Returns True if valid, False if error was printed.
     """
-    if hasattr(args, "system") and args.system is not None and args.template != "bioreactor-manual":
+    if getattr(args, "system", None) is not None and getattr(args, "template", None) is not None:
         print("ERROR: --system and --template are mutually exclusive", file=sys.stderr)
         return False
     return True
@@ -378,20 +377,42 @@ def _run_observability_step(
         print(f"    To start: cd {obs_result.stack_path} && docker compose up -d")
 
 
+DEFAULT_TEMPLATE = "sim-quickstart"
+
+
+def _resolve_names(args: argparse.Namespace) -> tuple[str, str]:
+    """Project and template names, defaulted coherently.
+
+    The project defaults to the TEMPLATE name rather than a fixed string: a
+    default project called `bioreactor-v1` seeded from a simulator template
+    describes something that does not exist.
+    """
+    template = getattr(args, "template", None) or DEFAULT_TEMPLATE
+    project = getattr(args, "project", None) or template
+    return project, template
+
+
 def _provision_workspace(args: argparse.Namespace) -> Path:
     """Authoring: ensure the local workspace project exists (source of truth)."""
     from anolis_workbench.core import paths as paths_module
 
-    project_dir: Path = paths_module.SYSTEMS_ROOT / args.project
-    if project_dir.exists() and not args.force and args.system is None:
+    # `bundle` deliberately has no --force: building an offline bundle reads the
+    # project, it must never replace it. So read the flag defensively rather than
+    # assuming every subcommand that authors a workspace defines one.
+    force = bool(getattr(args, "force", False))
+    system_path = getattr(args, "system", None)
+    project, template = _resolve_names(args)
+
+    project_dir: Path = paths_module.SYSTEMS_ROOT / project
+    if project_dir.exists() and not force and system_path is None:
         _print_progress("project", f"Using existing workspace project: {project_dir}")
         return project_dir
     return installer.provision_project(
-        args.template,
-        args.project,
+        template,
+        project,
         args.install_prefix,
-        force=args.force,
-        system_path=args.system,
+        force=force,
+        system_path=system_path,
     )
 
 
@@ -405,11 +426,11 @@ def _run_install(args: argparse.Namespace) -> int:
     token = os.environ.get("GITHUB_TOKEN")
 
     print("Anolis Provision — Install")
-    print(f"  Project:  {args.project}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
     if args.system:
         print(f"  System:   {args.system}")
     else:
-        print(f"  Template: {args.template}")
+        print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Prefix:   {args.install_prefix}")
     if args.dry_run:
         print("  Mode:     DRY RUN")
@@ -421,15 +442,12 @@ def _run_install(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — delegated to the canonical anolis install.sh.
     try:
         result = deploy.deploy_local(
-            system=system,
-            project_name=args.project,
-            workspace_dir=project_dir,
+            project_dir=project_dir,
+            project_name=_resolve_names(args)[0],
             prefix=args.install_prefix,
             no_start=args.no_start,
             dry_run=args.dry_run,
@@ -476,19 +494,19 @@ def _run_install(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_system_for_deploy(template: str, system_path: Path | None) -> tuple[dict, Path]:
-    """Load a system definition + the dir its behavior files resolve against."""
+def _template_project_dir(template: str) -> Path:
+    """A bundled template as a canonical project directory (#255).
+
+    Templates are the artifacts themselves now — there is nothing to load or
+    render, only a directory to hand to install.sh.
+    """
+    from anolis_workbench.core import machine_profile
     from anolis_workbench.core import paths as paths_module
 
-    if system_path is not None:
-        if not system_path.exists():
-            raise FileNotFoundError(f"System file not found: {system_path}")
-        return migrations.migrate_system(json.loads(system_path.read_text(encoding="utf-8")))[0], system_path.parent
-    tpl_dir = paths_module.TEMPLATES_ROOT / template
-    tpl_path = tpl_dir / "system.json"
-    if not tpl_path.exists():
-        raise FileNotFoundError(f"Template '{template}' not found at {tpl_path}")
-    return migrations.migrate_system(json.loads(tpl_path.read_text(encoding="utf-8")))[0], tpl_dir
+    tpl_dir: Path = paths_module.TEMPLATES_ROOT / template
+    if not (tpl_dir / machine_profile.PROFILE_FILENAME).is_file():
+        raise FileNotFoundError(f"Template '{template}' not found at {tpl_dir}")
+    return tpl_dir
 
 
 def _run_bundle(args: argparse.Namespace) -> int:
@@ -499,22 +517,23 @@ def _run_bundle(args: argparse.Namespace) -> int:
     arch = "arm64" if args.arch in ("arm64", "aarch64") else "x86_64"
 
     print("Anolis Provision — Bundle")
-    print(f"  Project:  {args.project}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
     if args.system:
         print(f"  System:   {args.system}")
     else:
-        print(f"  Template: {args.template}")
+        print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Arch:     {arch}")
     print(f"  Output:   {args.out}")
     print(f"  Prefix:   {args.install_prefix}")
     print()
 
     try:
-        system, workspace_dir = _load_system_for_deploy(args.template, args.system)
+        # Bundle from the workspace project, like install/remote do — the
+        # template is only the seed when the project does not exist yet.
+        project_dir = _provision_workspace(args)
         tarball = deploy.stage_bundle(
-            system=system,
-            project_name=args.project,
-            workspace_dir=workspace_dir,
+            project_dir=project_dir,
+            project_name=_resolve_names(args)[0],
             out_dir=args.out,
             arch=arch,
             prefix=args.install_prefix,
@@ -568,8 +587,8 @@ def _run_remote(args: argparse.Namespace) -> int:
 
     print("Anolis Provision — Remote")
     print(f"  Target:   {user}@{host}")
-    print(f"  Project:  {args.project}")
-    print(f"  Template: {args.template}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
+    print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Prefix:   {args.install_prefix}")
     print(f"  Session:  {session_id}")
     print()
@@ -602,16 +621,13 @@ def _run_remote(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — push the config to the target and run install.sh there.
     try:
         result = deploy.deploy_remote(
             executor=executor,
-            system=system,
-            project_name=args.project,
-            workspace_dir=project_dir,
+            project_dir=project_dir,
+            project_name=_resolve_names(args)[0],
             prefix=args.install_prefix,
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),
@@ -665,12 +681,22 @@ def _provision_single_target(
     )
 
     try:
-        system, workspace_dir = _load_system_for_deploy(target.template, None)
+        from anolis_workbench.core import paths as paths_module
+
+        project_dir = paths_module.SYSTEMS_ROOT / target.project
+        if not project_dir.exists():
+            # Seed from the template only when the operator has no workspace
+            # project yet; an existing one is the source of truth and must not
+            # be replaced under a fleet run.
+            project_dir = installer.provision_project(
+                target.template,
+                target.project,
+                target.install_prefix,
+            )
         result = deploy.deploy_remote(
             executor=executor,
-            system=system,
+            project_dir=project_dir,
             project_name=target.project,
-            workspace_dir=workspace_dir,
             prefix=target.install_prefix,
             dry_run=dry_run,
         )

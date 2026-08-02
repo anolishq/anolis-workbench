@@ -41,13 +41,24 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     except FileNotFoundError:
         return None, f"Running project '{active_project}' not found", 500
 
-    runtime_cfg = system.get("topology", {}).get("runtime", {})
-    bind = runtime_cfg.get("http_bind", "127.0.0.1")
-    port = runtime_cfg.get("http_port", 8080)
+    # The proxy target comes from the variant that is actually running (#255).
+    # Reading a fixed default here would silently point Operate at :8080 while
+    # the runtime listens elsewhere — and the launcher WOULD report it running,
+    # so the UI shows a live project whose every call 502s.
+    runtime_doc = launcher_module.active_runtime_config(system) or {}
+    http = runtime_doc.get("http")
+    http = http if isinstance(http, dict) else {}
+    bind = http.get("bind", "127.0.0.1")
+    port = http.get("port", 8080)
 
     if not isinstance(bind, str) or bind == "":
         bind = "127.0.0.1"
-    if not isinstance(port, int):
+    if isinstance(port, str):
+        try:
+            port = int(port)
+        except ValueError:
+            return None, "Runtime port is invalid", 500
+    if not isinstance(port, int) or isinstance(port, bool):
         return None, "Runtime port is invalid", 500
 
     return f"http://{bind}:{port}", None, 200

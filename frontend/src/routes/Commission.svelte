@@ -14,8 +14,8 @@
     type ProviderHealth,
     type RuntimeApiStatus,
     type RuntimeStatus,
-    type SystemConfig,
   } from "../lib/contracts";
+  import { activeVariant } from "../lib/canonical";
 
   let {
     projectName,
@@ -29,23 +29,17 @@
     commissionRunningForCurrent: boolean;
   } = $props();
 
-  // Imported (machine-profile) projects are deploy-only (#226): no dev-launch,
-  // no .anpkg export. Bundle export works and gains a variant selector.
+  // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
   const imported = $derived(isImportedDoc(system));
-  const importedVariants = $derived.by(() => {
-    if (!system || !isImportedDoc(system)) return [] as string[];
-    const profiles = system.profile?.runtime_profiles;
-    return typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)
-      ? Object.keys(profiles as Record<string, unknown>)
-      : [];
-  });
-  let selectedVariant = $state<string>("");
-  $effect(() => {
-    if (importedVariants.length > 0 && !importedVariants.includes(selectedVariant)) {
-      selectedVariant = importedVariants.includes("manual") ? "manual" : importedVariants[0];
-    }
-  });
-  const composerSystem = $derived(!imported ? (system as SystemConfig | null) : null);
+
+  // Every project declares runtime variants now (#255). The bundle carries ALL
+  // of them: install.sh's bundle assembly always stages the inert `manual`
+  // variant and ignores --variant, so the choice is made at install time on the
+  // target. Offering a picker here would claim otherwise (see wb#275).
+  const variants = $derived(Object.keys(system?.profile?.runtime_profiles ?? {}).sort());
+
+  /** The HTTP port dev-launch serves on, from the variant it will run. */
+  const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -398,11 +392,7 @@
       const startRes = await fetchJson<{ job_id: string }>("/api/provision/bundle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          imported && selectedVariant
-            ? { project: projectName, arch: "arm64", variant: selectedVariant }
-            : { project: projectName, arch: "arm64" },
-        ),
+        body: JSON.stringify({ project: projectName, arch: "arm64" }),
       });
       const jobId = startRes.job_id;
       bundleFeedback = "Building bundle…";
@@ -473,16 +463,7 @@
     {#if imported}
       <div class="workspace-advisory">
         Imported machine profile — carried verbatim; dev-launch and preflight are not available.
-        Deploy it with install.sh (Export Bundle below, or the provision CLI), selecting a runtime
-        variant:
-        <label class="inline-label" style="margin-left:0.5rem">
-          <select bind:value={selectedVariant}>
-            {#each importedVariants as variant (variant)}
-              <option value={variant}>{variant}</option>
-            {/each}
-          </select>
-          variant
-        </label>
+        Deploy it with install.sh (Export Bundle below, or the provision CLI).
       </div>
     {:else if !commissionRunningForCurrent}
       <!-- Idle: preflight + launch -->
@@ -538,7 +519,7 @@
       <!-- Running state -->
       <div class="launch-running-bar">
         <span class="running-label">
-          Running — {projectName} on port {composerSystem?.topology?.runtime?.http_port ?? "?"}
+          Running — {projectName} on port {launchPort ?? "?"}
         </span>
         <span class="health-badge {healthStatus}">
           {healthStatus === "healthy"
@@ -681,6 +662,12 @@
     >
       {bundleRunning ? "Building Bundle…" : "Export Bundle"}
     </button>
+    {#if variants.length > 1}
+      <span class="field-note">
+        Carries every runtime variant ({variants.join(", ")}). Choose one on the target with
+        <code>install.sh --variant</code>.
+      </span>
+    {/if}
     {#if bundleFeedback}
       <span
         id="export-bundle-feedback"

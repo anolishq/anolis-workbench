@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import yaml
+
 from anolis_workbench.core import canonical, machine_profile
 
 
@@ -49,8 +51,15 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def validate_project(document: dict[str, Any]) -> list[str]:
-    """Errors that must block a save. Empty list means the project is valid."""
+def validate_project(document: dict[str, Any], project_dir: Any = None) -> list[str]:
+    """Errors that must block a save. Empty list means the project is valid.
+
+    `project_dir` enables the existence check on referenced files. It is worth
+    doing at save time because the profile is a manifest: a reference to a file
+    that isn't there blocks EVERY deploy of the project — including variants
+    that have nothing to do with it — and the only symptom is a deploy-time
+    error naming a file the user never knowingly added.
+    """
     errors: list[str] = []
     profile = _as_mapping(document.get("profile"))
     variants = _as_mapping(document.get("variants"))
@@ -68,6 +77,29 @@ def validate_project(document: dict[str, Any]) -> list[str]:
     errors.extend(_pinned_provider_errors(profile, variants))
     errors.extend(_i2c_conflict_errors(providers))
     errors.extend(_port_errors(variants))
+    errors.extend(_bind_errors(variants))
+    if project_dir is not None:
+        errors.extend(_missing_behavior_errors(profile, project_dir))
+    return errors
+
+
+def _missing_behavior_errors(profile: dict[str, Any], project_dir: Any) -> list[str]:
+    """Behaviour trees are authored outside the workbench, so the profile can
+    name one that was never added. Provider configs and runtime variants are
+    written by this same save, so they are deliberately not checked here."""
+    behaviors = profile.get("behaviors")
+    if not isinstance(behaviors, list):
+        return []
+    errors: list[str] = []
+    for ref in behaviors:
+        if not isinstance(ref, str) or machine_profile.containment_error(ref) is not None:
+            continue
+        if not (project_dir / ref).is_file():
+            errors.append(
+                f"Behavior tree '{ref}' is declared in the machine-profile but is not in the "
+                "project. Add the file, or remove the variant that uses it — while it is missing "
+                "NO variant of this project can be deployed."
+            )
     return errors
 
 
@@ -114,6 +146,14 @@ def _variant_errors(
         errors.append(
             f"No '{canonical.MANUAL_VARIANT}' runtime variant. install.sh boots the inert "
             f"'{canonical.MANUAL_VARIANT}' variant and refuses a profile without one."
+        )
+
+    # Every declared variant needs a document, or the profile ends up naming a
+    # config file nothing writes — which blocks EVERY deploy of the project and
+    # is invisible in the UI, since a variant with no document is not rendered.
+    for variant in sorted(set(declared) - set(variants)):
+        errors.append(
+            f"Runtime variant '{variant}' is declared in the machine-profile but has no configuration in this document."
         )
 
     for variant, doc in variants.items():
@@ -265,6 +305,41 @@ def _port_errors(variants: dict[str, Any]) -> list[str]:
                 f"Runtime variant '{variant}' uses HTTP port {reserved}, which conflicts "
                 "with the workbench control server."
             )
+    return errors
+
+
+def _bind_errors(variants: dict[str, Any]) -> list[str]:
+    """A non-loopback bind without auth is refused by install.sh — but LATE.
+
+    Its check runs in the config phase, AFTER the binaries on the target have
+    been replaced, so the operator is left mid-install. Catch it at save time
+    while it is still a one-field fix.
+
+    Read from the SERIALIZED text, because install.sh's reader is an awk that
+    takes the raw field: it never strips quotes, so `bind: ""` and
+    `bind: "[::1]"` are values it cannot recognise as loopback, and
+    `auth_enabled: 'true'` is not the string `true` it compares against.
+    """
+    errors: list[str] = []
+    for variant, doc in sorted(variants.items()):
+        if not isinstance(doc, dict):
+            continue
+        text = yaml.safe_dump(doc, default_flow_style=False, sort_keys=False)
+        bind = canonical.http_value_text(text, "bind")
+        # install.sh: `case "${bind:-127.0.0.1}" in 127.* | ::1 | localhost)`.
+        # The default only applies when the field is absent entirely.
+        if bind == "" or bind == "localhost" or bind == "::1" or bind.startswith("127."):
+            continue
+        if canonical.http_value_text(text, "auth_enabled") == "true":
+            continue
+        if canonical.http_value_text(text, "allow_insecure_bind") == "true":
+            continue
+        errors.append(
+            f"Runtime variant '{variant}' binds HTTP to {bind}, which install.sh does not read as "
+            "loopback, with authentication disabled. Set http.auth_enabled: true, or keep bind on "
+            "an unquoted 127.0.0.1 and let install.sh do the LAN rewrite (which turns "
+            "authentication on for you)."
+        )
     return errors
 
 

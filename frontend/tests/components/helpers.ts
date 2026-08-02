@@ -1,35 +1,107 @@
-import type { RuntimeStatus, SystemConfig } from '../../src/lib/contracts';
+import type { ProjectDocument, ProviderInstance, RuntimeStatus } from '../../src/lib/contracts';
+import {
+  MANUAL_VARIANT,
+  providerCommandToken,
+  providerConfigRelpath,
+  projectPathToken,
+  variantRelpath,
+} from '../../src/lib/canonical';
 
-export function createSystemConfig(name = 'demo'): SystemConfig {
+/**
+ * A canonical project document (#255) — the shape the API serves and accepts.
+ *
+ * Provider `command` values are deploy TOKENS, not host paths; the host binary
+ * lives in `host_paths`. Getting that backwards is the failure this whole
+ * change exists to prevent, so the fixtures build tokens through the same
+ * helpers the composer uses.
+ */
+export function createProjectDocument(name = 'demo'): ProjectDocument {
   return {
-    meta: {
-      name,
-      created: '2026-01-01T00:00:00Z',
-      template: 'sim-quickstart',
-    },
-    topology: {
-      runtime: {
-        name,
-        http_port: 8080,
-        http_bind: '127.0.0.1',
-        cors_origins: [],
-        cors_allow_credentials: false,
-        shutdown_timeout_ms: 5000,
-        startup_timeout_ms: 30000,
-        polling_interval_ms: 1000,
-        log_level: 'info',
-        telemetry: { enabled: false },
-        automation_enabled: false,
-        behavior_tree_path: null,
-        providers: [],
+    format: 'machine-profile',
+    authored: true,
+    meta: { name, created: '2026-01-01T00:00:00Z', template: 'sim-quickstart' },
+    profile: {
+      schema_version: 1,
+      machine_id: name,
+      display_name: name,
+      runtime_profiles: { [MANUAL_VARIANT]: variantRelpath(MANUAL_VARIANT) },
+      providers: {},
+      compatibility: {
+        runtime: { config_contract: '01-runtime-config', http_contract: '02-runtime-http' },
+        providers: {},
       },
-      providers: {},
+      components: {
+        runtime: { repo: 'anolishq/anolis', version: '0.1.39' },
+        providers: {},
+      },
     },
-    paths: {
-      runtime_executable: '',
-      providers: {},
+    variants: {
+      [MANUAL_VARIANT]: {
+        runtime: { name, shutdown_timeout_ms: 5000, startup_timeout_ms: 30000 },
+        http: {
+          enabled: true,
+          bind: '127.0.0.1',
+          port: 8080,
+          cors_allowed_origins: [],
+          cors_allow_credentials: false,
+        },
+        providers: [],
+        polling: { interval_ms: 1000 },
+        telemetry: { enabled: false },
+        logging: { level: 'info' },
+        automation: { enabled: false },
+      },
     },
+    providers: {},
+    host_paths: { runtime_executable: '', providers: {} },
+    launch: { variant: MANUAL_VARIANT },
+    warnings: [],
   };
+}
+
+/** Add a provider to a document the way the composer does: profile + variant + config. */
+export function withProvider(
+  doc: ProjectDocument,
+  id: string,
+  kind: string,
+  config: ProviderInstance['config'] = {},
+  options: { executable?: string; variant?: string } = {},
+): ProjectDocument {
+  const variant = options.variant ?? MANUAL_VARIANT;
+  const machineId = doc.profile.machine_id;
+
+  doc.profile.providers[id] = { config: providerConfigRelpath(kind, id) };
+  (doc.profile.compatibility as Record<string, Record<string, unknown>>).providers[id] = {
+    strategy: 'pinned-ref',
+    version: '0.2.7',
+  };
+  doc.profile.components!.providers![kind] = {
+    repo: `anolishq/anolis-provider-${kind}`,
+    version: '0.2.7',
+  };
+  doc.providers[id] = { kind, config };
+  doc.variants[variant].providers = [
+    ...(doc.variants[variant].providers ?? []),
+    {
+      id,
+      command: providerCommandToken(kind),
+      args: ['--config', projectPathToken(machineId, providerConfigRelpath(kind, id))],
+      timeout_ms: 5000,
+      hello_timeout_ms: 3000,
+      ready_timeout_ms: 10000,
+      restart_policy: { enabled: false },
+    },
+  ];
+  doc.host_paths!.providers![id] = { executable: options.executable ?? '' };
+  return doc;
+}
+
+/** An imported project: same shape, carried verbatim, read-only. */
+export function createImportedDocument(name = 'rig-a'): ProjectDocument {
+  const doc = createProjectDocument(name);
+  doc.authored = false;
+  doc.meta = { name, imported_from: '/srv/machines/rig-a' };
+  return doc;
 }
 
 export function createRuntimeStatus(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {

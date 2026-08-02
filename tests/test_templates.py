@@ -1,235 +1,136 @@
-"""Render-and-validate tests for all bundled templates.
+"""The bundled templates are shipped ARTIFACTS (#255), not renderer input.
 
-Run with:  python -m pytest tests/
-Or standalone: python tests/test_templates.py
+A template is a canonical project directory that gets copied to create a
+project and copied again to deploy, so every property install.sh depends on has
+to hold in the checked-in files themselves. That is what this module asserts.
+
+Only `sim-quickstart` ships. It is synthetic — no hardware, no counterpart in
+anolis-projects — so there is nothing for it to drift from. Templates that
+mirrored REAL machines were removed: a fork of a machine config cannot be kept
+honest by a test, because the source of truth lives in another repo that CI
+cannot see, and the bioreactor fork had already silently lost
+`command_watchdog_ms` from its bread devices. Real machines are imported (#226).
 """
 
-import copy
-import json
+from __future__ import annotations
+
 import pathlib
-import subprocess
-import sys
-import tempfile
 
-import yaml  # noqa: E402 (PyYAML must be available for the renderer already uses it)
+import pytest
+import yaml
 
-from anolis_workbench.core import renderer
+from anolis_workbench.core import canonical, canonical_validator, machine_profile
 
 TEMPLATES_DIR = pathlib.Path(__file__).parent.parent / "anolis_workbench" / "templates"
 FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "bioreactor"
 
-# Platform-dependent binary paths (relative to repo root)
-_WIN_RUNTIME = pathlib.Path("build/dev-windows-release/core/anolis-runtime.exe")
-_LIN_RUNTIME = pathlib.Path("build/dev-release/core/anolis-runtime")
-RUNTIME_BIN = _WIN_RUNTIME if sys.platform == "win32" else _LIN_RUNTIME
-
-
-def load_template(name: str) -> dict:
-    return json.loads((TEMPLATES_DIR / name / "system.json").read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+TEMPLATES = ("sim-quickstart",)
 
 
 def _load_yaml(path: pathlib.Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
-def _normalize_runtime_doc(doc: dict) -> dict:
-    normalized = copy.deepcopy(doc)
-    for provider in normalized.get("providers", []):
-        args = provider.get("args")
-        if isinstance(args, list) and len(args) == 2 and args[0] == "--config":
-            provider["args"] = ["--config", f"providers/{provider['id']}.yaml"]
-    return normalized
+@pytest.fixture(params=TEMPLATES)
+def template(request: pytest.FixtureRequest) -> pathlib.Path:
+    return TEMPLATES_DIR / str(request.param)
 
 
-# ---------------------------------------------------------------------------
-# Template: sim-quickstart
-# ---------------------------------------------------------------------------
+def test_every_bundled_template_is_shipped(template: pathlib.Path) -> None:
+    assert template.is_dir()
+    assert (template / machine_profile.PROFILE_FILENAME).is_file()
+    assert (template / machine_profile.SIDECAR_NAME).is_file()
 
 
-def test_sim_quickstart_renders():
-    system = load_template("sim-quickstart")
-    outputs = renderer.render(system, "test-sim")
-    assert "anolis-runtime.yaml" in outputs
-    assert "providers/sim0.yaml" in outputs
-    for key, content in outputs.items():
-        parsed = yaml.safe_load(content)
-        assert parsed is not None, f"Empty YAML for {key}"
+def test_template_is_a_valid_canonical_project(template: pathlib.Path) -> None:
+    document = canonical.read_project(template)
+    assert document["authored"] is True
+    assert canonical_validator.validate_project(document) == []
 
 
-def test_sim_quickstart_check_config():
-    if not RUNTIME_BIN.exists():
-        try:
-            import pytest
-
-            pytest.skip(f"Runtime binary not found at {RUNTIME_BIN} — build first")
-        except ImportError:
-            print("SKIP  test_sim_quickstart_check_config — binary missing")
-            return
-    system = load_template("sim-quickstart")
-    outputs = renderer.render(system, "test-cc")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        runtime_yaml = pathlib.Path(tmpdir) / "anolis-runtime.yaml"
-        runtime_yaml.write_text(outputs["anolis-runtime.yaml"], encoding="utf-8")
-        result = subprocess.run(
-            [str(RUNTIME_BIN), "--check-config", str(runtime_yaml)],
-            capture_output=True,
-            timeout=10,
-        )
-        assert result.returncode == 0, result.stderr.decode(errors="replace")
+def test_template_machine_id_matches_its_directory(template: pathlib.Path) -> None:
+    """install.sh keys its `../anolis-projects/projects/<X>/` rewrites on the
+    deploy directory basename, which is the machine_id — so a template whose id
+    and directory disagree produces configs pointing at the wrong project."""
+    profile = machine_profile.load_profile(template)
+    assert profile["machine_id"] == template.name
 
 
-# ---------------------------------------------------------------------------
-# Template: mixed-bus-mock
-# ---------------------------------------------------------------------------
+def test_template_manual_variant_is_inert(template: pathlib.Path) -> None:
+    """install.sh refuses a non-inert `manual` variant outright."""
+    document = canonical.read_project(template)
+    manual = document["variants"][canonical.MANUAL_VARIANT]
+    assert canonical.inertness_violation(manual) is None
 
 
-def test_mixed_bus_mock_renders():
-    system = load_template("mixed-bus-mock")
-    outputs = renderer.render(system, "test-mixed")
-    assert "anolis-runtime.yaml" in outputs
-    assert "providers/bread0.yaml" in outputs
-    assert "providers/ezo0.yaml" in outputs
-    for key, content in outputs.items():
-        parsed = yaml.safe_load(content)
-        assert parsed is not None, f"Empty YAML for {key}"
+def test_template_paths_are_canonical_deploy_tokens(template: pathlib.Path) -> None:
+    document = canonical.read_project(template)
+    profile = document["profile"]
+    kinds = {pid: entry["kind"] for pid, entry in document["providers"].items()}
+    for variant, doc in document["variants"].items():
+        problems = canonical.assert_deploy_tokens(profile["machine_id"], doc, kinds)
+        assert problems == [], f"{template.name}/{variant}: {problems}"
 
 
-# ---------------------------------------------------------------------------
-# Template: bioreactor-manual
-# ---------------------------------------------------------------------------
+def test_template_pins_every_kind_it_runs(template: pathlib.Path) -> None:
+    """install.sh fetches provider binaries by `components.providers` KEY and
+    hard-fails when a variant's command resolves to an unpinned kind."""
+    document = canonical.read_project(template)
+    pinned = canonical.pinned_kinds(document["profile"])
+    assert pinned, f"{template.name} ships without component pins"
+    for doc in document["variants"].values():
+        for entry in doc["providers"]:
+            assert canonical.command_kind(entry["command"]) in pinned
 
 
-def test_bioreactor_manual_renders():
-    system = load_template("bioreactor-manual")
-    outputs = renderer.render(system, "test-bio")
-    assert "anolis-runtime.yaml" in outputs
-    assert "providers/bread0.yaml" in outputs
-    assert "providers/ezo0.yaml" in outputs
-    for key, content in outputs.items():
-        parsed = yaml.safe_load(content)
-        assert parsed is not None, f"Empty YAML for {key}"
+def test_template_provider_filenames_follow_the_install_sh_convention(template: pathlib.Path) -> None:
+    """install.sh takes the provider config's stem up to the FIRST dot as the
+    installed name, so the kind has to come first."""
+    document = canonical.read_project(template)
+    for pid, entry in document["profile"]["providers"].items():
+        name = pathlib.PurePosixPath(entry["config"]).name
+        assert name == canonical.provider_config_filename(document["providers"][pid]["kind"], pid)
 
 
-def test_bioreactor_manual_matches_checked_in_baselines():
-    system = load_template("bioreactor-manual")
-    outputs = renderer.render(system, "bioreactor-manual")
-
-    rendered_runtime = yaml.safe_load(outputs["anolis-runtime.yaml"])
-    expected_runtime = _load_yaml(FIXTURE_DIR / "anolis-runtime.bioreactor.manual.yaml")
-    assert _normalize_runtime_doc(rendered_runtime) == _normalize_runtime_doc(expected_runtime)
-
-    rendered_bread = yaml.safe_load(outputs["providers/bread0.yaml"])
-    expected_bread = _load_yaml(FIXTURE_DIR / "provider-bread.bioreactor.yaml")
-    assert rendered_bread == expected_bread
-
-    rendered_ezo = yaml.safe_load(outputs["providers/ezo0.yaml"])
-    expected_ezo = _load_yaml(FIXTURE_DIR / "provider-ezo.bioreactor.yaml")
-    assert rendered_ezo == expected_ezo
+def test_template_bind_is_emitted_unquoted(template: pathlib.Path) -> None:
+    """install.sh's LAN-exposure rewrite matches `^\\s*bind: 127.0.0.1\\s*$`.
+    A quoted value silently skips the rewrite AND the auth it turns on."""
+    for rel in machine_profile.load_profile(template)["runtime_profiles"].values():
+        text = (template / rel).read_text(encoding="utf-8")
+        if "bind:" in text:
+            assert "bind: 127.0.0.1\n" in text
 
 
-def test_bioreactor_telemetry_path_matches_checked_in_baseline():
-    system = load_template("bioreactor-manual")
-    system["topology"]["runtime"]["name"] = "bioreactor-telemetry"
-    system["topology"]["runtime"]["telemetry"]["enabled"] = True
-
-    outputs = renderer.render(system, "bioreactor-telemetry")
-    rendered_runtime = yaml.safe_load(outputs["anolis-runtime.yaml"])
-    expected_runtime = _load_yaml(FIXTURE_DIR / "anolis-runtime.bioreactor.telemetry.yaml")
-    assert _normalize_runtime_doc(rendered_runtime) == _normalize_runtime_doc(expected_runtime)
+def test_template_runtime_configs_are_schema_valid(template: pathlib.Path) -> None:
+    for variant, doc in canonical.read_project(template)["variants"].items():
+        assert canonical.runtime_config_errors(doc) == [], f"{template.name}/{variant}"
 
 
-# ---------------------------------------------------------------------------
-# YAML structural assertions
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "baseline",
+    ["anolis-runtime.bioreactor.manual.yaml", "anolis-runtime.bioreactor.telemetry.yaml"],
+)
+def test_real_world_baselines_validate_against_the_vendored_schema(baseline: str) -> None:
+    """The vendored runtime-config schema is what save-time validation rejects
+    on — it must accept hand-authored configs that the runtime itself accepts.
+
+    These fixtures are captured from the real bioreactor project. They are kept
+    as a CONTRACT check on the schema, not as a copy of a machine we ship."""
+    assert canonical.runtime_config_errors(_load_yaml(FIXTURE_DIR / baseline)) == []
 
 
-def test_runtime_yaml_has_required_sections():
-    """Runtime YAML must have 'http' and 'providers' sections."""
-    for tpl in ("sim-quickstart", "mixed-bus-mock", "bioreactor-manual"):
-        system = load_template(tpl)
-        outputs = renderer.render(system, "test-struct")
-        doc = yaml.safe_load(outputs["anolis-runtime.yaml"])
-        assert "http" in doc, f"{tpl}: missing 'http' section"
-        assert "providers" in doc, f"{tpl}: missing 'providers' section"
-        assert isinstance(doc["providers"], list), f"{tpl}: 'providers' must be a list"
-        assert len(doc["providers"]) > 0, f"{tpl}: 'providers' must not be empty"
+@pytest.mark.parametrize(
+    ("fixture", "kind"),
+    [("provider-bread.bioreactor.yaml", "bread"), ("provider-ezo.bioreactor.yaml", "ezo")],
+)
+def test_real_world_provider_configs_satisfy_the_vendored_envelopes(fixture: str, kind: str) -> None:
+    """Captured from the real bioreactor machine. Kept as a contract check on
+    the provider schemas — not as a machine config we ship. If a provider's
+    schema ever stops accepting what the rig actually runs, this fails."""
+    import jsonschema
 
+    from anolis_workbench.core import provider_schemas
 
-def test_provider_yaml_has_command_field():
-    """Each provider YAML is embedded via --config; the runtime entry must have a command."""
-    system = load_template("sim-quickstart")
-    rt_doc = yaml.safe_load(renderer.render(system, "test-cmd")["anolis-runtime.yaml"])
-    for p in rt_doc["providers"]:
-        assert "command" in p, f"Provider entry missing 'command': {p}"
-        assert "args" in p, f"Provider entry missing 'args': {p}"
-
-
-def test_renderer_tolerates_missing_provider_path_entries():
-    system = load_template("mixed-bus-mock")
-    del system["paths"]["providers"]["bread0"]
-    outputs = renderer.render(system, "test-missing-paths")
-    rt_doc = yaml.safe_load(outputs["anolis-runtime.yaml"])
-    bread_entry = next(p for p in rt_doc["providers"] if p["id"] == "bread0")
-    assert bread_entry["command"] == ""
-    # bus_path lives in the provider-native config, not paths — unaffected.
-    bread_doc = yaml.safe_load(outputs["providers/bread0.yaml"])
-    assert bread_doc["hardware"]["bus_path"] == "mock://mixed-bus"
-
-
-def test_behavior_tree_path_renders_canonical_runtime_key():
-    """When behavior_tree_path is set, runtime YAML uses automation.behavior_tree."""
-    system = load_template("bioreactor-manual")
-    system["topology"]["runtime"]["behavior_tree_path"] = "behaviors/main.xml"
-    rt_doc = yaml.safe_load(renderer.render(system, "my-bioreactor")["anolis-runtime.yaml"])
-    assert rt_doc["automation"]["enabled"] is True
-    assert rt_doc["automation"]["behavior_tree"] == "behaviors/main.xml"
-    assert "behavior_tree_path" not in rt_doc["automation"]
-
-
-def test_no_behavior_tree_path_renders_disabled():
-    """When behavior_tree_path is null/absent, automation section respects automation_enabled."""
-    system = load_template("bioreactor-manual")
-    assert system["topology"]["runtime"].get("behavior_tree_path") is None
-    rt_doc = yaml.safe_load(renderer.render(system, "my-bioreactor")["anolis-runtime.yaml"])
-    assert rt_doc["automation"]["enabled"] is False
-    assert "behavior_tree" not in rt_doc["automation"]
-
-
-# ---------------------------------------------------------------------------
-# Run standalone
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    tests = [
-        test_sim_quickstart_renders,
-        test_sim_quickstart_check_config,
-        test_mixed_bus_mock_renders,
-        test_bioreactor_manual_renders,
-        test_bioreactor_manual_matches_checked_in_baselines,
-        test_bioreactor_telemetry_path_matches_checked_in_baseline,
-        test_runtime_yaml_has_required_sections,
-        test_provider_yaml_has_command_field,
-        test_renderer_tolerates_missing_provider_path_entries,
-        test_behavior_tree_path_renders_canonical_runtime_key,
-        test_no_behavior_tree_path_renders_disabled,
-    ]
-    passed = 0
-    skipped = 0
-    for t in tests:
-        try:
-            t()
-            print(f"  PASS  {t.__name__}")
-            passed += 1
-        except AssertionError as exc:
-            print(f"  FAIL  {t.__name__}: {exc}")
-        except Exception as exc:
-            msg = str(exc)
-            if "SKIP" in msg or "binary" in msg.lower():
-                print(f"  SKIP  {t.__name__}: {msg}")
-                skipped += 1
-            else:
-                print(f"  ERROR {t.__name__}: {exc}")
-
-    total = len(tests) - skipped
-    print(f"\n{passed}/{total} tests passed ({skipped} skipped).")
-    sys.exit(0 if passed == total else 1)
+    envelope = provider_schemas.get_envelope(kind)
+    assert envelope is not None, f"no vendored envelope for {kind}"
+    jsonschema.Draft202012Validator(envelope["schema"]).validate(_load_yaml(FIXTURE_DIR / fixture))

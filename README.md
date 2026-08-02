@@ -4,7 +4,7 @@ Commissioning shell repository for Anolis.
 
 Repository structure:
 
-1. `anolis_workbench/core` — pure domain library (projects, renderer, launcher, exporter, validators, paths)
+1. `anolis_workbench/core` — pure domain library (projects, canonical artifacts, launcher, exporter, validators, paths)
 2. `anolis_workbench/server` — unified HTTP server (Compose + Commission + Operate `/v0/*` proxy)
 3. `anolis_workbench/cli` — CLI entry points (`anolis-workbench`, `anolis-package`, `anolis-validate`)
 

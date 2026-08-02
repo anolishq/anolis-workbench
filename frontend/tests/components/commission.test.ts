@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import Commission from '../../src/routes/Commission.svelte';
 import {
   createRuntimeStatus,
-  createSystemConfig,
+  createProjectDocument,
   deferred,
   jsonResponse,
   pathFromInput,
@@ -34,7 +34,7 @@ describe('Commission.svelte', () => {
     render(Commission, {
       props: {
         projectName: 'demo',
-        system: createSystemConfig('demo'),
+        system: createProjectDocument('demo'),
         runtimeStatus: createRuntimeStatus(),
         commissionRunningForCurrent: false,
       },
@@ -73,7 +73,7 @@ describe('Commission.svelte', () => {
     render(Commission, {
       props: {
         projectName: 'demo',
-        system: createSystemConfig('demo'),
+        system: createProjectDocument('demo'),
         runtimeStatus: createRuntimeStatus(),
         commissionRunningForCurrent: false,
       },
@@ -118,7 +118,7 @@ describe('Commission.svelte', () => {
     render(Commission, {
       props: {
         projectName: 'demo',
-        system: createSystemConfig('demo'),
+        system: createProjectDocument('demo'),
         runtimeStatus: createRuntimeStatus({ running: true, active_project: 'demo' }),
         commissionRunningForCurrent: true,
       },

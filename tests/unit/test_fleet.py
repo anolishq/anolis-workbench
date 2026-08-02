@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ from anolis_workbench.core.fleet import (
 class TestLoadFleetFile:
     def test_loads_valid_fleet(self, tmp_path: Path) -> None:
         fleet = {
-            "defaults": {"template": "bioreactor-manual", "systemd": True},
+            "defaults": {"template": "sim-quickstart", "systemd": True},
             "targets": [
                 {"name": "rpi-a", "host": "pi@192.168.1.10", "project": "bioreactor-v1"},
                 {"name": "rpi-b", "host": "pi@192.168.1.11", "project": "bioreactor-v1"},
@@ -39,7 +40,7 @@ class TestLoadFleetFile:
         assert config.targets[0].name == "rpi-a"
         assert config.targets[0].host == "pi@192.168.1.10"
         assert config.targets[0].systemd is True  # from defaults
-        assert config.targets[0].template == "bioreactor-manual"
+        assert config.targets[0].template == "sim-quickstart"
 
     def test_target_overrides_defaults(self, tmp_path: Path) -> None:
         fleet = {
@@ -177,3 +178,18 @@ class TestFormatFleetResult:
         assert "✓ rpi-a" in output
         assert "✗ rpi-b" in output
         assert "1/2 succeeded, 1 failed" in output
+
+
+def test_target_without_a_template_defaults_to_the_shipped_one() -> None:
+    """A fleet entry that omits `template:` seeds a MISSING project from this.
+    An existing workspace project is the source of truth and is used as-is, so
+    the default only matters on first provision of a new name."""
+    from anolis_workbench.core import fleet as fleet_module
+
+    path = Path(tempfile.mkdtemp()) / "fleet.yaml"
+    path.write_text(
+        yaml.safe_dump({"targets": [{"name": "t1", "host": "pi@10.0.0.1", "project": "rig"}]}),
+        encoding="utf-8",
+    )
+    config = fleet_module.load_fleet_file(path)
+    assert config.targets[0].template == fleet_module.DEFAULT_TEMPLATE == "sim-quickstart"

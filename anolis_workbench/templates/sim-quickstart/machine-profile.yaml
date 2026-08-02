@@ -1,0 +1,24 @@
+schema_version: 1
+machine_id: sim-quickstart
+display_name: sim-quickstart
+runtime_profiles:
+  manual: config/anolis-runtime.manual.yaml
+providers:
+  sim0:
+    config: config/provider-sim.sim0.yaml
+compatibility:
+  runtime:
+    config_contract: 01-runtime-config
+    http_contract: 02-runtime-http
+  providers:
+    sim0:
+      strategy: pinned-ref
+      version: 0.2.7
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: 0.1.39
+  providers:
+    sim:
+      repo: anolishq/anolis-provider-sim
+      version: 0.2.7

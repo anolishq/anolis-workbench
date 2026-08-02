@@ -218,32 +218,109 @@ def runtime_config_errors(doc: Any) -> list[str]:
     ]
 
 
-def inertness_violation(doc: dict[str, Any]) -> str | None:
+# install.sh's inertness gate is an AWK PASS OVER THE RAW YAML, not a structural
+# read of the parsed document, and mirroring it structurally drifts in both
+# directions: it misses an `enabled:` that only appears as a wrapped line of a
+# multi-line string, and it wrongly flags `enabled: 'false'`, which the awk
+# un-quotes and accepts. So the mirror runs over the same text install.sh will
+# see — the exact bytes `write_project` is about to serialize.
+_FALSEY_ENABLED = ("", "false", "no", "off", "n")
+
+# awk's defaults, which Python's do NOT match: records split on "\n" alone
+# (str.splitlines also breaks on \x0b \x0c \x1c-\x1e \x85 \u2028 \u2029 and a
+# lone \r), and fields split on spaces and tabs alone (str.split also splits on
+# \r \v \f \xa0 ...). Differential testing over thousands of generated configs
+# found real decision mismatches from exactly these two differences.
+_AWK_FS = re.compile(r"[ \t]+")
+
+
+def _awk_records(text: str, *, strip_cr: bool) -> list[str]:
+    """Lines as awk sees them.
+
+    `strip_cr` mirrors a real asymmetry in install.sh: its inertness pass opens
+    with `sub(/\r$/, "")`, its block-value reader does NOT. So on a CRLF file the
+    latter sees `http:\r`, never matches the block, and reports an empty bind —
+    which silently passes the LAN-exposure gate. Reproducing that faithfully is
+    the point: `deploy._assert_no_crlf` is what refuses such a file.
+    """
+    lines = text.split("\n")
+    if not strip_cr:
+        return lines
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
+
+def _awk_fields(line: str) -> list[str]:
+    stripped = line.strip(" \t")
+    return _AWK_FS.split(stripped) if stripped else []
+
+
+def inertness_violation(doc: Any) -> str | None:
     """Why this runtime config is not inert, or None.
 
-    Mirrors install.sh's inertness gates: automation enabled, or
-    mode_transition_hooks present. install.sh REFUSES a non-inert `manual`
-    variant at stage and install time, so the workbench must never author one.
-
-    Deliberately errs strict: a non-mapping `automation` makes install.sh's
-    stage-time renderer die outright, and a string like "false" is truthy to
-    its Python gate, so both are violations here rather than silent passes.
+    install.sh REFUSES a non-inert `manual` variant at install time, so the
+    workbench must never author one. Checked against the serialized form,
+    because that is what its awk reads.
     """
-    if "automation" not in doc:
-        return None
-    automation = doc.get("automation")
-    if automation is None:
-        return None
-    if not isinstance(automation, dict):
-        return f"automation must be a mapping (install.sh fails to render {automation!r})"
-    enabled = automation.get("enabled")
-    if isinstance(enabled, str):
-        return f"automation.enabled is the string {enabled!r} (install.sh treats any non-empty string as enabled)"
-    if enabled:
-        return "automation.enabled is true"
-    if "mode_transition_hooks" in automation:
-        return "automation.mode_transition_hooks is present"
+    if not isinstance(doc, dict):
+        return f"runtime config must be a mapping (install.sh fails to render {doc!r})"
+    return inertness_violation_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False))
+
+
+def inertness_violation_text(text: str) -> str | None:
+    """A faithful port of install.sh's `_automation_inert_violation` awk.
+
+    Line-oriented and un-anchored by design — that IS the gate. Keeping the two
+    in step matters more than being structurally clever, because a disagreement
+    means either a rig that dies at `sudo` or a config the composer refuses to
+    save for no real reason.
+    """
+    in_block = False
+    for line in _awk_records(text, strip_cr=True):
+        if line.startswith("automation:"):
+            in_block = True
+            rest = re.sub(r"^automation:[ \t]*", "", line)
+            rest = re.sub(r"[ \t]*#.*", "", rest)
+            if rest != "":
+                return f"automation is not a plain block mapping ({rest})"
+            continue
+        if line[:1].isalpha():
+            in_block = False
+        if not in_block:
+            continue
+        fields = _awk_fields(line)
+        if not fields:
+            continue
+        if fields[0] == "enabled:":
+            value = fields[1] if len(fields) > 1 else ""
+            # awk mutates the value in place before printing, so the reason it
+            # reports carries the UNQUOTED text.
+            unquoted = value.replace('"', "").replace("'", "")
+            if unquoted.lower() not in _FALSEY_ENABLED:
+                return f"automation.enabled={unquoted}"
+        elif fields[0] == "mode_transition_hooks:":
+            return "mode_transition_hooks present"
     return None
+
+
+def http_value_text(text: str, key: str) -> str:
+    """A faithful port of install.sh's `_yaml_block_value(cfg, http, key)`.
+
+    Returns the RAW field as its awk sees it — quotes included, `\\r` not
+    stripped — because that is precisely what makes the difference between a
+    value install.sh recognises and one it does not.
+    """
+    in_block = False
+    for line in _awk_records(text, strip_cr=False):
+        fields = _awk_fields(line)
+        if line[:1].isalpha():
+            in_block = fields[:1] == ["http:"]
+        if not in_block or not fields:
+            continue
+        if fields[0] == f"{key}:":
+            # awk prints $2 and exits on the FIRST match — a bare `key:` yields
+            # the empty string rather than falling through to a later line.
+            return fields[1] if len(fields) > 1 else ""
+    return ""
 
 
 def pinned_kinds(profile: dict[str, Any]) -> set[str]:
@@ -454,33 +531,99 @@ def write_project(project_dir: Path, document: dict[str, Any]) -> None:
             if isinstance(config, dict):
                 targets.append((_checked_target(project_dir, rel, f"providers.{pid}.config"), config))
 
+    # What the profile ON DISK claimed before this save — the only files this
+    # save is entitled to reclaim.
+    previously_owned = _owned_paths(project_dir, _previous_profile(project_dir))
+
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / CONFIG_DIR).mkdir(exist_ok=True)
-    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
+    # Configs first, THEN the profile that references them: the profile is the
+    # manifest, so a save interrupted half-way must leave it pointing only at
+    # files that exist. Pruning last, for the same reason.
     for path, doc in targets:
         _write_yaml_atomic(path, doc)
+    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
 
-    _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets})
+    _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets}, previously_owned)
 
 
-def _prune_orphans(project_dir: Path, profile: dict[str, Any], just_written: set[Path]) -> None:
-    """Remove config files the profile no longer references (renamed/removed
-    providers and variants), so the directory always matches the profile.
+def _previous_profile(project_dir: Path) -> dict[str, Any]:
+    try:
+        return machine_profile.load_profile(project_dir)
+    except (machine_profile.ProfileError, FileNotFoundError):
+        return {}
 
-    `just_written` is unioned in so a file this same save produced can never be
-    pruned by a path-normalization mismatch.
-    """
-    referenced = set(just_written) | {
+
+def _owned_paths(project_dir: Path, profile: dict[str, Any]) -> set[Path]:
+    return {
         (project_dir / ref).resolve()
         for ref in machine_profile.referenced_files(profile)
         if machine_profile.containment_error(ref) is None
     }
+
+
+# What install.sh's stage renderer GLOBS out of config/ (tools/install.sh).
+# Its view is glob-driven, not profile-driven, so anything matching these is
+# consumed whether or not the profile mentions it.
+_INSTALL_SH_CONFIG_GLOBS = ("anolis-runtime.*.yaml", "provider-*.yaml")
+
+
+def orphaned_config_files(project_dir: Path, profile: dict[str, Any]) -> list[Path]:
+    """Files install.sh would consume that this profile no longer declares."""
     config_dir = project_dir / CONFIG_DIR
     if not config_dir.is_dir():
-        return
-    for path in config_dir.glob("*.yaml"):
-        if path.resolve() not in referenced:
-            path.unlink()
+        return []
+    referenced = _owned_paths(project_dir, profile)
+    found: set[Path] = set()
+    for pattern in _INSTALL_SH_CONFIG_GLOBS:
+        found.update(path.resolve() for path in config_dir.glob(pattern) if path.is_file())
+    return sorted(found - referenced)
+
+
+def _prune_orphans(
+    project_dir: Path,
+    profile: dict[str, Any],
+    just_written: set[Path],
+    previously_owned: set[Path],
+) -> None:
+    """Retire config files install.sh would pick up but the profile no longer declares.
+
+    This has to happen, and it has to be scoped tightly, for two opposing
+    reasons. install.sh's stage renderer GLOBS `config/anolis-runtime.*.yaml`
+    and `config/provider-*.yaml` and hard-fails on any of them it cannot
+    resolve — so a config left behind by a rename breaks every deploy, even
+    though nothing references it. But `referenced_files` also covers behaviour
+    trees and validation scripts, which the workbench never writes and cannot
+    recreate — pruning by that set would delete a hand-authored .xml the moment
+    its variant was removed.
+
+    So: only files inside `config/` that match install.sh's own globs, and they
+    are MOVED to `.workbench/retired/` rather than deleted — out of install.sh's
+    view and out of the deployed set (nothing under `.workbench/` is copied),
+    without destroying anything.
+    """
+    keep = set(just_written) | _owned_paths(project_dir, profile)
+    candidates = set(orphaned_config_files(project_dir, profile)) | {
+        path for path in previously_owned if path.parent == (project_dir / CONFIG_DIR).resolve()
+    }
+    retired_dir = project_dir / LAUNCH_DIR / "retired"
+    config_dir = project_dir / CONFIG_DIR
+    for resolved in sorted(candidates - keep):
+        # Act on the path INSIDE the project, never the symlink target: moving
+        # the resolved path would drag a file out of the user's home and leave a
+        # dangling link that breaks install.sh's config render.
+        path = config_dir / resolved.name
+        if path.is_symlink() or not path.is_file():
+            continue
+        if not any(path.match(pattern) for pattern in _INSTALL_SH_CONFIG_GLOBS):
+            continue
+        retired_dir.mkdir(parents=True, exist_ok=True)
+        target = retired_dir / path.name
+        suffix = 1
+        while target.exists():  # never clobber an earlier retirement
+            target = retired_dir / f"{path.name}.{suffix}"
+            suffix += 1
+        path.replace(target)
 
 
 def _load_yaml(path: Path) -> Any:
@@ -498,10 +641,15 @@ def _write_yaml_atomic(path: Path, document: Any) -> None:
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
+    # newline="\n" is load-bearing, not tidiness: these files are shipped
+    # verbatim to a Linux target, and install.sh's parsers do not strip \r.
+    # A CRLF machine-profile makes it fail to find the `manual` variant, and a
+    # CRLF runtime config silently skips the LAN-exposure bind rewrite — so a
+    # project authored on Windows would deploy loopback-only with no warning.
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
         os.replace(tmp, path)
     except BaseException:
@@ -511,3 +659,33 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 def write_sidecar(project_dir: Path, sidecar: dict[str, Any]) -> None:
     _write_text_atomic(project_dir / machine_profile.SIDECAR_NAME, json.dumps(sidecar, indent=2) + "\n")
+
+
+def retarget_project(project_dir: Path, new_machine_id: str) -> None:
+    """Re-key an authored project onto a new machine_id.
+
+    Every `../anolis-projects/projects/<id>/...` token inside every config
+    references the project directory by name, and install.sh keys its path
+    rewrites on that basename. Copying a project without rewriting them would
+    make the copy deploy into the ORIGINAL's directory — so create-from-template
+    and duplicate both go through here.
+    """
+    profile = machine_profile.load_profile(project_dir)
+    old_machine_id = profile.get("machine_id")
+    if old_machine_id == new_machine_id:
+        return
+
+    pattern = re.compile(r"(\.\./anolis-projects/projects/)[a-z0-9-]+(/)")
+    for rel in machine_profile.referenced_files(profile):
+        if machine_profile.containment_error(rel) is not None:
+            continue
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        rewritten = pattern.sub(rf"\g<1>{new_machine_id}\g<2>", text)
+        if rewritten != text:
+            _write_text_atomic(path, rewritten)
+
+    profile["machine_id"] = new_machine_id
+    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)

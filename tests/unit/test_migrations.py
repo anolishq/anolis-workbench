@@ -13,10 +13,13 @@ import pathlib
 import pytest
 import yaml
 
-from anolis_workbench.core import migrations, projects, renderer
+from anolis_workbench.core import canonical, machine_profile, migrations, projects, renderer
 
 V1_FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "v1-templates"
-TEMPLATES = pathlib.Path(__file__).parent.parent.parent / "anolis_workbench" / "templates"
+# The bundled templates are canonical dirs since #255, so the v2 documents they
+# used to be are frozen here — this suite covers the v1 -> v2 step, and
+# test_migrate_to_canonical.py picks up from v2.
+V2_FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "v2-templates"
 
 TEMPLATE_NAMES = ("sim-quickstart", "bioreactor-manual", "mixed-bus-mock")
 
@@ -26,7 +29,7 @@ def _load_v1(name: str) -> dict:
 
 
 def _load_v2_template(name: str) -> dict:
-    return json.loads((TEMPLATES / name / "system.json").read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    return json.loads((V2_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 @pytest.mark.parametrize("name", TEMPLATE_NAMES)
@@ -139,7 +142,9 @@ def test_unknown_kind_empty_config_renders_no_yaml() -> None:
     assert "providers/custom0.yaml" not in outputs
 
 
-def test_get_project_backs_up_the_v1_document(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+def test_get_project_backs_up_the_legacy_document(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """Opening a legacy project migrates it all the way to canonical artifacts,
+    keeping ONE backup: the untouched document as it was found."""
     systems_root = tmp_path / "systems"
     monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
     project_dir = systems_root / "legacy"
@@ -149,32 +154,34 @@ def test_get_project_backs_up_the_v1_document(monkeypatch: pytest.MonkeyPatch, t
 
     projects.get_project("legacy")
 
-    backup = project_dir / "system.json.v1.bak"
+    backup = project_dir / "system.json.pre255.bak"
     assert backup.read_text(encoding="utf-8") == original
-    # A second load must not clobber the original backup with a v2 doc.
+    assert not (project_dir / "system.json").exists()
+    # A second load must not clobber the original backup.
     projects.get_project("legacy")
     assert backup.read_text(encoding="utf-8") == original
 
 
-def test_duplicate_project_cleans_up_when_source_fails_validation(
+def test_duplicate_project_leaves_no_half_copy_when_it_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
-    """A legal-but-degenerate v1 doc (sim without tick_rate_hz) migrates to a
-    doc the envelope rejects; duplicating it must fail loudly WITHOUT leaving a
-    half-initialized copy on disk."""
+    """Duplicating re-keys the copy's machine_id and every path token; if that
+    fails the partial copy must be removed, not left behind as a project that
+    would deploy into the ORIGINAL's directory."""
     systems_root = tmp_path / "systems"
     monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
-    v1 = _load_v1("sim-quickstart")
-    del v1["topology"]["providers"]["sim0"]["tick_rate_hz"]
     source_dir = systems_root / "legacy"
     source_dir.mkdir(parents=True)
-    (source_dir / "system.json").write_text(json.dumps(v1), encoding="utf-8")
+    (source_dir / "system.json").write_text(json.dumps(_load_v1("sim-quickstart")), encoding="utf-8")
+    projects.get_project("legacy")  # migrate to canonical
 
-    with pytest.raises(projects.ProjectValidationError):
+    (source_dir / "machine-profile.yaml").write_text("{ not: valid: yaml", encoding="utf-8")
+
+    with pytest.raises((machine_profile.ProfileError, ValueError)):
         projects.duplicate_project("legacy", "copy1")
 
     assert not (systems_root / "copy1").exists()
-    assert (source_dir / "system.json").exists()  # source untouched
+    assert (source_dir / "machine-profile.yaml").exists()  # source untouched
 
 
 def test_sim_inert_mode_drops_tick_rate() -> None:
@@ -191,12 +198,14 @@ def test_get_project_migrates_and_persists(monkeypatch: pytest.MonkeyPatch, tmp_
     project_dir.mkdir(parents=True)
     (project_dir / "system.json").write_text(json.dumps(_load_v1("mixed-bus-mock")), encoding="utf-8")
 
-    system = projects.get_project("legacy")
-    assert system["schema_version"] == 2
-    assert "config" in system["topology"]["providers"]["bread0"]
+    document = projects.get_project("legacy")
+    assert document["format"] == projects.FORMAT_MACHINE_PROFILE
+    # The v1 -> v2 provider-native shape survived the second hop to canonical.
+    assert document["providers"]["bread0"]["config"]["hardware"]["bus_path"] == "mock://mixed-bus"
 
-    on_disk = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    assert on_disk == system  # persisted, not just served
+    # Persisted, not just served.
+    assert (project_dir / "machine-profile.yaml").is_file()
+    assert canonical.read_project(project_dir)["providers"] == document["providers"]
 
 
 def test_unknown_schema_version_left_untouched() -> None:

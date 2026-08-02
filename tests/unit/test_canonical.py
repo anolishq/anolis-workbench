@@ -285,14 +285,60 @@ def test_hex_addresses_round_trip_as_quoted_strings(tmp_path: pathlib.Path) -> N
 
 
 def test_write_prunes_configs_the_profile_no_longer_references(tmp_path: pathlib.Path) -> None:
+    """A removed provider's config must go: install.sh globs
+    `config/provider-*.yaml`, so a leftover would be installed for a provider
+    the runtime never launches."""
+    pdir = tmp_path / "rig-a"
+    document = _document()
+    canonical.write_project(pdir, document)
+    dropped = pdir / "config" / "provider-bread.bread0.yaml"
+    assert dropped.is_file()
+
+    document["profile"]["providers"] = {"ezo0": {"config": "config/provider-ezo.ezo0.yaml"}}
+    document["providers"] = {"ezo0": {"kind": "ezo", "config": {"provider": {"name": "ezo0"}}}}
+    canonical.write_project(pdir, document)
+
+    assert not dropped.exists()
+    assert (pdir / "config" / "provider-ezo.ezo0.yaml").is_file()
+
+
+def test_write_retires_a_stray_config_install_sh_would_consume(tmp_path: pathlib.Path) -> None:
+    """install.sh's stage renderer GLOBS config/provider-*.yaml and
+    config/anolis-runtime.*.yaml and hard-fails on one it cannot resolve, so a
+    stray matching file breaks every deploy even though nothing references it.
+    It is moved aside, not deleted — out of install.sh's view, still on disk."""
     pdir = tmp_path / "rig-a"
     canonical.write_project(pdir, _document())
-    stale = pdir / "config" / "provider-ezo.ezo0.yaml"
-    stale.write_text("stale: true\n", encoding="utf-8")
+    spare = pdir / "config" / "provider-bread.spare0.yaml"
+    spare.write_text("staged: true\n", encoding="utf-8")
 
-    canonical.write_project(pdir, _authored(pdir))
-    assert not stale.exists()
-    assert (pdir / "config" / "provider-bread.bread0.yaml").is_file()
+    canonical.write_project(pdir, _document())
+
+    assert not spare.exists()
+    retired = pdir / canonical.LAUNCH_DIR / "retired" / "provider-bread.spare0.yaml"
+    assert retired.read_text(encoding="utf-8") == "staged: true\n"
+
+
+def test_write_leaves_alone_what_install_sh_never_looks_at(tmp_path: pathlib.Path) -> None:
+    """Anything outside install.sh's globs is the user's, including behaviour
+    trees the workbench cannot recreate."""
+    pdir = tmp_path / "rig-a"
+    document = _document()
+    document["profile"]["behaviors"] = ["behaviors/main.xml"]
+    canonical.write_project(pdir, document)
+    behavior = pdir / "behaviors" / "main.xml"
+    behavior.parent.mkdir(exist_ok=True)
+    behavior.write_text("<root />\n", encoding="utf-8")
+    notes = pdir / "config" / "notes.yaml"
+    notes.write_text("note: keep me\n", encoding="utf-8")
+
+    # Removing the automation variant drops the behaviours entry — the exact
+    # sequence that must NOT take the hand-authored .xml with it.
+    document["profile"].pop("behaviors")
+    canonical.write_project(pdir, document)
+
+    assert behavior.read_text(encoding="utf-8") == "<root />\n"
+    assert notes.read_text(encoding="utf-8") == "note: keep me\n"
 
 
 def test_sidecar_authored_flag_defaults_false_for_pre_255_sidecars(tmp_path: pathlib.Path) -> None:
@@ -537,12 +583,43 @@ def test_machine_id_is_length_capped() -> None:
     assert MACHINE_ID_RE.fullmatch(machine_id)
 
 
-def test_inertness_is_strict_about_install_sh_edge_cases() -> None:
-    """install.sh's stage-time gate is Python truthiness on the parsed YAML, and
-    a non-mapping automation makes its renderer die outright."""
-    assert canonical.inertness_violation(_runtime_doc(automation={"enabled": "false"})) is not None
+@pytest.mark.parametrize(
+    ("automation", "inert"),
+    [
+        ({"enabled": False}, True),
+        ({"enabled": False, "behavior_tree": "behaviors/main.xml"}, True),
+        ({"enabled": True}, False),
+        # install.sh un-quotes and lowercases the field, then compares against a
+        # false-ish set — so these ARE inert to it and must not be blocked.
+        ({"enabled": "false"}, True),
+        ({"enabled": "False"}, True),
+        ({"enabled": "no"}, True),
+        ({"enabled": "off"}, True),
+        # ...but a number is not in that set.
+        ({"enabled": 0}, False),
+        ({"enabled": 1}, False),
+        ({"mode_transition_hooks": []}, False),
+        # Its scan is not depth-anchored: a flag or hook nested anywhere in the
+        # automation block trips it.
+        ({"enabled": False, "policy": {"enabled": True}}, False),
+        ({"enabled": False, "policy": {"mode_transition_hooks": []}}, False),
+    ],
+)
+def test_inertness_matches_install_sh(automation: dict, inert: bool) -> None:
+    """install.sh's install-time gate is an awk pass over the raw YAML. Anywhere
+    this is laxer, the workbench authors a manual variant that install.sh then
+    refuses at sudo time on the target."""
+    violation = canonical.inertness_violation(_runtime_doc(automation=automation))
+    assert (violation is None) is inert, violation
+
+
+def test_inertness_rejects_an_empty_automation_block() -> None:
+    """install.sh needs a plain block mapping; `automation:` alone is not one —
+    and safe_dump writes a bare key exactly that way, so this is reachable just
+    by round-tripping such a config through the workbench."""
+    assert canonical.inertness_violation({"automation": None, "providers": []}) is not None
+    assert canonical.inertness_violation({"automation": {}, "providers": []}) is not None
     assert canonical.inertness_violation({"automation": "yes", "providers": []}) is not None
-    assert canonical.inertness_violation({"automation": None, "providers": []}) is None
     assert canonical.inertness_violation({"providers": []}) is None
 
 
@@ -554,3 +631,34 @@ def test_deploy_tokens_reject_traversal_and_bare_relative_args() -> None:
     doc = _runtime_doc("rig-a")
     doc["providers"][0]["args"] = ["--config", "config/provider-bread.bread0.yaml"]
     assert any("bare relative path" in p for p in canonical.assert_deploy_tokens("rig-a", doc))
+
+
+def test_retiring_an_orphan_never_clobbers_an_earlier_one(tmp_path: pathlib.Path) -> None:
+    """Two rounds of retirement must not silently overwrite the first file."""
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    stray = pdir / "config" / "provider-bread.spare0.yaml"
+
+    stray.write_text("version one\n", encoding="utf-8")
+    canonical.write_project(pdir, _document())
+    stray.write_text("version two\n", encoding="utf-8")
+    canonical.write_project(pdir, _document())
+
+    retired = sorted(p.read_text(encoding="utf-8").strip() for p in (pdir / canonical.LAUNCH_DIR / "retired").iterdir())
+    assert retired == ["version one", "version two"]
+
+
+def test_retiring_an_orphan_does_not_follow_a_symlink_out_of_the_project(tmp_path: pathlib.Path) -> None:
+    """Moving the RESOLVED path would drag a file out of the user's home and
+    leave a dangling link that breaks install.sh's config render."""
+    outside = tmp_path / "elsewhere" / "provider-bread.note.yaml"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("mine\n", encoding="utf-8")
+
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    (pdir / "config" / "provider-bread.note.yaml").symlink_to(outside)
+
+    canonical.write_project(pdir, _document())
+
+    assert outside.read_text(encoding="utf-8") == "mine\n"

@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "format": "machine-profile",
+  "authored": true,
+  "meta": {
+    "name": "sim-quickstart",
+    "created": "2026-04-03T00:00:00Z",
+    "profile_dir_name": "sim-quickstart"
+  },
+  "host_paths": {
+    "runtime_executable": "build/dev-release/core/anolis-runtime",
+    "providers": {
+      "sim0": {
+        "executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim"
+      }
+    }
+  },
+  "launch": {
+    "variant": "manual"
+  },
+  "warnings": []
+}

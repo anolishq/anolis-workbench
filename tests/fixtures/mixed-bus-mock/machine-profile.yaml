@@ -1,0 +1,32 @@
+schema_version: 1
+machine_id: mixed-bus-mock
+display_name: mixed-bus-mock
+runtime_profiles:
+  manual: config/anolis-runtime.manual.yaml
+providers:
+  bread0:
+    config: config/provider-bread.bread0.yaml
+  ezo0:
+    config: config/provider-ezo.ezo0.yaml
+compatibility:
+  runtime:
+    config_contract: 01-runtime-config
+    http_contract: 02-runtime-http
+  providers:
+    bread0:
+      strategy: pinned-ref
+      version: 0.3.8
+    ezo0:
+      strategy: pinned-ref
+      version: 0.3.4
+components:
+  runtime:
+    repo: anolishq/anolis
+    version: 0.1.39
+  providers:
+    bread:
+      repo: anolishq/anolis-provider-bread
+      version: 0.3.8
+    ezo:
+      repo: anolishq/anolis-provider-ezo
+      version: 0.3.4

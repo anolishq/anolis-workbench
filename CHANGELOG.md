@@ -67,6 +67,44 @@ Historical note:
 
 ### Changed
 
+- **A project IS its deployed artifacts (#255).** `system.json` is gone as the
+  source of truth: a project on disk is now a canonical machine-profile
+  directory (`machine-profile.yaml` + `config/anolis-runtime.<variant>.yaml` +
+  `config/provider-<kind>.<id>.yaml` + `behaviors/`) — the same layout imports
+  have used since #226, and exactly what install.sh consumes. Nothing is
+  rendered, synthesised or resolved at deploy time; deploying is a byte-copy.
+  Existing projects migrate automatically and in place on first sight (and
+  eagerly at server start), keeping the untouched original as
+  `system.json.pre255.bak`.
+
+  What this fixes, both of which could reach a bench rig:
+
+  - **Deploys no longer invent component pins.** They were resolved from live
+    GitHub releases at materialize time, so an unchanged project could ship a
+    newer runtime than the one it was commissioned with — under a running rig —
+    and deploying offline was impossible. Pins are authored data now, edited in
+    Compose. A migrated project therefore refuses to deploy until its pins are
+    filled in; that is deliberate.
+  - **Composer projects with automation can be deployed at all.** The composer
+    wrote `automation.enabled: true` into its only runtime config, deploy filed
+    that as the `manual` variant, and install.sh refuses a non-inert `manual`
+    variant — so every such deploy was rejected at the target. Automation is now
+    a separate `automation` variant, and `manual` is kept inert.
+
+  Save-time validation mirrors install.sh's three hard gates (inert `manual`
+  variant, provider commands resolving to pinned components, path tokens
+  carrying the profile's `machine_id`), so a project that install.sh would
+  refuse is refused in the composer with a message naming the fix.
+
+  API note: `GET`/`PUT /api/projects/{name}` now speak one `ProjectDocument`
+  (profile + variants + provider configs + host paths) instead of a
+  system-document/imported-document union. Every project reports
+  `format: "machine-profile"`; `authored` distinguishes workbench-authored
+  projects from imported read-only ones.
+- Handoff packages record `exported_variant` and `omitted_variants` in
+  `meta/provenance.json`. Package format v1 holds a single runtime config, so a
+  multi-variant project exports its inert `manual` variant only — the recipient
+  can now see that rather than assume the package is the whole machine.
 - `core/renderer.py` renders provider configs as a verbatim YAML passthrough
   of the native config; the per-kind `_render_sim`/`_render_bread`/
   `_render_ezo` transforms are deleted (they live on only as the v1→v2
@@ -82,6 +120,23 @@ Historical note:
 
 ### Removed
 
+- The `bioreactor-manual` and `mixed-bus-mock` templates. Since a template is
+  now literally a canonical project directory, one that mirrors a real machine
+  is a **fork** of it — and this pair had already drifted: the bioreactor
+  template was missing `command_watchdog_ms` on all three bread devices, which
+  the real `anolis-projects/projects/bioreactor-v1` carries (the firmware
+  command watchdog; "0 never arms"). A fork like that cannot be kept honest by a
+  test, because the source of truth lives in another repo CI cannot see.
+
+  Real machines come from **Import** (#226), which carries every variant, the
+  safety block and the docs verbatim, with no drift possible. `sim-quickstart`
+  remains the one shipped template: it is synthetic, has no hardware and no
+  counterpart, so there is nothing for it to drift from. `mixed-bus-mock` moved
+  to `tests/fixtures/` — it was a test artifact that happened to ship in the
+  wheel; nothing user-facing should offer to create a mock-bus machine.
+
+  The default template for `anolis-provision`, the provision routes and fleet
+  entries is now `sim-quickstart`.
 - `catalog/providers.json`, its loaders, and `GET /api/catalog` (#270): the
   catalog's form-field data (`topology_fields`/`device_types`/`path_fields`)
   had zero consumers, and its live fields are replaced — kind display labels
@@ -92,6 +147,50 @@ Historical note:
 
 ### Fixed
 
+- Operate proxied to a hardcoded `127.0.0.1:8080` instead of the port the
+  running variant declares. The launcher still reported the runtime as running,
+  so the UI showed a live project and then 502'd on every call to it.
+- A legacy project that could not be migrated took the whole project list down
+  with it (500), making every OTHER project unreachable. Migration failures are
+  now reported per project and the project stays listed.
+- Save no longer deletes files under `config/` that the project never
+  referenced — staged provider configs and notes kept alongside the ones in use
+  survive. It still reclaims the config of a provider that was renamed or
+  removed, which install.sh would otherwise install for a provider the runtime
+  never launches.
+- Migration carries a provider config that existed only as a hand-written
+  `providers/<id>.yaml` (the retired deploy path fell back to it), relocates a
+  behaviour tree stored outside `behaviors/`, drops a provider with no kind from
+  the runtime variants as well as the profile, and moves `providers/` aside
+  rather than deleting it. A behaviour tree that cannot be found now drops the
+  automation variant with a warning instead of leaving the profile referencing a
+  missing file — which would have blocked every deploy of the project.
+- Canonical files are written with LF endings. On Windows they were CRLF, and
+  install.sh does not strip `\r`: the machine profile failed to resolve its
+  `manual` variant, and the LAN-exposure rewrite silently did not match, so a
+  rig meant to be reachable shipped loopback-only with no warning.
+- Save-time validation now matches install.sh's inertness gate exactly (an empty
+  `automation:` block, `enabled: 0`, and flags nested below the top level all
+  count), rejects an off-host `http.bind` with authentication disabled (install.sh
+  refuses it too, but only AFTER replacing the binaries on the target), and
+  rejects a behaviour tree the project does not contain.
+- Deploy refuses a project whose config path tokens name a different directory
+  than it installs into. install.sh reports success in that case and the rig is
+  left with configs pointing at a path nothing was written to.
+- Two projects can no longer share a machine ID (`Rig_A` and `rig-a` slugify
+  identically). install.sh removes `{prefix}/projects/<machine_id>` before
+  installing, so deploying either would have destroyed the other's config.
+- `anolis-provision bundle` and fleet provisioning worked again: both still
+  looked for `templates/<name>/system.json`. Building a bundle no longer
+  re-creates the workspace project, which with `force` deleted the user's
+  commissioned project directory.
+- Dev-launch, preflight, stop, restart and `.anpkg` export are no longer
+  refused for every project. The guard that makes imported projects deploy-only
+  keyed on the project FORMAT, which after #255 is `machine-profile` for
+  everything; it now keys on `authored`.
+- Packaged wheels ship the bundled templates again: the include glob was
+  `templates/*/system.json`, which matched nothing once templates became
+  canonical directories.
 - Packaged wheels now include `schemas/providers/*.json` (the vendored
   provider envelopes) — the include glob previously missed the subdirectory.
 

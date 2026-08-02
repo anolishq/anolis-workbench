@@ -1,18 +1,19 @@
 """Workspace project authoring for Anolis provisioning.
 
-Creates ready-to-launch workbench projects from bundled templates or a
-custom system.json. Deployment (binaries, /opt/anolis, systemd) is
-delegated to the canonical anolis install.sh — see core/deploy.py.
+Creates ready-to-launch workbench projects from bundled templates or an
+existing canonical project directory. Deployment (binaries, /opt/anolis,
+systemd) is delegated to the canonical anolis install.sh — see core/deploy.py.
 """
 
 from __future__ import annotations
 
-import json
+import shutil
 from pathlib import Path
 
-from anolis_workbench.core import migrations
+from anolis_workbench.core import canonical, machine_profile
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core.executor import Executor, LocalExecutor
+from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core.executor import Executor
 
 # ---------------------------------------------------------------------------
 # Naming
@@ -44,98 +45,105 @@ def provision_project(
     systems_root: Path | None = None,
     system_path: Path | None = None,
 ) -> Path:
-    """Create a workbench project from a bundled template or custom system.json.
+    """Create a workbench project from a bundled canonical template.
 
-    Loads the template (or custom system.json), patches executable paths to point
-    at the install prefix, validates, renders all configs, and writes them to disk.
+    Since #255 a project IS the canonical artifact set, so this copies the
+    template directory and re-keys it onto the new project's machine_id. Host
+    binary paths (the dev-launch residual) are pointed at the install prefix in
+    the workbench sidecar; the canonical configs keep their deploy tokens,
+    which install.sh rewrites to whatever --prefix it is given.
 
     Args:
-        template_name: Template directory name under templates/ (e.g. "bioreactor-manual").
-        project_name: Name for the created project (e.g. "bioreactor-v1").
-        install_prefix: Binary install prefix (e.g. /opt/anolis).
-        force: If True, overwrite an existing project.
-        executor: Executor for file writes. Defaults to LocalExecutor.
-        systems_root: Override systems root (for remote targets). Defaults to local SYSTEMS_ROOT.
-        system_path: Optional path to a custom system.json (overrides template_name).
+        template_name: Template directory name under templates/.
+        project_name: Name for the created project.
+        install_prefix: Binary install prefix, used for the sidecar host paths.
+        force: If True, replace an existing project.
+        executor: Unused for local writes; kept for signature compatibility.
+        systems_root: Override systems root. Defaults to local SYSTEMS_ROOT.
+        system_path: Optional path to an existing canonical project directory to
+            copy instead of a bundled template.
 
     Returns:
         Path to the created project directory.
-
-    Raises:
-        FileNotFoundError: If the template/system file doesn't exist.
-        ValueError: If the project exists and force=False.
     """
-    from datetime import datetime, timezone
-
-    if executor is None:
-        executor = LocalExecutor()
     if systems_root is None:
         systems_root = paths_module.SYSTEMS_ROOT
 
     project_dir = systems_root / project_name
-    if not force and executor.file_exists(str(project_dir)):
-        raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
+    if project_dir.exists():
+        if not force:
+            raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
+        shutil.rmtree(project_dir)
 
-    # Load system definition from custom path or template
-    if system_path is not None:
-        if not system_path.exists():
-            raise FileNotFoundError(f"System file not found: {system_path}")
-        system: dict = json.loads(system_path.read_text(encoding="utf-8"))
-    else:
-        tpl_path = paths_module.TEMPLATES_ROOT / template_name / "system.json"
-        if not tpl_path.exists():
-            raise FileNotFoundError(f"Template '{template_name}' not found at {tpl_path}")
-        system = json.loads(tpl_path.read_text(encoding="utf-8"))
+    source = system_path if system_path is not None else paths_module.TEMPLATES_ROOT / template_name
+    if source.is_file():  # a legacy system.json handed to the CLI
+        source = source.parent
+    if not (source / machine_profile.PROFILE_FILENAME).is_file():
+        available = (
+            ", ".join(sorted(d.name for d in paths_module.TEMPLATES_ROOT.iterdir() if d.is_dir()))
+            if paths_module.TEMPLATES_ROOT.is_dir()
+            else "(none)"
+        )
+        raise FileNotFoundError(
+            f"Template '{template_name}' not found at {source} (available: {available}). "
+            "Templates that mirrored real machines were removed — import the machine's own "
+            "project directory instead of seeding a copy of it."
+        )
 
-    system, _ = migrations.migrate_system(system)
-
-    # Patch meta
-    system["meta"]["name"] = project_name
-    system["meta"]["created"] = datetime.now(timezone.utc).isoformat()
-
-    # Patch paths — point executables at the install prefix bin directory
-    bin_dir = install_prefix / "bin"
-    system["paths"]["runtime_executable"] = str(bin_dir / _RUNTIME_BINARY_NAME)
-
-    for _provider_id, provider_data in system["paths"].get("providers", {}).items():
-        original_exe = Path(provider_data.get("executable", ""))
-        binary_name = original_exe.name
-        provider_data["executable"] = str(bin_dir / binary_name)
-
-    # Write project files via executor
-    write_project_files(executor, system, project_name, systems_root)
+    previous_root = projects_module.SYSTEMS_ROOT
+    try:
+        projects_module.SYSTEMS_ROOT = systems_root
+        if system_path is not None:
+            _copy_canonical(source, project_dir)
+            machine_id = canonical.machine_id_from_name(project_name)
+            canonical.retarget_project(project_dir, machine_id)
+            # retarget rewrote every path token onto the new machine_id, so the
+            # sidecar's deploy-directory name has to follow. Leaving the copied
+            # source's name behind installs the project into one directory while
+            # its configs point at another — install.sh reports success and the
+            # providers then crash-loop on a config that isn't there.
+            sidecar = machine_profile.read_sidecar(project_dir) or {}
+            meta = sidecar.get("meta")
+            meta = meta if isinstance(meta, dict) else {}
+            meta["profile_dir_name"] = machine_id
+            meta["name"] = project_name
+            sidecar["meta"] = meta
+            canonical.write_sidecar(project_dir, sidecar)
+        else:
+            projects_module.create_project_from_template(project_name, template_name)
+        _point_host_paths_at_prefix(project_dir, install_prefix)
+    finally:
+        projects_module.SYSTEMS_ROOT = previous_root
 
     return project_dir
 
 
-def write_project_files(
-    executor: Executor,
-    system: dict,
-    project_name: str,
-    systems_root: Path,
-) -> None:
-    """Validate, render, and write project configs via the given executor."""
-    from anolis_workbench.core import renderer as renderer_module
-    from anolis_workbench.core.projects import validate_system_payload
+def _copy_canonical(source: Path, dest: Path) -> None:
+    dest.mkdir(parents=True)
+    entries = list(machine_profile.copy_entries(machine_profile.load_profile(source)))
+    entries.append(machine_profile.SIDECAR_NAME)
+    for entry in entries:
+        src = source / entry
+        if src.is_file():
+            shutil.copy2(src, dest / entry)
+        elif src.is_dir():
+            shutil.copytree(src, dest / entry, copy_function=shutil.copy2)
 
-    # Validate locally before writing
-    errors = validate_system_payload(system)
-    if errors:
-        raise ValueError(f"System validation failed: {errors}")
 
-    project_dir_str = str(systems_root / project_name)
-    executor.mkdir(project_dir_str)
-
-    # Write system.json
-    system_json = json.dumps(system, indent=2).encode("utf-8")
-    executor.write_file(f"{project_dir_str}/system.json", system_json)
-
-    # Render and write config files
-    rendered = renderer_module.render(system, project_name, systems_dir_name=systems_root.name)
-    for rel_path, content in rendered.items():
-        full_path = f"{project_dir_str}/{rel_path}"
-        # Ensure parent dir exists for provider configs
-        parent = str(Path(full_path).parent)
-        if parent != project_dir_str:
-            executor.mkdir(parent)
-        executor.write_file(full_path, content.encode("utf-8"))
+def _point_host_paths_at_prefix(project_dir: Path, install_prefix: Path) -> None:
+    """The sidecar's host paths are what dev-launch runs; point them at the
+    installed binaries. The canonical configs are untouched — their command
+    tokens are rewritten by install.sh at deploy time."""
+    sidecar = machine_profile.read_sidecar(project_dir) or {}
+    bin_dir = install_prefix / "bin"
+    host_paths = canonical.host_paths(sidecar)
+    host_paths["runtime_executable"] = str(bin_dir / _RUNTIME_BINARY_NAME)
+    profile = machine_profile.load_profile(project_dir)
+    kinds = machine_profile.derive_kinds(profile, project_dir)
+    host_paths["providers"] = {
+        pid: {"executable": str(bin_dir / f"anolis-provider-{kind}")}
+        for pid, kind in kinds.items()
+        if isinstance(kind, str)
+    }
+    sidecar["host_paths"] = host_paths
+    canonical.write_sidecar(project_dir, sidecar)
