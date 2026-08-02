@@ -21,7 +21,7 @@ import os
 import re
 import tempfile
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import jsonschema
@@ -64,22 +64,24 @@ class CanonicalError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+MACHINE_ID_MAX_LEN = 64
+
+
 def machine_id_from_name(name: str) -> str:
     """Slugify a project name into a profile machine_id.
 
     Must satisfy BOTH the machine-profile schema (`^[a-z0-9][a-z0-9-]*$`) and
     install.sh's project-path token class (`[a-z0-9-]+`) — workbench project
     names allow uppercase and underscores, so the project name must never be
-    used in a config path.
+    used in a config path. Capped in length because the value becomes a
+    directory name (an over-long one fails with ENAMETOOLONG at write time).
     """
     lowered = name.strip().lower().replace("_", "-")
     cleaned = _MACHINE_ID_STRIP_RE.sub("-", lowered)
-    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    if cleaned == "":
-        cleaned = "machine"
-    if not cleaned[0].isalnum():
-        cleaned = f"m-{cleaned}"
-    return cleaned
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")[:MACHINE_ID_MAX_LEN].strip("-")
+    # The strip above guarantees an alphanumeric first character, since the
+    # substitution leaves only [a-z0-9-].
+    return cleaned or "machine"
 
 
 def variant_filename(variant: str) -> str:
@@ -113,40 +115,81 @@ def project_path_token(machine_id: str, relpath: str) -> str:
     return f"../anolis-projects/projects/{machine_id}/{relpath}"
 
 
-def assert_deploy_tokens(machine_id: str, runtime_doc: dict[str, Any]) -> list[str]:
-    """Problems that would make install.sh mis-render or refuse this variant."""
+def command_kind(command: Any) -> str | None:
+    """The provider kind install.sh will resolve from a command token.
+
+    install.sh rewrites the token using the SECOND capture group and then
+    re-derives the kind from the rendered `{prefix}/bin/anolis-provider-<kind>`
+    path, so a token whose two kind captures disagree resolves to something
+    other than what the filename implies. Returns None unless both agree.
+    """
+    if not isinstance(command, str):
+        return None
+    match = PROVIDER_COMMAND_RE.fullmatch(command)
+    if match is None or match.group(1) != match.group(2):
+        return None
+    return match.group(2)
+
+
+def _path_token_problem(machine_id: str, value: str, label: str) -> str | None:
+    match = PROJECT_PATH_RE.fullmatch(value)
+    if match is None:
+        return f"{label} is not a canonical project path token: {value!r}"
+    if match.group(1) != machine_id:
+        return f"{label} names project '{match.group(1)}' but machine_id is '{machine_id}'"
+    if ".." in PurePosixPath(match.group(3)).parts:
+        return f"{label} escapes the project directory: {value!r}"
+    return None
+
+
+def assert_deploy_tokens(
+    machine_id: str,
+    runtime_doc: dict[str, Any],
+    provider_kinds: dict[str, Any] | None = None,
+) -> list[str]:
+    """Problems that would make install.sh mis-render or refuse this variant.
+
+    When `provider_kinds` is given, also checks that the kind install.sh
+    resolves from each command token matches the kind the provider's config
+    filename declares — install.sh's pinned-provider gate keys on the FORMER.
+    """
     problems: list[str] = []
     for entry in runtime_doc.get("providers", []) or []:
         if not isinstance(entry, dict):
             continue
         pid = entry.get("id", "<unknown>")
         command = entry.get("command")
-        if not isinstance(command, str) or not PROVIDER_COMMAND_RE.fullmatch(command):
+        kind = command_kind(command)
+        if kind is None:
             problems.append(
                 f"provider '{pid}' command is not a canonical deploy token "
-                f"(expected ../anolis-provider-<kind>/build/<preset>/anolis-provider-<kind>, got {command!r})"
+                f"(expected ../anolis-provider-<kind>/build/<preset>/anolis-provider-<kind> "
+                f"with a consistent kind, got {command!r})"
             )
-        for arg in entry.get("args", []) or []:
-            if not isinstance(arg, str) or not arg.startswith("../"):
-                continue
-            match = PROJECT_PATH_RE.fullmatch(arg)
-            if match is None:
-                problems.append(f"provider '{pid}' config arg is not a canonical project path token: {arg!r}")
-            elif match.group(1) != machine_id:
+        elif provider_kinds is not None:
+            declared = provider_kinds.get(pid)
+            if isinstance(declared, str) and declared != kind:
                 problems.append(
-                    f"provider '{pid}' config arg names project '{match.group(1)}' but machine_id is '{machine_id}'"
+                    f"provider '{pid}' command resolves to kind '{kind}' but its config declares '{declared}'"
                 )
+        for arg in entry.get("args", []) or []:
+            if not isinstance(arg, str):
+                continue
+            if arg.startswith("../"):
+                problem = _path_token_problem(machine_id, arg, f"provider '{pid}' arg")
+                if problem:
+                    problems.append(problem)
+            elif arg.endswith((".yaml", ".yml")):
+                # A bare-relative config path is never rewritten by install.sh
+                # and silently fails to resolve after install.
+                problems.append(f"provider '{pid}' arg is a bare relative path install.sh will not rewrite: {arg!r}")
     automation = runtime_doc.get("automation")
     if isinstance(automation, dict):
         behavior = automation.get("behavior_tree")
         if isinstance(behavior, str) and behavior.startswith("../"):
-            match = PROJECT_PATH_RE.fullmatch(behavior)
-            if match is None:
-                problems.append(f"automation.behavior_tree is not a canonical project path token: {behavior!r}")
-            elif match.group(1) != machine_id:
-                problems.append(
-                    f"automation.behavior_tree names project '{match.group(1)}' but machine_id is '{machine_id}'"
-                )
+            problem = _path_token_problem(machine_id, behavior, "automation.behavior_tree")
+            if problem:
+                problems.append(problem)
     return problems
 
 
@@ -178,14 +221,25 @@ def runtime_config_errors(doc: Any) -> list[str]:
 def inertness_violation(doc: dict[str, Any]) -> str | None:
     """Why this runtime config is not inert, or None.
 
-    Mirrors install.sh's `_automation_inert_violation`: automation enabled, or
+    Mirrors install.sh's inertness gates: automation enabled, or
     mode_transition_hooks present. install.sh REFUSES a non-inert `manual`
     variant at stage and install time, so the workbench must never author one.
+
+    Deliberately errs strict: a non-mapping `automation` makes install.sh's
+    stage-time renderer die outright, and a string like "false" is truthy to
+    its Python gate, so both are violations here rather than silent passes.
     """
-    automation = doc.get("automation")
-    if not isinstance(automation, dict):
+    if "automation" not in doc:
         return None
-    if automation.get("enabled"):
+    automation = doc.get("automation")
+    if automation is None:
+        return None
+    if not isinstance(automation, dict):
+        return f"automation must be a mapping (install.sh fails to render {automation!r})"
+    enabled = automation.get("enabled")
+    if isinstance(enabled, str):
+        return f"automation.enabled is the string {enabled!r} (install.sh treats any non-empty string as enabled)"
+    if enabled:
         return "automation.enabled is true"
     if "mode_transition_hooks" in automation:
         return "automation.mode_transition_hooks is present"
@@ -221,7 +275,18 @@ def build_profile(
     `providers` maps provider id -> its config relpath; `variants` maps variant
     name -> its config relpath (defaults to just `manual`). Pins (`components`)
     are AUTHORED data — this never invents them from release lookups.
+
+    Raises when the result could not be schema-valid: the canonical contract has
+    no representation of a zero-provider machine (both the machine-profile
+    `compatibility.providers` and the runtime-config `providers` list require at
+    least one entry), so a caller must seed a provider rather than persist a
+    profile that only fails later at deploy.
     """
+    if not providers:
+        raise CanonicalError(
+            "a canonical project needs at least one provider "
+            "(machine-profile compatibility.providers and runtime-config providers are both non-empty)"
+        )
     profile: dict[str, Any] = {
         "schema_version": 1,
         "machine_id": machine_id,
@@ -335,46 +400,77 @@ def read_project(project_dir: Path) -> dict[str, Any]:
     }
 
 
-def write_project(project_dir: Path, document: dict[str, Any]) -> None:
-    """Persist an authored canonical project.
+def _checked_target(project_dir: Path, rel: Any, label: str) -> Path:
+    """Resolve a profile-relative path, refusing anything that escapes.
 
-    Writes every artifact atomically. Callers must have validated first; this
-    function does not decide policy, it only serializes.
+    Without this, `project_dir / "../../x.yaml"` writes outside the workspace
+    and `project_dir / "/etc/x"` discards the left side entirely — and profile
+    data reaches this function from the HTTP API.
     """
+    if not isinstance(rel, str):
+        raise CanonicalError(f"{label} must be a string path, got {rel!r}")
+    problem = machine_profile.containment_error(rel)
+    if problem is not None:
+        raise CanonicalError(f"{label} {problem}")
+    return project_dir / rel
+
+
+def write_project(project_dir: Path, document: dict[str, Any]) -> None:
+    """Persist an AUTHORED canonical project.
+
+    Refuses imported documents: those are carried verbatim (#226) and
+    re-emitting them through the serializer would destroy comments and key
+    order. Every referenced path is containment-checked before use.
+    """
+    if not document.get("authored"):
+        raise CanonicalError(
+            "refusing to write a project that is not workbench-authored — "
+            "imported machine profiles are carried verbatim"
+        )
     profile = document.get("profile")
     if not isinstance(profile, dict):
         raise CanonicalError("document.profile must be a mapping")
 
-    project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / CONFIG_DIR).mkdir(exist_ok=True)
-
-    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
-
     runtime_profiles = profile.get("runtime_profiles")
-    variants = document.get("variants") or {}
-    if isinstance(runtime_profiles, dict) and isinstance(variants, dict):
+    profile_providers = profile.get("providers")
+    raw_variants = document.get("variants")
+    variants: dict[str, Any] = raw_variants if isinstance(raw_variants, dict) else {}
+    raw_providers = document.get("providers")
+    providers: dict[str, Any] = raw_providers if isinstance(raw_providers, dict) else {}
+
+    # Resolve every target BEFORE creating anything, so a bad reference cannot
+    # leave a half-written project behind.
+    targets: list[tuple[Path, Any]] = []
+    if isinstance(runtime_profiles, dict):
         for variant, rel in runtime_profiles.items():
             doc = variants.get(variant)
-            if isinstance(doc, dict) and isinstance(rel, str):
-                _write_yaml_atomic(project_dir / rel, doc)
-
-    profile_providers = profile.get("providers")
-    providers = document.get("providers") or {}
-    if isinstance(profile_providers, dict) and isinstance(providers, dict):
+            if isinstance(doc, dict):
+                targets.append((_checked_target(project_dir, rel, f"runtime_profiles.{variant}"), doc))
+    if isinstance(profile_providers, dict):
         for pid, entry in profile_providers.items():
             rel = entry.get("config") if isinstance(entry, dict) else None
             provider = providers.get(pid)
             config = provider.get("config") if isinstance(provider, dict) else None
-            if isinstance(rel, str) and isinstance(config, dict):
-                _write_yaml_atomic(project_dir / rel, config)
+            if isinstance(config, dict):
+                targets.append((_checked_target(project_dir, rel, f"providers.{pid}.config"), config))
 
-    _prune_orphans(project_dir, profile)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / CONFIG_DIR).mkdir(exist_ok=True)
+    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)
+    for path, doc in targets:
+        _write_yaml_atomic(path, doc)
+
+    _prune_orphans(project_dir, profile, {path.resolve() for path, _ in targets})
 
 
-def _prune_orphans(project_dir: Path, profile: dict[str, Any]) -> None:
+def _prune_orphans(project_dir: Path, profile: dict[str, Any], just_written: set[Path]) -> None:
     """Remove config files the profile no longer references (renamed/removed
-    providers and variants), so the directory always matches the profile."""
-    referenced = {
+    providers and variants), so the directory always matches the profile.
+
+    `just_written` is unioned in so a file this same save produced can never be
+    pruned by a path-normalization mismatch.
+    """
+    referenced = set(just_written) | {
         (project_dir / ref).resolve()
         for ref in machine_profile.referenced_files(profile)
         if machine_profile.containment_error(ref) is None

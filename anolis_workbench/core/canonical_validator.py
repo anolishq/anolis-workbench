@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from anolis_workbench.core import canonical
+from anolis_workbench.core import canonical, machine_profile
 
 
 def _resolve_workbench_port(default: int = 3010) -> int:
@@ -39,12 +39,10 @@ def _parse_i2c_address(value: object) -> int | None:
     text = value.strip()
     if text == "":
         return None
-    for base in (0, 16):
-        try:
-            return int(text, base)
-        except ValueError:
-            continue
-    return None
+    try:
+        return int(text, 0)  # provider schemas allow an int or an 0x-prefixed string
+    except ValueError:
+        return None
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -63,15 +61,50 @@ def validate_project(document: dict[str, Any]) -> list[str]:
         errors.append("machine-profile is missing machine_id.")
         machine_id = ""
 
-    errors.extend(_variant_errors(profile, variants, machine_id))
+    errors.extend(f"machine-profile: {message}" for message in machine_profile.schema_errors(profile))
+    errors.extend(_reference_containment_errors(profile))
+    errors.extend(_variant_errors(profile, variants, machine_id, providers))
     errors.extend(_provider_coherence_errors(profile, variants, providers))
-    errors.extend(_pinned_provider_errors(profile, providers))
+    errors.extend(_pinned_provider_errors(profile, variants))
     errors.extend(_i2c_conflict_errors(providers))
     errors.extend(_port_errors(variants))
     return errors
 
 
-def _variant_errors(profile: dict[str, Any], variants: dict[str, Any], machine_id: str) -> list[str]:
+def project_warnings(document: dict[str, Any]) -> list[str]:
+    """Non-blocking observations. install.sh warns (never fails) when a pinned
+    provider is referenced by no runtime config, so neither do we."""
+    profile = _as_mapping(document.get("profile"))
+    variants = _as_mapping(document.get("variants"))
+    profile_providers = _as_mapping(profile.get("providers"))
+
+    run_somewhere: set[str] = set()
+    for doc in variants.values():
+        if not isinstance(doc, dict):
+            continue
+        entries = doc.get("providers")
+        if isinstance(entries, list):
+            run_somewhere.update(str(e.get("id")) for e in entries if isinstance(e, dict) and e.get("id") is not None)
+    return [
+        f"Provider '{pid}' is declared in the machine-profile but run by no runtime variant."
+        for pid in sorted(set(profile_providers) - run_somewhere)
+    ]
+
+
+def _reference_containment_errors(profile: dict[str, Any]) -> list[str]:
+    """Every profile-relative reference must stay inside the project directory —
+    the same rule imports enforce, applied before we WRITE these paths."""
+    errors: list[str] = []
+    for ref in machine_profile.referenced_files(profile):
+        problem = machine_profile.containment_error(ref)
+        if problem is not None:
+            errors.append(f"machine-profile reference {problem}")
+    return errors
+
+
+def _variant_errors(
+    profile: dict[str, Any], variants: dict[str, Any], machine_id: str, providers: dict[str, Any]
+) -> list[str]:
     errors: list[str] = []
     declared = profile.get("runtime_profiles")
     if not isinstance(declared, dict) or not declared:
@@ -90,7 +123,11 @@ def _variant_errors(profile: dict[str, Any], variants: dict[str, Any], machine_i
         for message in canonical.runtime_config_errors(doc):
             errors.append(f"Runtime variant '{variant}': {message}")
         if machine_id:
-            errors.extend(f"Runtime variant '{variant}': {p}" for p in canonical.assert_deploy_tokens(machine_id, doc))
+            declared_kinds = {pid: entry.get("kind") for pid, entry in providers.items() if isinstance(entry, dict)}
+            errors.extend(
+                f"Runtime variant '{variant}': {p}"
+                for p in canonical.assert_deploy_tokens(machine_id, doc, declared_kinds)
+            )
 
     # GATE 1 (install.sh verify_inert_runtime_config): the manual variant must
     # be inert, or a fresh install is refused outright.
@@ -132,27 +169,42 @@ def _provider_coherence_errors(
             errors.append(
                 f"Runtime variant '{variant}' runs provider '{pid}' which the machine-profile does not declare."
             )
-        for pid in sorted(profile_ids - set(variant_ids)):
-            errors.append(f"Provider '{pid}' is declared but never run by variant '{variant}'.")
     return errors
 
 
-def _pinned_provider_errors(profile: dict[str, Any], providers: dict[str, Any]) -> list[str]:
-    """GATE 2 (install.sh #226 cross-validation): every provider must resolve to
-    a kind present in the pinned components, or assemble_bundle hard-fails."""
-    pinned = canonical.pinned_kinds(profile)
-    if not pinned:
-        # No components block at all — deploy already fails with its own,
-        # clearer message ("resolve component pins"); don't double-report.
+def _pinned_provider_errors(profile: dict[str, Any], variants: dict[str, Any]) -> list[str]:
+    """GATE 2 (install.sh #226 cross-validation).
+
+    install.sh resolves the kind from the RENDERED COMMAND, not from the config
+    filename, so this must key on the command token too — checking the derived
+    `kind` instead would let a config whose command names a different provider
+    sail through here and hard-fail at bundle time.
+    """
+    components = profile.get("components")
+    if not isinstance(components, dict):
+        # No components at all: deploy fails earlier with a clearer
+        # "resolve component pins" message. Don't double-report.
         return []
+    pinned = canonical.pinned_kinds(profile)
+
     errors: list[str] = []
-    for pid, entry in sorted(providers.items()):
-        kind = entry.get("kind") if isinstance(entry, dict) else None
-        if isinstance(kind, str) and kind not in pinned:
+    seen: set[tuple[str, str]] = set()
+    for variant, doc in sorted(variants.items()):
+        if not isinstance(doc, dict):
+            continue
+        for entry in doc.get("providers", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            pid = str(entry.get("id", "<unknown>"))
+            kind = canonical.command_kind(entry.get("command"))
+            if kind is None or kind in pinned or (pid, kind) in seen:
+                continue
+            seen.add((pid, kind))
+            known = ", ".join(sorted(pinned)) or "(none pinned)"
             errors.append(
-                f"Provider '{pid}' is kind '{kind}', which is not in the profile's pinned "
-                f"components ({', '.join(sorted(pinned))}). install.sh refuses a provider "
-                "command that does not resolve to a pinned component."
+                f"Provider '{pid}' in variant '{variant}' runs kind '{kind}', which is not in the "
+                f"profile's pinned components ({known}). install.sh refuses a provider command that "
+                "does not resolve to a pinned component."
             )
     return errors
 

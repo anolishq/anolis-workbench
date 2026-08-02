@@ -226,13 +226,20 @@ def test_write_then_read_round_trips(tmp_path: pathlib.Path) -> None:
     assert read["providers"]["bread0"]["kind"] == "bread"  # derived from components x filename
 
 
+def _authored(pdir: pathlib.Path) -> dict:
+    """read_project + the authored flag, i.e. what a real save round-trip does."""
+    doc = canonical.read_project(pdir)
+    doc["authored"] = True
+    return doc
+
+
 def test_save_is_idempotent(tmp_path: pathlib.Path) -> None:
     pdir = tmp_path / "rig-a"
     canonical.write_project(pdir, _document())
     first = {p.name: p.read_bytes() for p in sorted((pdir / "config").iterdir())}
     first["machine-profile.yaml"] = (pdir / "machine-profile.yaml").read_bytes()
 
-    canonical.write_project(pdir, canonical.read_project(pdir))
+    canonical.write_project(pdir, _authored(pdir))
     second = {p.name: p.read_bytes() for p in sorted((pdir / "config").iterdir())}
     second["machine-profile.yaml"] = (pdir / "machine-profile.yaml").read_bytes()
     assert first == second
@@ -283,7 +290,7 @@ def test_write_prunes_configs_the_profile_no_longer_references(tmp_path: pathlib
     stale = pdir / "config" / "provider-ezo.ezo0.yaml"
     stale.write_text("stale: true\n", encoding="utf-8")
 
-    canonical.write_project(pdir, canonical.read_project(pdir))
+    canonical.write_project(pdir, _authored(pdir))
     assert not stale.exists()
     assert (pdir / "config" / "provider-bread.bread0.yaml").is_file()
 
@@ -318,10 +325,33 @@ def test_gate_manual_variant_must_be_inert() -> None:
 
 
 def test_gate_provider_kind_must_be_pinned() -> None:
+    """install.sh resolves the kind from the RENDERED COMMAND, so the gate must
+    key on the command token — not on the kind derived from the filename."""
     doc = _document()
-    doc["providers"]["bread0"]["kind"] = "ezo"  # not in components.providers
+    doc["variants"][canonical.MANUAL_VARIANT]["providers"][0]["command"] = canonical.provider_command_token("ezo")
     errors = canonical_validator.validate_project(doc)
     assert any("not in the profile's pinned components" in e for e in errors), errors
+
+
+def test_gate_catches_command_disagreeing_with_the_config_filename() -> None:
+    """The exact hole the review found: a bread config file whose command names
+    ezo passed validation and then hard-failed at install.sh bundle time."""
+    doc = _document()
+    doc["profile"]["components"]["providers"]["ezo"] = {
+        "repo": "anolishq/anolis-provider-ezo",
+        "version": "0.3.4",
+    }
+    doc["variants"][canonical.MANUAL_VARIANT]["providers"][0]["command"] = canonical.provider_command_token("ezo")
+    errors = canonical_validator.validate_project(doc)
+    assert any("resolves to kind 'ezo'" in e and "declares 'bread'" in e for e in errors), errors
+
+
+def test_command_kind_requires_both_captures_to_agree() -> None:
+    assert canonical.command_kind(canonical.provider_command_token("bread")) == "bread"
+    # install.sh rewrites using the SECOND capture; a mismatched token would
+    # render to a different provider than the path implies.
+    assert canonical.command_kind("../anolis-provider-bread/build/dev-release/anolis-provider-ezo") is None
+    assert canonical.command_kind("/opt/anolis/bin/anolis-provider-bread") is None
 
 
 def test_gate_path_tokens_must_carry_the_machine_id() -> None:
@@ -344,10 +374,45 @@ def test_provider_coherence_across_profile_variant_and_config() -> None:
     errors = canonical_validator.validate_project(doc)
     assert any("not declared in the machine-profile" in e and "ezo0" in e for e in errors), errors
 
+
+def test_provider_run_in_only_some_variants_is_legal() -> None:
+    """A per-variant provider set is a main reason variants exist. install.sh
+    unions across all runtime configs and only WARNS, so a save must not fail."""
     doc = _document()
-    doc["variants"][canonical.MANUAL_VARIANT]["providers"] = []
-    errors = canonical_validator.validate_project(doc)
-    assert any("never run by variant" in e for e in errors), errors
+    telemetry = _runtime_doc("rig-a")
+    doc["profile"]["runtime_profiles"]["telemetry"] = canonical.variant_relpath("telemetry")
+    doc["variants"]["telemetry"] = telemetry
+    # bread0 runs in manual only; telemetry runs a different (also pinned) set.
+    doc["profile"]["components"]["providers"]["ezo"] = {
+        "repo": "anolishq/anolis-provider-ezo",
+        "version": "0.3.4",
+    }
+    doc["profile"]["providers"]["ezo0"] = canonical.provider_config_relpath("ezo", "ezo0")
+    doc["profile"]["providers"] = {
+        "bread0": {"config": canonical.provider_config_relpath("bread", "bread0")},
+        "ezo0": {"config": canonical.provider_config_relpath("ezo", "ezo0")},
+    }
+    doc["providers"]["ezo0"] = {"kind": "ezo", "config": {"hardware": {"bus_path": "/dev/i2c-2"}}}
+    telemetry["providers"] = [
+        {
+            "id": "ezo0",
+            "command": canonical.provider_command_token("ezo"),
+            "args": [
+                "--config",
+                canonical.project_path_token("rig-a", canonical.provider_config_relpath("ezo", "ezo0")),
+            ],
+        }
+    ]
+    assert canonical_validator.validate_project(doc) == []
+    assert canonical_validator.project_warnings(doc) == []
+
+
+def test_provider_run_by_no_variant_is_a_warning_not_an_error() -> None:
+    doc = _document()
+    doc["profile"]["providers"]["ghost0"] = {"config": canonical.provider_config_relpath("bread", "ghost0")}
+    doc["providers"]["ghost0"] = {"kind": "bread", "config": {}}
+    assert canonical_validator.validate_project(doc) == []
+    assert any("run by no runtime variant" in w for w in canonical_validator.project_warnings(doc))
 
 
 def test_cross_provider_i2c_conflict_is_capability_driven() -> None:
@@ -392,3 +457,100 @@ def test_path_token_warning_on_dir_name_mismatch() -> None:
     profile = {"machine_id": "rig-a"}
     assert canonical_validator.path_token_warnings(profile, "rig-a") == []
     assert canonical_validator.path_token_warnings(profile, "other") != []
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-review regressions (PR 1 hardening)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["../../ESCAPE.yaml", "/tmp/ABSOLUTE.yaml", "config/sub/../provider-bread.bread0.yaml"],
+)
+def test_write_project_refuses_references_that_escape_or_normalize_away(tmp_path: pathlib.Path, ref: str) -> None:
+    """Profile data reaches write_project from the HTTP API. An escaping ref
+    wrote outside the workspace; a normalizing one was written and then pruned
+    in the SAME call, silently yielding a project with a missing config."""
+    pdir = tmp_path / "rig-a"
+    doc = _document()
+    doc["profile"]["providers"]["bread0"]["config"] = ref
+    with pytest.raises(canonical.CanonicalError):
+        canonical.write_project(pdir, doc)
+    assert not (tmp_path / "ESCAPE.yaml").exists()
+    assert not pathlib.Path("/tmp/ABSOLUTE.yaml").exists()
+
+
+def test_write_project_creates_nothing_when_a_reference_is_rejected(tmp_path: pathlib.Path) -> None:
+    pdir = tmp_path / "rig-a"
+    doc = _document()
+    doc["profile"]["providers"]["bread0"]["config"] = "../../escape.yaml"
+    with pytest.raises(canonical.CanonicalError):
+        canonical.write_project(pdir, doc)
+    assert not (pdir / "machine-profile.yaml").exists()
+
+
+def test_write_project_refuses_an_imported_document(tmp_path: pathlib.Path) -> None:
+    """#274's verbatim invariant: imported profiles are never re-emitted."""
+    pdir = tmp_path / "rig-a"
+    doc = _document()
+    doc["authored"] = False
+    with pytest.raises(canonical.CanonicalError, match="verbatim"):
+        canonical.write_project(pdir, doc)
+    assert not pdir.exists()
+
+
+def test_validate_project_reports_profile_schema_errors() -> None:
+    doc = _document()
+    del doc["profile"]["compatibility"]
+    doc["profile"]["display_name"] = ""
+    errors = canonical_validator.validate_project(doc)
+    assert any("machine-profile:" in e and "compatibility" in e for e in errors), errors
+
+
+def test_validate_project_rejects_escaping_references() -> None:
+    doc = _document()
+    doc["profile"]["providers"]["bread0"]["config"] = "../../escape.yaml"
+    errors = canonical_validator.validate_project(doc)
+    assert any("escapes the project directory" in e for e in errors), errors
+
+
+def test_build_profile_refuses_a_zero_provider_project() -> None:
+    """The canonical contract has no representation for it: both
+    compatibility.providers and the runtime providers list are non-empty."""
+    with pytest.raises(canonical.CanonicalError, match="at least one provider"):
+        canonical.build_profile(machine_id="rig-a", display_name="Rig A", providers={})
+
+
+def test_pinned_gate_fires_when_components_lists_no_providers() -> None:
+    """components.runtime pinned but components.providers missing: deploy's own
+    guard only checks components.runtime, so this reached install.sh and
+    hard-failed for every provider."""
+    doc = _document(components={"runtime": {"repo": "anolishq/anolis", "version": "0.1.39"}})
+    errors = canonical_validator.validate_project(doc)
+    assert any("none pinned" in e for e in errors), errors
+
+
+def test_machine_id_is_length_capped() -> None:
+    machine_id = canonical.machine_id_from_name("x" * 300)
+    assert len(machine_id) <= canonical.MACHINE_ID_MAX_LEN
+    assert MACHINE_ID_RE.fullmatch(machine_id)
+
+
+def test_inertness_is_strict_about_install_sh_edge_cases() -> None:
+    """install.sh's stage-time gate is Python truthiness on the parsed YAML, and
+    a non-mapping automation makes its renderer die outright."""
+    assert canonical.inertness_violation(_runtime_doc(automation={"enabled": "false"})) is not None
+    assert canonical.inertness_violation({"automation": "yes", "providers": []}) is not None
+    assert canonical.inertness_violation({"automation": None, "providers": []}) is None
+    assert canonical.inertness_violation({"providers": []}) is None
+
+
+def test_deploy_tokens_reject_traversal_and_bare_relative_args() -> None:
+    doc = _runtime_doc("rig-a")
+    doc["providers"][0]["args"] = ["--config", "../anolis-projects/projects/rig-a/config/../../etc/passwd"]
+    assert any("escapes" in p for p in canonical.assert_deploy_tokens("rig-a", doc))
+
+    doc = _runtime_doc("rig-a")
+    doc["providers"][0]["args"] = ["--config", "config/provider-bread.bread0.yaml"]
+    assert any("bare relative path" in p for p in canonical.assert_deploy_tokens("rig-a", doc))
