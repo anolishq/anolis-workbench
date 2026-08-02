@@ -381,16 +381,22 @@ def _provision_workspace(args: argparse.Namespace) -> Path:
     """Authoring: ensure the local workspace project exists (source of truth)."""
     from anolis_workbench.core import paths as paths_module
 
+    # `bundle` deliberately has no --force: building an offline bundle reads the
+    # project, it must never replace it. So read the flag defensively rather than
+    # assuming every subcommand that authors a workspace defines one.
+    force = bool(getattr(args, "force", False))
+    system_path = getattr(args, "system", None)
+
     project_dir: Path = paths_module.SYSTEMS_ROOT / args.project
-    if project_dir.exists() and not args.force and args.system is None:
+    if project_dir.exists() and not force and system_path is None:
         _print_progress("project", f"Using existing workspace project: {project_dir}")
         return project_dir
     return installer.provision_project(
         args.template,
         args.project,
         args.install_prefix,
-        force=args.force,
-        system_path=args.system,
+        force=force,
+        system_path=system_path,
     )
 
 

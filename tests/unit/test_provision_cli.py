@@ -74,3 +74,31 @@ class TestProfileFlagRemoved:
         with pytest.raises(SystemExit) as exc:
             _parse_args()
         assert exc.value.code == 2
+
+
+def test_every_workspace_subcommand_can_be_provisioned(tmp_path, monkeypatch) -> None:
+    """`bundle` has no --force (bundling must never replace a project), so
+    _provision_workspace has to tolerate its absence. Drive the REAL parser —
+    a hand-built Namespace hides exactly this class of bug, and did."""
+    from anolis_workbench.cli import provision_cli
+    from anolis_workbench.core import paths as paths_module
+
+    systems_root = tmp_path / "systems"
+    systems_root.mkdir()
+    monkeypatch.setattr(paths_module, "SYSTEMS_ROOT", systems_root)
+    monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems_root)
+
+    for argv in (
+        ["install", "--project", "p1", "--template", "sim-quickstart"],
+        ["bundle", "--project", "p2", "--template", "sim-quickstart", "--arch", "x86_64", "--out", str(tmp_path / "o")],
+    ):
+        monkeypatch.setattr("sys.argv", ["anolis-provision", *argv])
+        args = provision_cli._parse_args()
+        project_dir = provision_cli._provision_workspace(args)
+        assert (project_dir / "machine-profile.yaml").is_file(), argv
+
+    # Second call on an existing project reuses it rather than re-seeding.
+    monkeypatch.setattr(
+        "sys.argv", ["anolis-provision", "bundle", "--project", "p2", "--arch", "x86_64", "--out", str(tmp_path / "o")]
+    )
+    assert provision_cli._provision_workspace(provision_cli._parse_args()) == systems_root / "p2"
