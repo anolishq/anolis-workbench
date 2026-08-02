@@ -2,14 +2,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 
 import Compose from "../../src/routes/Compose.svelte";
-import { createRuntimeStatus, createSystemConfig, deferred, jsonResponse } from "./helpers";
+import { createProjectDocument, createRuntimeStatus, deferred, jsonResponse } from "./helpers";
 
 describe("Compose.svelte", () => {
   it("shows advisory banner when runtime is active for the same project", () => {
     render(Compose, {
       props: {
         projectName: "demo",
-        system: createSystemConfig("demo"),
+        system: createProjectDocument("demo"),
         providerSchemas: null,
         runtimeStatus: createRuntimeStatus({ running: true, active_project: "demo" }),
         onDirty: vi.fn(),
@@ -32,7 +32,7 @@ describe("Compose.svelte", () => {
     render(Compose, {
       props: {
         projectName: "demo",
-        system: createSystemConfig("demo"),
+        system: createProjectDocument("demo"),
         providerSchemas: null,
         runtimeStatus: createRuntimeStatus(),
         onDirty: vi.fn(),
@@ -62,7 +62,7 @@ describe("Compose.svelte", () => {
           {
             source: "schema",
             code: "minimum",
-            path: "$.topology.runtime.http_port",
+            path: "$.variants.manual.http.port",
             message: "Must be >= 1",
           },
         ],
@@ -73,7 +73,7 @@ describe("Compose.svelte", () => {
     render(Compose, {
       props: {
         projectName: "demo",
-        system: createSystemConfig("demo"),
+        system: createProjectDocument("demo"),
         providerSchemas: null,
         runtimeStatus: createRuntimeStatus(),
         onDirty: vi.fn(),
@@ -84,7 +84,7 @@ describe("Compose.svelte", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Project validation failed")).toBeInTheDocument();
-    expect(screen.getByText(/\$\.topology\.runtime\.http_port/)).toBeInTheDocument();
+    expect(screen.getByText(/\$\.variants\.manual\.http\.port/)).toBeInTheDocument();
     expect(screen.getByText(/Must be .*1/)).toBeInTheDocument();
   });
 });

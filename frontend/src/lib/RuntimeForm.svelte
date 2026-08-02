@@ -1,14 +1,35 @@
 <script lang="ts">
-  import type { RuntimeConfig, RuntimeTelemetry, SystemConfig } from "./contracts";
+  import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "./canonical";
+  import type { ProjectDocument, RuntimeConfigDoc, RuntimeTelemetry } from "./contracts";
 
   /**
-   * RuntimeForm.svelte — Runtime configuration form.
-   * Mutates `system.topology.runtime` and `system.paths` via onChanged callback.
+   * RuntimeForm.svelte — the runtime-config form.
+   *
+   * Since #255 this edits the runtime config DIRECTLY (one variant of
+   * `config/anolis-runtime.<variant>.yaml`) rather than a shadow document that
+   * was translated at deploy time. Field names are the runtime's own.
    */
-  let { system, onChanged }: { system: SystemConfig; onChanged: () => void } = $props();
+  let {
+    doc,
+    variant,
+    onChanged,
+  }: {
+    doc: ProjectDocument;
+    variant?: string;
+    onChanged: () => void;
+  } = $props();
 
-  const rt = $derived(system?.topology?.runtime ?? ({} as RuntimeConfig));
-  const paths = $derived(system?.paths ?? {});
+  const name = $derived(variant ?? activeVariant(doc));
+  const rt = $derived((doc.variants?.[name] ?? {}) as RuntimeConfigDoc);
+  const hostPaths = $derived(doc.host_paths ?? {});
+
+  /**
+   * install.sh refuses to install a `manual` variant that boots into
+   * automation, so surface that here rather than at sudo time on the target.
+   */
+  const inertnessError = $derived(
+    name === MANUAL_VARIANT ? inertnessViolation(doc.variants?.[name]) : null,
+  );
 
   function inputTarget(event: Event): HTMLInputElement {
     return event.currentTarget as HTMLInputElement;
@@ -22,54 +43,62 @@
     return event.currentTarget as HTMLTextAreaElement;
   }
 
-  // Normalize migration fields when system changes
-  $effect(() => {
-    if (!system?.topology?.runtime) return;
-    const r = system.topology.runtime;
-    if (r.cors_allow_credentials === undefined) r.cors_allow_credentials = false;
-    if (r.telemetry_enabled !== undefined) {
-      r.telemetry = r.telemetry || {};
-      if (r.telemetry.enabled === undefined) r.telemetry.enabled = !!r.telemetry_enabled;
-      delete r.telemetry_enabled;
-    }
-    if (!r.telemetry || typeof r.telemetry !== "object")
-      r.telemetry = { enabled: false } as RuntimeTelemetry;
-    if (r.telemetry.enabled === undefined) r.telemetry.enabled = false;
-  });
+  /** Set `doc.variants[name].<section>.<key>`, creating the section if needed. */
+  function setIn(section: string, key: string, value: unknown): void {
+    const config = (doc.variants[name] ??= {});
+    const target = ((config as Record<string, unknown>)[section] ??= {}) as Record<string, unknown>;
+    target[key] = value;
+    onChanged();
+  }
 
-  function set(obj: Record<string, unknown>, key: string, val: unknown): void {
-    obj[key] = val;
+  function setInflux(key: string, value: unknown): void {
+    const config = (doc.variants[name] ??= {});
+    const telemetry = (config.telemetry ??= {} as RuntimeTelemetry);
+    telemetry.influxdb ??= {};
+    telemetry.influxdb[key] = value;
     onChanged();
   }
-  function setRt(key: string, val: unknown): void {
-    set(system.topology.runtime as Record<string, unknown>, key, val);
+
+  function setNumber(section: string, key: string, raw: string): void {
+    const n = Number(raw);
+    if (!isNaN(n)) setIn(section, key, n);
   }
-  function setInflux(key: string, val: unknown): void {
-    const r = system.topology.runtime;
-    r.telemetry = (r.telemetry || {}) as RuntimeTelemetry;
-    r.telemetry.influxdb = r.telemetry.influxdb || {};
-    r.telemetry.influxdb[key] = val;
-    onChanged();
-  }
+
   function setCorsOrigins(raw: string): void {
-    system.topology.runtime.cors_origins = raw
-      .split("\n")
-      .map((s: string) => s.trim())
-      .filter(Boolean);
+    setIn(
+      "http",
+      "cors_allowed_origins",
+      raw
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+  }
+
+  function setRuntimeExecutable(value: string): void {
+    const paths = (doc.host_paths ??= {});
+    paths.runtime_executable = value;
     onChanged();
   }
 </script>
 
 <section class="form-section">
-  <h3>Runtime</h3>
+  <h3>Runtime <span class="variant-badge">{name}</span></h3>
+
+  {#if inertnessError}
+    <div class="bus-note note-warning" data-testid="inertness-warning">
+      The <code>{MANUAL_VARIANT}</code> variant must boot inert ({inertnessError}). install.sh
+      refuses to install it otherwise — author automation into a separate variant.
+    </div>
+  {/if}
 
   <div class="form-group">
     <label>Runtime name</label>
     <input
       type="text"
       spellcheck="false"
-      value={rt.name ?? ""}
-      oninput={(e: Event) => setRt("name", inputTarget(e).value)}
+      value={rt.runtime?.name ?? ""}
+      oninput={(e: Event) => setIn("runtime", "name", inputTarget(e).value)}
     />
   </div>
 
@@ -79,11 +108,8 @@
       type="number"
       min="1"
       max="65535"
-      value={rt.http_port ?? ""}
-      onchange={(e: Event) => {
-        const n = Number(inputTarget(e).value);
-        if (!isNaN(n)) setRt("http_port", n);
-      }}
+      value={rt.http?.port ?? ""}
+      onchange={(e: Event) => setNumber("http", "port", inputTarget(e).value)}
     />
   </div>
 
@@ -93,9 +119,13 @@
       type="text"
       spellcheck="false"
       style="font-family:monospace"
-      value={rt.http_bind ?? ""}
-      oninput={(e: Event) => setRt("http_bind", inputTarget(e).value)}
+      value={rt.http?.bind ?? ""}
+      oninput={(e: Event) => setIn("http", "bind", inputTarget(e).value)}
     />
+    <span class="field-note"
+      >Keep <code>127.0.0.1</code> unless the rig must be reachable over the LAN — install.sh turns on
+      authentication when it rewrites this for LAN exposure.</span
+    >
   </div>
 
   <div class="form-group">
@@ -103,7 +133,7 @@
     <textarea
       rows="3"
       placeholder="https://workbench.example"
-      value={(rt.cors_origins ?? []).join("\n")}
+      value={(rt.http?.cors_allowed_origins ?? []).join("\n")}
       oninput={(e: Event) => setCorsOrigins(textAreaTarget(e).value)}></textarea>
   </div>
 
@@ -111,8 +141,8 @@
     <label>
       <input
         type="checkbox"
-        checked={rt.cors_allow_credentials ?? false}
-        onchange={(e: Event) => setRt("cors_allow_credentials", inputTarget(e).checked)}
+        checked={rt.http?.cors_allow_credentials ?? false}
+        onchange={(e: Event) => setIn("http", "cors_allow_credentials", inputTarget(e).checked)}
       />
       CORS allow credentials
     </label>
@@ -124,11 +154,8 @@
       type="number"
       min="500"
       max="30000"
-      value={rt.shutdown_timeout_ms ?? ""}
-      onchange={(e: Event) => {
-        const n = Number(inputTarget(e).value);
-        if (!isNaN(n)) setRt("shutdown_timeout_ms", n);
-      }}
+      value={rt.runtime?.shutdown_timeout_ms ?? ""}
+      onchange={(e: Event) => setNumber("runtime", "shutdown_timeout_ms", inputTarget(e).value)}
     />
   </div>
 
@@ -138,11 +165,8 @@
       type="number"
       min="5000"
       max="300000"
-      value={rt.startup_timeout_ms ?? ""}
-      onchange={(e: Event) => {
-        const n = Number(inputTarget(e).value);
-        if (!isNaN(n)) setRt("startup_timeout_ms", n);
-      }}
+      value={rt.runtime?.startup_timeout_ms ?? ""}
+      onchange={(e: Event) => setNumber("runtime", "startup_timeout_ms", inputTarget(e).value)}
     />
   </div>
 
@@ -152,19 +176,16 @@
       type="number"
       min="100"
       max="10000"
-      value={rt.polling_interval_ms ?? ""}
-      onchange={(e: Event) => {
-        const n = Number(inputTarget(e).value);
-        if (!isNaN(n)) setRt("polling_interval_ms", n);
-      }}
+      value={rt.polling?.interval_ms ?? ""}
+      onchange={(e: Event) => setNumber("polling", "interval_ms", inputTarget(e).value)}
     />
   </div>
 
   <div class="form-group">
     <label>Log level</label>
     <select
-      value={rt.log_level ?? "info"}
-      onchange={(e: Event) => setRt("log_level", selectTarget(e).value)}
+      value={rt.logging?.level ?? "info"}
+      onchange={(e: Event) => setIn("logging", "level", selectTarget(e).value)}
     >
       <option value="debug">debug</option>
       <option value="info">info</option>
@@ -178,11 +199,7 @@
       <input
         type="checkbox"
         checked={rt.telemetry?.enabled ?? false}
-        onchange={(e: Event) => {
-          system.topology.runtime.telemetry = system.topology.runtime.telemetry || {};
-          system.topology.runtime.telemetry.enabled = inputTarget(e).checked;
-          onChanged();
-        }}
+        onchange={(e: Event) => setIn("telemetry", "enabled", inputTarget(e).checked)}
       />
       Telemetry enabled
     </label>
@@ -227,7 +244,9 @@
         value={rt.telemetry?.influxdb?.token ?? ""}
         oninput={(e: Event) => setInflux("token", inputTarget(e).value)}
       />
-      <span class="field-note">Stored in system.json for the checked-in dev telemetry profile.</span
+      <span class="field-note"
+        >Stored in the runtime config for the checked-in dev telemetry profile. Handoff export
+        strips it — the target reads INFLUXDB_TOKEN from the environment.</span
       >
     </div>
     <div class="form-group">
@@ -258,44 +277,29 @@
     </div>
   {/if}
 
-  <div class="form-group form-group-inline">
-    <label>
-      <input
-        type="checkbox"
-        checked={rt.automation_enabled ?? false}
-        onchange={(e: Event) => setRt("automation_enabled", inputTarget(e).checked)}
-      />
-      Automation enabled
-    </label>
-  </div>
-
-  <div class="form-group">
-    <label>Behavior tree path</label>
-    <input
-      type="text"
-      spellcheck="false"
-      style="font-family:monospace"
-      placeholder="behaviors/main.xml"
-      value={rt.behavior_tree_path ?? ""}
-      oninput={(e: Event) => setRt("behavior_tree_path", inputTarget(e).value.trim() || null)}
-    />
-    <span class="field-note">Optional. Relative paths resolve from the project directory.</span>
-  </div>
-
   <div class="form-group">
     <label>Runtime executable path</label>
     <input
       type="text"
       spellcheck="false"
       style="font-family:monospace"
-      value={paths.runtime_executable ?? ""}
-      oninput={(e: Event) => {
-        system.paths.runtime_executable = inputTarget(e).value;
-        onChanged();
-      }}
+      value={hostPaths.runtime_executable ?? ""}
+      oninput={(e: Event) => setRuntimeExecutable(inputTarget(e).value)}
     />
     <span class="field-note"
-      >Default assumes CMake dev-release preset. Change if your build output is elsewhere.</span
+      >Host path, used for dev-launch only. It is never deployed — install.sh installs the pinned
+      runtime under its own prefix.</span
     >
   </div>
 </section>
+
+<style>
+  .variant-badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(127, 127, 127, 0.18);
+    vertical-align: middle;
+  }
+</style>

@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { ImportedProjectDoc, UnknownRecord } from "./contracts";
+  import type { ProjectDocument, UnknownRecord } from "./contracts";
 
   /**
    * ProfileView.svelte — read-only view of an imported machine-profile
    * project (#226). The workbench carries the profile verbatim; the source
    * repository is the place to edit it.
    */
-  let { doc }: { doc: ImportedProjectDoc } = $props();
+  let { doc }: { doc: ProjectDocument } = $props();
 
   const profile = $derived(doc.profile ?? {});
   const warnings = $derived(Array.isArray(doc.warnings) ? doc.warnings : []);

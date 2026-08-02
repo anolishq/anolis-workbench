@@ -157,7 +157,7 @@ def _validate_document_shape(doc: dict, failures: list[Failure]) -> None:
         "ErrorResponse",
         "ValidationErrorItem",
         "ProjectSummary",
-        "SystemDocument",
+        "ProjectDocument",
         "TemplateSummary",
         "StatusResponse",
         "PreflightCheckItem",

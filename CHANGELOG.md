@@ -67,6 +67,44 @@ Historical note:
 
 ### Changed
 
+- **A project IS its deployed artifacts (#255).** `system.json` is gone as the
+  source of truth: a project on disk is now a canonical machine-profile
+  directory (`machine-profile.yaml` + `config/anolis-runtime.<variant>.yaml` +
+  `config/provider-<kind>.<id>.yaml` + `behaviors/`) — the same layout imports
+  have used since #226, and exactly what install.sh consumes. Nothing is
+  rendered, synthesised or resolved at deploy time; deploying is a byte-copy.
+  Existing projects migrate automatically and in place on first sight (and
+  eagerly at server start), keeping the untouched original as
+  `system.json.pre255.bak`.
+
+  What this fixes, both of which could reach a bench rig:
+
+  - **Deploys no longer invent component pins.** They were resolved from live
+    GitHub releases at materialize time, so an unchanged project could ship a
+    newer runtime than the one it was commissioned with — under a running rig —
+    and deploying offline was impossible. Pins are authored data now, edited in
+    Compose. A migrated project therefore refuses to deploy until its pins are
+    filled in; that is deliberate.
+  - **Composer projects with automation can be deployed at all.** The composer
+    wrote `automation.enabled: true` into its only runtime config, deploy filed
+    that as the `manual` variant, and install.sh refuses a non-inert `manual`
+    variant — so every such deploy was rejected at the target. Automation is now
+    a separate `automation` variant, and `manual` is kept inert.
+
+  Save-time validation mirrors install.sh's three hard gates (inert `manual`
+  variant, provider commands resolving to pinned components, path tokens
+  carrying the profile's `machine_id`), so a project that install.sh would
+  refuse is refused in the composer with a message naming the fix.
+
+  API note: `GET`/`PUT /api/projects/{name}` now speak one `ProjectDocument`
+  (profile + variants + provider configs + host paths) instead of a
+  system-document/imported-document union. Every project reports
+  `format: "machine-profile"`; `authored` distinguishes workbench-authored
+  projects from imported read-only ones.
+- Handoff packages record `exported_variant` and `omitted_variants` in
+  `meta/provenance.json`. Package format v1 holds a single runtime config, so a
+  multi-variant project exports its inert `manual` variant only — the recipient
+  can now see that rather than assume the package is the whole machine.
 - `core/renderer.py` renders provider configs as a verbatim YAML passthrough
   of the native config; the per-kind `_render_sim`/`_render_bread`/
   `_render_ezo` transforms are deleted (they live on only as the v1→v2
@@ -92,6 +130,13 @@ Historical note:
 
 ### Fixed
 
+- Dev-launch, preflight, stop, restart and `.anpkg` export are no longer
+  refused for every project. The guard that makes imported projects deploy-only
+  keyed on the project FORMAT, which after #255 is `machine-profile` for
+  everything; it now keys on `authored`.
+- Packaged wheels ship the bundled templates again: the include glob was
+  `templates/*/system.json`, which matched nothing once templates became
+  canonical directories.
 - Packaged wheels now include `schemas/providers/*.json` (the vendored
   provider envelopes) — the include glob previously missed the subdirectory.
 

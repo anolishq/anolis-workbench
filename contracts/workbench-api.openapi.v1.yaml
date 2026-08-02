@@ -57,11 +57,11 @@ paths:
               additionalProperties: true
       responses:
         "201":
-          description: Project created — returns full system document
+          description: Project created — returns the full project document
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SystemDocument"
+                $ref: "#/components/schemas/ProjectDocument"
         "400":
           $ref: "#/components/responses/Error400"
         "404":
@@ -139,14 +139,13 @@ paths:
       responses:
         "200":
           description: >-
-            Full project document — the system document for composer projects,
-            or the imported (machine-profile) document for imported projects.
+            The whole canonical project as one document: the parsed
+            machine-profile, every runtime-config variant, every provider
+            config, and the workbench-owned sidecar fields.
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/SystemDocument"
-                  - $ref: "#/components/schemas/ImportedProjectDocument"
+                $ref: "#/components/schemas/ProjectDocument"
         "400":
           $ref: "#/components/responses/Error400"
         "404":
@@ -154,8 +153,13 @@ paths:
     put:
       summary: Save project document
       description: >-
-        Validates schema and semantics. Re-renders derived YAML files to disk
-        on success.
+        Validates the document, then decomposes it into the canonical files on
+        disk (machine-profile.yaml, config/anolis-runtime.<variant>.yaml,
+        config/provider-<kind>.<id>.yaml) plus the workbench sidecar.
+
+
+        Rejected with 409 for imported projects: those are carried verbatim
+        and are edited in their source repository.
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -163,7 +167,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SystemDocument"
+              $ref: "#/components/schemas/ProjectDocument"
       responses:
         "200":
           $ref: "#/components/responses/Ok200"
@@ -225,9 +229,11 @@ paths:
     post:
       summary: Duplicate project
       description: >-
-        Copies the project to a new name. Does not copy running.json or logs/.
-        Re-renders derived YAML. Updates meta.name and meta.created in the
-        copy. Returns the full system document of the new project (201).
+        Copies the project to a new name. Does not copy running.json, logs/,
+        or the dev-launch projection. Updates meta.name and meta.created, and
+        for authored projects re-keys machine_id and every project path token
+        in the copy — without that the copy would deploy into the ORIGINAL's
+        directory. Returns the full project document of the new project (201).
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -245,11 +251,11 @@ paths:
               additionalProperties: true
       responses:
         "201":
-          description: Duplicate project created — returns full system document
+          description: Duplicate project created — returns the full project document
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SystemDocument"
+                $ref: "#/components/schemas/ProjectDocument"
         "400":
           $ref: "#/components/responses/Error400"
         "404":
@@ -515,8 +521,8 @@ paths:
         contracts/runtime-http.openapi.v0.yaml, not here.
 
         Precondition: a runtime process must be running with an active project.
-        The proxy target is topology.runtime.http_bind:topology.runtime.http_port
-        from the active project system.json.
+        The proxy target is http.bind:http.port from the active project's
+        active runtime-config variant.
 
         503 — runtime is not running or no active project.
         502 — proxy connection to runtime failed.
@@ -689,7 +695,7 @@ components:
             semantic.validation
         path:
           type: string
-          description: JSON pointer to the offending field (e.g. $.topology.runtime)
+          description: JSON pointer to the offending field (e.g. $.providers.bread0.config)
         message:
           type: string
           description: Human-readable description of the violation
@@ -704,70 +710,98 @@ components:
           description: Project name (directory name)
         format:
           type: string
-          enum: [system, machine-profile]
+          enum: [machine-profile]
           description: >-
-            Project format — "system" for composer projects (system.json),
-            "machine-profile" for imported near-passthrough projects.
+            Project format. Every project is a canonical machine-profile
+            project; `authored` is what distinguishes workbench-authored
+            projects from imported ones.
+        authored:
+          type: boolean
+          description: >-
+            True when the workbench authored this project (rewritable). False
+            for imported projects, which are carried verbatim and read-only.
         meta:
           type: object
-          description: >-
-            Project metadata — from system.json for composer projects, from
-            the workbench.json sidecar for imported projects.
+          description: Project metadata from the workbench.json sidecar.
           additionalProperties: true
       additionalProperties: true
 
-    ImportedProjectDocument:
+    ProjectDocument:
       type: object
-      required: [format, meta, profile]
+      required: [format, authored, profile, variants, providers]
       description: >-
-        An imported (machine-profile) project. The profile and its referenced
-        files are carried verbatim; this document is a read-only parsed view
-        plus workbench-owned metadata. Write endpoints reject these projects.
+        The whole canonical project as one document. It carries the FULL parsed
+        files rather than a workbench model of them, so keys the workbench does
+        not understand round-trip intact.
+
+
+        Imported projects use the same shape but have `authored: false`; they
+        are read-only and write endpoints reject them with 409.
       properties:
         format:
           type: string
           enum: [machine-profile]
+        authored:
+          type: boolean
+          description: False for imported projects, which are carried verbatim.
         meta:
           type: object
+          description: Workbench-owned metadata from the sidecar (name, created, template).
           additionalProperties: true
         profile:
           type: object
-          description: Parsed machine-profile.yaml (read-only view)
+          description: >-
+            Parsed machine-profile.yaml. Validated server-side against the
+            bundled machine-profile schema. `components` holds the AUTHORED
+            component pins — the deploy path never resolves them from the
+            network.
+          additionalProperties: true
+        variants:
+          type: object
+          description: >-
+            Runtime-config documents keyed by variant name, mirroring the
+            profile's runtime_profiles. `manual` is required and must be inert
+            (install.sh refuses a manual variant that boots into automation).
+            Provider `command` values are deploy TOKENS install.sh rewrites,
+            not host paths.
+          additionalProperties:
+            type: object
+            additionalProperties: true
+        providers:
+          type: object
+          description: >-
+            Provider instances keyed by id, each `{kind, config}` where config
+            is the provider-native document validated against that provider's
+            own --config-schema envelope.
+          additionalProperties:
+            type: object
+            properties:
+              kind:
+                type: string
+                nullable: true
+              config:
+                type: object
+                additionalProperties: true
+            additionalProperties: true
+        host_paths:
+          type: object
+          description: >-
+            Dev-launch only: the host binary paths for the runtime and each
+            provider. These live in the workbench sidecar and are NEVER
+            deployed — a Windows binary path does not even resemble a deploy
+            token. Launch projects them into a throwaway config.
+          additionalProperties: true
+        launch:
+          type: object
+          description: Workbench launch settings, e.g. which variant dev-launch runs.
           additionalProperties: true
         warnings:
           type: array
           items:
             type: string
-          description: Import-time validation warnings (persisted in the sidecar)
-      additionalProperties: true
-
-    SystemDocument:
-      type: object
-      required: [meta, topology, paths]
-      description: >-
-        Full project document (system.json). Schema is validated server-side
-        against the bundled system.schema.json. The properties listed here are
-        the required top-level keys; all sub-structures are additionalProperties
-        to avoid contract drift as the schema evolves.
-      properties:
-        meta:
-          type: object
-          required: [name, created, template]
-          properties:
-            name:
-              type: string
-            created:
-              type: string
-              format: date-time
-            template:
-              type: string
-          additionalProperties: true
-        topology:
-          type: object
-          additionalProperties: true
-        paths:
-          type: object
-          additionalProperties: true
+          description: >-
+            Persisted advisory warnings (import-time checks, or migration
+            notes such as component pins that could not be carried over).
       additionalProperties: true
 
     TemplateSummary:

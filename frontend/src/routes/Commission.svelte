@@ -14,8 +14,8 @@
     type ProviderHealth,
     type RuntimeApiStatus,
     type RuntimeStatus,
-    type SystemConfig,
   } from "../lib/contracts";
+  import { activeVariant, MANUAL_VARIANT } from "../lib/canonical";
 
   let {
     projectName,
@@ -29,23 +29,22 @@
     commissionRunningForCurrent: boolean;
   } = $props();
 
-  // Imported (machine-profile) projects are deploy-only (#226): no dev-launch,
-  // no .anpkg export. Bundle export works and gains a variant selector.
+  // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
   const imported = $derived(isImportedDoc(system));
-  const importedVariants = $derived.by(() => {
-    if (!system || !isImportedDoc(system)) return [] as string[];
-    const profiles = system.profile?.runtime_profiles;
-    return typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)
-      ? Object.keys(profiles as Record<string, unknown>)
-      : [];
-  });
+
+  // Every project declares runtime variants now (#255), so the variant picker
+  // applies to authored projects too — that is how an automation machine gets
+  // deployed, since the `manual` variant is required to boot inert.
+  const variants = $derived(Object.keys(system?.profile?.runtime_profiles ?? {}).sort());
   let selectedVariant = $state<string>("");
   $effect(() => {
-    if (importedVariants.length > 0 && !importedVariants.includes(selectedVariant)) {
-      selectedVariant = importedVariants.includes("manual") ? "manual" : importedVariants[0];
+    if (variants.length > 0 && !variants.includes(selectedVariant)) {
+      selectedVariant = variants.includes(MANUAL_VARIANT) ? MANUAL_VARIANT : variants[0];
     }
   });
-  const composerSystem = $derived(!imported ? (system as SystemConfig | null) : null);
+
+  /** The HTTP port dev-launch serves on, from the variant it will run. */
+  const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -399,7 +398,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          imported && selectedVariant
+          selectedVariant
             ? { project: projectName, arch: "arm64", variant: selectedVariant }
             : { project: projectName, arch: "arm64" },
         ),
@@ -477,7 +476,7 @@
         variant:
         <label class="inline-label" style="margin-left:0.5rem">
           <select bind:value={selectedVariant}>
-            {#each importedVariants as variant (variant)}
+            {#each variants as variant (variant)}
               <option value={variant}>{variant}</option>
             {/each}
           </select>
@@ -538,7 +537,7 @@
       <!-- Running state -->
       <div class="launch-running-bar">
         <span class="running-label">
-          Running — {projectName} on port {composerSystem?.topology?.runtime?.http_port ?? "?"}
+          Running — {projectName} on port {launchPort ?? "?"}
         </span>
         <span class="health-badge {healthStatus}">
           {healthStatus === "healthy"

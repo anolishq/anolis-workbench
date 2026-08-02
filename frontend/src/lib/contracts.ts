@@ -15,7 +15,10 @@ export interface ApiErrorResponse extends UnknownRecord {
 
 export interface ProjectSummary extends UnknownRecord {
   name: string;
-  format?: "system" | "machine-profile";
+  /** Every project is a canonical machine-profile project since #255. */
+  format?: "machine-profile";
+  /** False for imported projects, which are carried verbatim and read-only. */
+  authored?: boolean;
   meta: UnknownRecord;
 }
 
@@ -77,9 +80,17 @@ export interface RestartPolicy extends UnknownRecord {
   success_reset_ms?: number;
 }
 
-export interface ProviderRuntimeEntry extends UnknownRecord {
+/**
+ * One entry in a runtime config's `providers[]`.
+ *
+ * `command` is a deploy TOKEN, not a host path: install.sh rewrites it to
+ * `{prefix}/bin/anolis-provider-<kind>` at install time. The real host binary
+ * lives in `ProjectDocument.host_paths` and is only used for dev-launch.
+ */
+export interface RuntimeProviderEntry extends UnknownRecord {
   id: string;
-  kind: ProviderKind;
+  command?: string;
+  args?: string[];
   timeout_ms?: number;
   hello_timeout_ms?: number;
   ready_timeout_ms?: number;
@@ -100,76 +111,105 @@ export interface RuntimeTelemetry extends UnknownRecord {
   influxdb?: RuntimeTelemetryInflux;
 }
 
-export interface RuntimeConfig extends UnknownRecord {
-  name?: string;
-  http_port?: number;
-  http_bind?: string;
-  cors_origins?: string[];
+export interface RuntimeHttp extends UnknownRecord {
+  enabled?: boolean;
+  bind?: string;
+  port?: number;
+  cors_allowed_origins?: string[];
   cors_allow_credentials?: boolean;
-  shutdown_timeout_ms?: number;
-  startup_timeout_ms?: number;
-  polling_interval_ms?: number;
-  log_level?: string;
-  telemetry_enabled?: boolean;
-  telemetry?: RuntimeTelemetry;
-  automation_enabled?: boolean;
-  behavior_tree_path?: string | null;
-  providers?: ProviderRuntimeEntry[];
+}
+
+export interface RuntimeAutomation extends UnknownRecord {
+  enabled?: boolean;
+  behavior_tree?: string;
 }
 
 /**
- * system.json v2 (#270): provider config is stored provider-natively — the
- * exact document the kind's --config-schema envelope describes. The workbench
- * has no per-kind knowledge of its shape.
+ * A runtime-config document — the file the runtime itself consumes
+ * (`config/anolis-runtime.<variant>.yaml`). The workbench edits it directly
+ * now; there is no intermediate shadow document.
  */
-export interface ProviderTopologyEntry extends UnknownRecord {
-  kind: ProviderKind;
+export interface RuntimeConfigDoc extends UnknownRecord {
+  runtime?: {
+    name?: string;
+    shutdown_timeout_ms?: number;
+    startup_timeout_ms?: number;
+  } & UnknownRecord;
+  http?: RuntimeHttp;
+  providers?: RuntimeProviderEntry[];
+  polling?: { interval_ms?: number } & UnknownRecord;
+  telemetry?: RuntimeTelemetry;
+  logging?: { level?: string } & UnknownRecord;
+  automation?: RuntimeAutomation;
+}
+
+export interface ComponentPin extends UnknownRecord {
+  repo?: string;
+  version?: string;
+}
+
+/** Parsed `machine-profile.yaml` — the machine's identity and contents. */
+export interface MachineProfile extends UnknownRecord {
+  schema_version?: number;
+  machine_id: string;
+  display_name?: string;
+  runtime_profiles: Record<string, string>;
+  providers: Record<string, { config: string } & UnknownRecord>;
+  behaviors?: string[];
+  compatibility?: UnknownRecord;
+  /** AUTHORED pins. Nothing resolves these from the network. */
+  components?: {
+    runtime?: ComponentPin;
+    providers?: Record<string, ComponentPin>;
+  } & UnknownRecord;
+  safety?: UnknownRecord;
+  validation?: UnknownRecord;
+}
+
+/**
+ * A provider instance: its kind plus the provider-native config document that
+ * the kind's own --config-schema envelope describes (#270). The workbench has
+ * no per-kind knowledge of that shape.
+ */
+export interface ProviderInstance extends UnknownRecord {
+  kind: ProviderKind | null;
   config: UnknownRecord;
 }
 
-export interface TopologyConfig extends UnknownRecord {
-  runtime: RuntimeConfig;
-  providers?: Record<string, ProviderTopologyEntry>;
-}
-
-export interface ProviderPaths extends UnknownRecord {
-  executable?: string;
-}
-
-export interface PathsConfig extends UnknownRecord {
+/**
+ * Dev-launch only. Host binary paths live in the workbench sidecar and are
+ * never deployed — a Windows path does not even resemble a deploy token.
+ */
+export interface HostPaths extends UnknownRecord {
   runtime_executable?: string;
-  providers?: Record<string, ProviderPaths>;
-}
-
-export interface SystemMeta extends UnknownRecord {
-  name: string;
-  created: string;
-  template: string;
-}
-
-export interface SystemConfig extends UnknownRecord {
-  schema_version?: number;
-  meta: SystemMeta;
-  topology: TopologyConfig;
-  paths: PathsConfig;
+  providers?: Record<string, { executable?: string } & UnknownRecord>;
 }
 
 /**
- * Imported (machine-profile) project (#226): the canonical directory is
- * carried verbatim; this document is a read-only parsed view plus
- * workbench-owned metadata. Discriminated from SystemConfig by `format`.
+ * The whole canonical project as one document (#255). It carries the FULL
+ * parsed files rather than a workbench model of them, so keys the workbench
+ * does not understand round-trip intact.
+ *
+ * Imported projects use the same shape with `authored: false`; they are
+ * carried verbatim and every write endpoint rejects them.
  */
-export interface ImportedProjectDoc extends UnknownRecord {
+export interface ProjectDocument extends UnknownRecord {
   format: "machine-profile";
-  meta: UnknownRecord;
-  profile: UnknownRecord;
+  authored: boolean;
+  meta?: UnknownRecord;
+  profile: MachineProfile;
+  variants: Record<string, RuntimeConfigDoc>;
+  providers: Record<string, ProviderInstance>;
+  host_paths?: HostPaths;
+  launch?: { variant?: string } & UnknownRecord;
   warnings?: string[];
 }
 
-export type ProjectDoc = SystemConfig | ImportedProjectDoc;
+export type ProjectDoc = ProjectDocument;
 
-export function isImportedDoc(doc: ProjectDoc | null): doc is ImportedProjectDoc {
-  return doc !== null && (doc as UnknownRecord).format === "machine-profile";
+/** Imported projects are read-only; `authored` is the only thing that says so. */
+export function isImportedDoc(doc: ProjectDoc | null): boolean {
+  return doc !== null && doc.authored === false;
 }
 
 export interface RuntimeStatusCode extends UnknownRecord {

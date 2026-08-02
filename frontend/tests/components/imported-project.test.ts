@@ -1,16 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ImportedProjectDoc } from "../../src/lib/contracts";
+import type { ProjectDocument } from "../../src/lib/contracts";
 import ProfileView from "../../src/lib/ProfileView.svelte";
 import Commission from "../../src/routes/Commission.svelte";
 import Compose from "../../src/routes/Compose.svelte";
 import Home from "../../src/routes/Home.svelte";
 import { createRuntimeStatus, jsonResponse } from "./helpers";
 
-function importedDoc(): ImportedProjectDoc {
+function importedDoc(): ProjectDocument {
   return {
     format: "machine-profile",
+    // The one thing that makes a project read-only (#255): every project is
+    // machine-profile FORMAT now, so format can no longer carry that meaning.
+    authored: false,
     meta: {
       name: "rig-a",
       imported_from: "/repos/anolis-projects/projects/bioreactor-v1",
@@ -34,6 +37,8 @@ function importedDoc(): ImportedProjectDoc {
         providers: { bread: { repo: "anolishq/anolis-provider-bread", version: "0.3.8" } },
       },
     },
+    variants: {},
+    providers: { bread0: { kind: "bread", config: {} } },
     warnings: ["Provider 'bread0' (kind 'bread'): sample warning"],
   };
 }
@@ -135,8 +140,8 @@ describe("Home.svelte import card", () => {
     render(Home, {
       props: {
         projects: [
-          { name: "composer-one", format: "system", meta: {} },
-          { name: "rig-a", format: "machine-profile", meta: {} },
+          { name: "composer-one", format: "machine-profile", authored: true, meta: {} },
+          { name: "rig-a", format: "machine-profile", authored: false, meta: {} },
         ],
         templates: [],
         onNavigate: vi.fn(),
@@ -144,7 +149,8 @@ describe("Home.svelte import card", () => {
       },
     });
 
-    expect(screen.getByTitle(/Imported machine profile/)).toBeInTheDocument();
+    // Exactly one badge: the authored project must not be tagged as imported.
+    expect(screen.getAllByTitle(/Imported machine profile/)).toHaveLength(1);
   });
 
   it("surfaces per-error import validation messages on a 400", async () => {
