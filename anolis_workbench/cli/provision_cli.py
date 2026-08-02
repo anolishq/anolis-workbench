@@ -28,13 +28,13 @@ def _parse_args() -> argparse.Namespace:
     )
     install_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name to create (default: bioreactor-v1).",
+        default=None,
+        help="Project name to create (defaults to the template name).",
     )
     install_parser.add_argument(
         "--template",
-        default="sim-quickstart",
-        help="Template to use for project creation (default: sim-quickstart).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     install_parser.add_argument(
         "--system",
@@ -91,13 +91,13 @@ def _parse_args() -> argparse.Namespace:
     )
     bundle_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name for the bundle (default: bioreactor-v1).",
+        default=None,
+        help="Project name for the bundle (defaults to the template name).",
     )
     bundle_parser.add_argument(
         "--template",
-        default="sim-quickstart",
-        help="Template to use for config rendering (default: sim-quickstart).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     bundle_parser.add_argument(
         "--system",
@@ -136,13 +136,13 @@ def _parse_args() -> argparse.Namespace:
     )
     remote_parser.add_argument(
         "--project",
-        default="bioreactor-v1",
-        help="Project name to create on the target (default: bioreactor-v1).",
+        default=None,
+        help="Project name to create on the target (defaults to the template name).",
     )
     remote_parser.add_argument(
         "--template",
-        default="sim-quickstart",
-        help="Template to use for project creation (default: sim-quickstart).",
+        default=None,
+        help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
     remote_parser.add_argument(
         "--system",
@@ -309,7 +309,7 @@ def _validate_system_template(args: argparse.Namespace) -> bool:
 
     Returns True if valid, False if error was printed.
     """
-    if hasattr(args, "system") and args.system is not None and args.template != "sim-quickstart":
+    if getattr(args, "system", None) is not None and getattr(args, "template", None) is not None:
         print("ERROR: --system and --template are mutually exclusive", file=sys.stderr)
         return False
     return True
@@ -377,6 +377,21 @@ def _run_observability_step(
         print(f"    To start: cd {obs_result.stack_path} && docker compose up -d")
 
 
+DEFAULT_TEMPLATE = "sim-quickstart"
+
+
+def _resolve_names(args: argparse.Namespace) -> tuple[str, str]:
+    """Project and template names, defaulted coherently.
+
+    The project defaults to the TEMPLATE name rather than a fixed string: a
+    default project called `bioreactor-v1` seeded from a simulator template
+    describes something that does not exist.
+    """
+    template = getattr(args, "template", None) or DEFAULT_TEMPLATE
+    project = getattr(args, "project", None) or template
+    return project, template
+
+
 def _provision_workspace(args: argparse.Namespace) -> Path:
     """Authoring: ensure the local workspace project exists (source of truth)."""
     from anolis_workbench.core import paths as paths_module
@@ -386,14 +401,15 @@ def _provision_workspace(args: argparse.Namespace) -> Path:
     # assuming every subcommand that authors a workspace defines one.
     force = bool(getattr(args, "force", False))
     system_path = getattr(args, "system", None)
+    project, template = _resolve_names(args)
 
-    project_dir: Path = paths_module.SYSTEMS_ROOT / args.project
+    project_dir: Path = paths_module.SYSTEMS_ROOT / project
     if project_dir.exists() and not force and system_path is None:
         _print_progress("project", f"Using existing workspace project: {project_dir}")
         return project_dir
     return installer.provision_project(
-        args.template,
-        args.project,
+        template,
+        project,
         args.install_prefix,
         force=force,
         system_path=system_path,
@@ -410,11 +426,11 @@ def _run_install(args: argparse.Namespace) -> int:
     token = os.environ.get("GITHUB_TOKEN")
 
     print("Anolis Provision — Install")
-    print(f"  Project:  {args.project}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
     if args.system:
         print(f"  System:   {args.system}")
     else:
-        print(f"  Template: {args.template}")
+        print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Prefix:   {args.install_prefix}")
     if args.dry_run:
         print("  Mode:     DRY RUN")
@@ -431,7 +447,7 @@ def _run_install(args: argparse.Namespace) -> int:
     try:
         result = deploy.deploy_local(
             project_dir=project_dir,
-            project_name=args.project,
+            project_name=_resolve_names(args)[0],
             prefix=args.install_prefix,
             no_start=args.no_start,
             dry_run=args.dry_run,
@@ -501,11 +517,11 @@ def _run_bundle(args: argparse.Namespace) -> int:
     arch = "arm64" if args.arch in ("arm64", "aarch64") else "x86_64"
 
     print("Anolis Provision — Bundle")
-    print(f"  Project:  {args.project}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
     if args.system:
         print(f"  System:   {args.system}")
     else:
-        print(f"  Template: {args.template}")
+        print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Arch:     {arch}")
     print(f"  Output:   {args.out}")
     print(f"  Prefix:   {args.install_prefix}")
@@ -517,7 +533,7 @@ def _run_bundle(args: argparse.Namespace) -> int:
         project_dir = _provision_workspace(args)
         tarball = deploy.stage_bundle(
             project_dir=project_dir,
-            project_name=args.project,
+            project_name=_resolve_names(args)[0],
             out_dir=args.out,
             arch=arch,
             prefix=args.install_prefix,
@@ -571,8 +587,8 @@ def _run_remote(args: argparse.Namespace) -> int:
 
     print("Anolis Provision — Remote")
     print(f"  Target:   {user}@{host}")
-    print(f"  Project:  {args.project}")
-    print(f"  Template: {args.template}")
+    print(f"  Project:  {_resolve_names(args)[0]}")
+    print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Prefix:   {args.install_prefix}")
     print(f"  Session:  {session_id}")
     print()
@@ -611,7 +627,7 @@ def _run_remote(args: argparse.Namespace) -> int:
         result = deploy.deploy_remote(
             executor=executor,
             project_dir=project_dir,
-            project_name=args.project,
+            project_name=_resolve_names(args)[0],
             prefix=args.install_prefix,
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),

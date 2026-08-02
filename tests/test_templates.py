@@ -117,3 +117,20 @@ def test_real_world_baselines_validate_against_the_vendored_schema(baseline: str
     These fixtures are captured from the real bioreactor project. They are kept
     as a CONTRACT check on the schema, not as a copy of a machine we ship."""
     assert canonical.runtime_config_errors(_load_yaml(FIXTURE_DIR / baseline)) == []
+
+
+@pytest.mark.parametrize(
+    ("fixture", "kind"),
+    [("provider-bread.bioreactor.yaml", "bread"), ("provider-ezo.bioreactor.yaml", "ezo")],
+)
+def test_real_world_provider_configs_satisfy_the_vendored_envelopes(fixture: str, kind: str) -> None:
+    """Captured from the real bioreactor machine. Kept as a contract check on
+    the provider schemas — not as a machine config we ship. If a provider's
+    schema ever stops accepting what the rig actually runs, this fails."""
+    import jsonschema
+
+    from anolis_workbench.core import provider_schemas
+
+    envelope = provider_schemas.get_envelope(kind)
+    assert envelope is not None, f"no vendored envelope for {kind}"
+    jsonschema.Draft202012Validator(envelope["schema"]).validate(_load_yaml(FIXTURE_DIR / fixture))

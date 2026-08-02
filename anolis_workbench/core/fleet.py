@@ -15,6 +15,11 @@ import yaml
 
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
+# The template a fleet entry seeds a MISSING project from. Only used when the
+# workspace has no project of that name — an existing one is the source of
+# truth, and real machines are imported rather than seeded (#226).
+DEFAULT_TEMPLATE = "sim-quickstart"
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -27,7 +32,7 @@ class FleetTarget:
     name: str
     host: str
     project: str
-    template: str = "sim-quickstart"
+    template: str = DEFAULT_TEMPLATE
     install_prefix: Path = field(default_factory=lambda: DEFAULT_INSTALL_PREFIX)
     systemd: bool = False
     key: str | None = None
@@ -114,8 +119,8 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
             FleetTarget(
                 name=entry["name"],
                 host=entry["host"],
-                project=entry.get("project", defaults.get("project", "bioreactor-v1")),
-                template=entry.get("template", defaults.get("template", "sim-quickstart")),
+                project=entry.get("project", defaults.get("project", DEFAULT_TEMPLATE)),
+                template=entry.get("template", defaults.get("template", DEFAULT_TEMPLATE)),
                 install_prefix=Path(
                     entry.get("install_prefix", defaults.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
                 ),
@@ -238,7 +243,7 @@ _FLEET_REGISTRY_PATH = Path.home() / ".anolis" / "fleet.yaml"
 def auto_register_host(
     host: str,
     project: str,
-    template: str = "sim-quickstart",
+    template: str = DEFAULT_TEMPLATE,
 ) -> None:
     """Add a host to the fleet registry if not already present.
 

@@ -79,7 +79,16 @@ def provision_project(
     if source.is_file():  # a legacy system.json handed to the CLI
         source = source.parent
     if not (source / machine_profile.PROFILE_FILENAME).is_file():
-        raise FileNotFoundError(f"Template '{template_name}' not found at {source}")
+        available = (
+            ", ".join(sorted(d.name for d in paths_module.TEMPLATES_ROOT.iterdir() if d.is_dir()))
+            if paths_module.TEMPLATES_ROOT.is_dir()
+            else "(none)"
+        )
+        raise FileNotFoundError(
+            f"Template '{template_name}' not found at {source} (available: {available}). "
+            "Templates that mirrored real machines were removed — import the machine's own "
+            "project directory instead of seeding a copy of it."
+        )
 
     previous_root = projects_module.SYSTEMS_ROOT
     try:

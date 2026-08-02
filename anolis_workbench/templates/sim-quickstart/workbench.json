@@ -8,10 +8,10 @@
     "profile_dir_name": "sim-quickstart"
   },
   "host_paths": {
-    "runtime_executable": "build/dev-windows-release/core/anolis-runtime.exe",
+    "runtime_executable": "build/dev-release/core/anolis-runtime",
     "providers": {
       "sim0": {
-        "executable": "../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe"
+        "executable": "../anolis-provider-sim/build/dev-release/anolis-provider-sim"
       }
     }
   },

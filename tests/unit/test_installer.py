@@ -91,3 +91,37 @@ class TestProvisionProject:
 # ---------------------------------------------------------------------------
 # verify_installation (mocked subprocess)
 # ---------------------------------------------------------------------------
+
+
+def test_provision_from_an_existing_canonical_project_carries_every_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `system_path` branch — seeding from an existing canonical directory
+    rather than a bundled template. This is the path a real multi-provider
+    machine takes now that no multi-provider template ships, and it was the
+    coverage lost when bioreactor-manual was deleted."""
+    systems_root = tmp_path / "systems"
+    systems_root.mkdir()
+    monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems_root)
+    monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems_root)
+
+    source = Path(__file__).parent.parent / "fixtures" / "mixed-bus-mock"
+    prefix = tmp_path / "prefix"
+
+    project_dir = installer.provision_project(
+        template_name="unused-when-system-path-given",
+        project_name="mixed-rig",
+        install_prefix=prefix,
+        system_path=source,
+        systems_root=systems_root,
+    )
+
+    document = canonical.read_project(project_dir)
+    host = document["host_paths"]["providers"]
+    assert host["bread0"]["executable"] == str(prefix / "bin" / "anolis-provider-bread")
+    assert host["ezo0"]["executable"] == str(prefix / "bin" / "anolis-provider-ezo")
+
+    # Re-keyed onto the new project, including the sidecar's deploy directory —
+    # without that it would install into the SOURCE's directory.
+    assert document["profile"]["machine_id"] == "mixed-rig"
+    assert document["meta"]["profile_dir_name"] == "mixed-rig"

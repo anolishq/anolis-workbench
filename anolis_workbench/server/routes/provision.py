@@ -18,6 +18,8 @@ from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
+DEFAULT_TEMPLATE = "sim-quickstart"
+
 # ---------------------------------------------------------------------------
 # Job management
 # ---------------------------------------------------------------------------
@@ -65,8 +67,10 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     re-seeds the project directory, which for a commissioned rig means losing
     its configs, behaviours and the pre-migration backup.
     """
-    project = params.get("project", "bioreactor-v1")
-    template = params.get("template", "sim-quickstart")
+    template = params.get("template") or DEFAULT_TEMPLATE
+    # Named after what it actually is: a project called `bioreactor-v1` seeded
+    # from a simulator template describes something that does not exist.
+    project = params.get("project") or template
     prefix = Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
 
     project_dir: Path = paths_module.SYSTEMS_ROOT / project
@@ -85,7 +89,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.events.append(event)
 
     try:
-        project = params.get("project", "bioreactor-v1")
+        project = params.get("project") or params.get("template") or DEFAULT_TEMPLATE
         project_dir = _prepare_workspace(params, _progress)
         result = deploy.deploy_local(
             project_dir=project_dir,
@@ -126,7 +130,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         )
 
         # Authoring stays local; the target only receives the deployment.
-        project = params.get("project", "bioreactor-v1")
+        project = params.get("project") or params.get("template") or DEFAULT_TEMPLATE
         project_dir = _prepare_workspace(params, _progress)
         result = deploy.deploy_remote(
             executor=executor,
@@ -141,8 +145,8 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 
         auto_register_host(
             host=host,
-            project=params.get("project", "bioreactor-v1"),
-            template=params.get("template", "sim-quickstart"),
+            project=params.get("project") or params.get("template") or DEFAULT_TEMPLATE,
+            template=params.get("template") or DEFAULT_TEMPLATE,
         )
         job.events.append(
             {
@@ -266,7 +270,7 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         arch = params.get("arch") or ("arm64" if platform.machine() in ("aarch64", "arm64") else "x86_64")
         if arch == "aarch64":
             arch = "arm64"
-        project = params.get("project", "bioreactor-v1")
+        project = params.get("project") or params.get("template") or DEFAULT_TEMPLATE
 
         _progress("resolve", f"Building bundle for {project} ({arch})")
 
