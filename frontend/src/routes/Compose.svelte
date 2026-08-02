@@ -1,12 +1,15 @@
 <script lang="ts">
   import { ApiResponseError, fetchJson } from "../lib/api";
-  import type {
-    ApiErrorResponse,
-    ProviderSchemasResponse,
-    RuntimeStatus,
-    SystemConfig,
+  import {
+    isImportedDoc,
+    type ApiErrorResponse,
+    type ProjectDoc,
+    type ProviderSchemasResponse,
+    type RuntimeStatus,
+    type SystemConfig,
   } from "../lib/contracts";
   import RuntimeForm from "../lib/RuntimeForm.svelte";
+  import ProfileView from "../lib/ProfileView.svelte";
   import ProviderList from "../lib/ProviderList.svelte";
 
   let {
@@ -18,12 +21,15 @@
     onSaved,
   }: {
     projectName: string | null;
-    system: SystemConfig | null;
+    system: ProjectDoc | null;
     providerSchemas: ProviderSchemasResponse | null;
     runtimeStatus: RuntimeStatus | null;
     onDirty: () => void;
     onSaved: () => void;
   } = $props();
+
+  const imported = $derived(isImportedDoc(system));
+  const systemDoc = $derived(!imported ? (system as SystemConfig | null) : null);
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -90,17 +96,21 @@
   {/if}
 
   <div id="compose-form-area">
-    {#if system}
-      <RuntimeForm {system} onChanged={markDirty} />
-      <ProviderList {system} {providerSchemas} onChanged={markDirty} />
+    {#if system && isImportedDoc(system)}
+      <ProfileView doc={system} />
+    {:else if systemDoc}
+      <RuntimeForm system={systemDoc} onChanged={markDirty} />
+      <ProviderList system={systemDoc} {providerSchemas} onChanged={markDirty} />
     {:else}
       <p class="placeholder">Loading…</p>
     {/if}
   </div>
 
-  <div class="compose-actions">
-    <button id="btn-save" type="button" class="btn-primary" disabled={saving} onclick={handleSave}
-      >{saving ? "Saving…" : "Save"}</button
-    >
-  </div>
+  {#if !imported}
+    <div class="compose-actions">
+      <button id="btn-save" type="button" class="btn-primary" disabled={saving} onclick={handleSave}
+        >{saving ? "Saving…" : "Save"}</button
+      >
+    </div>
+  {/if}
 </section>

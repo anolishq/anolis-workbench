@@ -7,12 +7,14 @@
     fetchResponse,
     filenameFromContentDisposition,
   } from "../lib/api";
-  import type {
-    PreflightResult,
-    ProviderHealth,
-    RuntimeApiStatus,
-    RuntimeStatus,
-    SystemConfig,
+  import {
+    isImportedDoc,
+    type PreflightResult,
+    type ProjectDoc,
+    type ProviderHealth,
+    type RuntimeApiStatus,
+    type RuntimeStatus,
+    type SystemConfig,
   } from "../lib/contracts";
 
   let {
@@ -22,10 +24,28 @@
     commissionRunningForCurrent,
   }: {
     projectName: string | null;
-    system: SystemConfig | null;
+    system: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     commissionRunningForCurrent: boolean;
   } = $props();
+
+  // Imported (machine-profile) projects are deploy-only (#226): no dev-launch,
+  // no .anpkg export. Bundle export works and gains a variant selector.
+  const imported = $derived(isImportedDoc(system));
+  const importedVariants = $derived.by(() => {
+    if (!system || !isImportedDoc(system)) return [] as string[];
+    const profiles = system.profile?.runtime_profiles;
+    return typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)
+      ? Object.keys(profiles as Record<string, unknown>)
+      : [];
+  });
+  let selectedVariant = $state<string>("");
+  $effect(() => {
+    if (importedVariants.length > 0 && !importedVariants.includes(selectedVariant)) {
+      selectedVariant = importedVariants.includes("manual") ? "manual" : importedVariants[0];
+    }
+  });
+  const composerSystem = $derived(!imported ? (system as SystemConfig | null) : null);
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -378,7 +398,11 @@
       const startRes = await fetchJson<{ job_id: string }>("/api/provision/bundle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: projectName, arch: "arm64" }),
+        body: JSON.stringify(
+          imported && selectedVariant
+            ? { project: projectName, arch: "arm64", variant: selectedVariant }
+            : { project: projectName, arch: "arm64" },
+        ),
       });
       const jobId = startRes.job_id;
       bundleFeedback = "Building bundle…";
@@ -446,7 +470,21 @@
 
   <!-- Launch panel -->
   <div id="launch-panel" class="launch-panel">
-    {#if !commissionRunningForCurrent}
+    {#if imported}
+      <div class="workspace-advisory">
+        Imported machine profile — carried verbatim; dev-launch and preflight are not available.
+        Deploy it with install.sh (Export Bundle below, or the provision CLI), selecting a runtime
+        variant:
+        <label class="inline-label" style="margin-left:0.5rem">
+          <select bind:value={selectedVariant}>
+            {#each importedVariants as variant (variant)}
+              <option value={variant}>{variant}</option>
+            {/each}
+          </select>
+          variant
+        </label>
+      </div>
+    {:else if !commissionRunningForCurrent}
       <!-- Idle: preflight + launch -->
       <div class="launch-idle-bar">
         <button
@@ -500,7 +538,7 @@
       <!-- Running state -->
       <div class="launch-running-bar">
         <span class="running-label">
-          Running — {projectName} on port {system?.topology?.runtime?.http_port ?? "?"}
+          Running — {projectName} on port {composerSystem?.topology?.runtime?.http_port ?? "?"}
         </span>
         <span class="health-badge {healthStatus}">
           {healthStatus === "healthy"
@@ -609,26 +647,28 @@
   </div>
 
   <!-- Export package -->
-  <div class="commission-export">
-    <button
-      type="button"
-      class="btn-secondary"
-      id="btn-export-package"
-      disabled={exportRunning}
-      onclick={doExport}
-    >
-      {exportRunning ? "Exporting…" : "Export .anpkg"}
-    </button>
-    {#if exportFeedback}
-      <span
-        id="export-package-feedback"
-        class="launch-summary"
-        style="color: {exportIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+  {#if !imported}
+    <div class="commission-export">
+      <button
+        type="button"
+        class="btn-secondary"
+        id="btn-export-package"
+        disabled={exportRunning}
+        onclick={doExport}
       >
-        {exportFeedback}
-      </span>
-    {/if}
-  </div>
+        {exportRunning ? "Exporting…" : "Export .anpkg"}
+      </button>
+      {#if exportFeedback}
+        <span
+          id="export-package-feedback"
+          class="launch-summary"
+          style="color: {exportIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+        >
+          {exportFeedback}
+        </span>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Export bundle (offline install package) -->
   <div class="commission-export">

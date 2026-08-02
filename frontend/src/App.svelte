@@ -12,7 +12,7 @@
     ProjectSummary,
     ProviderSchemasResponse,
     RuntimeStatus,
-    SystemConfig,
+    ProjectDoc,
     TemplateSummary,
     WorkbenchConfig,
   } from "./lib/contracts";
@@ -34,7 +34,7 @@
   let runtimeStatus = $state<RuntimeStatus | null>(null);
   let showOnboarding = $state<boolean>(false);
   let projectName = $state<string | null>(null);
-  let system = $state<SystemConfig | null>(null);
+  let system = $state<ProjectDoc | null>(null);
   let workspace = $state<WorkspaceName | null>(null);
   let dirty = $state<boolean>(false);
   let currentPath = $state<string>("/");
@@ -169,7 +169,7 @@
 
   async function loadProject(name: string): Promise<boolean> {
     try {
-      system = await fetchJson<SystemConfig>(`/api/projects/${encodeURIComponent(name)}`);
+      system = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
       projectName = name;
       return true;
     } catch {

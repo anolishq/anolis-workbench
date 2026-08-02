@@ -19,6 +19,13 @@
   let createError = $state<string>("");
   let creating = $state<boolean>(false);
 
+  // ── Import (machine-profile) state ────────────────────────────────────────
+  let importPath = $state<string>("");
+  let importName = $state<string>("");
+  let importError = $state<string>("");
+  let importWarnings = $state<string[]>([]);
+  let importing = $state<boolean>(false);
+
   // ── Update state ──────────────────────────────────────────────────────────
   interface UpdateCheckResult {
     current_version: string;
@@ -72,6 +79,41 @@
       createError = err instanceof Error ? err.message : "Failed to create project";
     } finally {
       creating = false;
+    }
+  }
+
+  async function handleImport() {
+    importError = "";
+    importWarnings = [];
+    const path = importPath.trim();
+    if (!path) {
+      importError = "Path to the machine-profile project directory is required.";
+      return;
+    }
+    const name = importName.trim();
+    if (name && !validProjectName(name)) {
+      importError = "Project name must be 1-64 chars: letters, digits, hyphens, underscores.";
+      return;
+    }
+    importing = true;
+    try {
+      const result = await fetchJson<{ name: string; warnings?: string[] }>(
+        "/api/projects/import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(name ? { path, name } : { path }),
+        },
+      );
+      importWarnings = Array.isArray(result.warnings) ? result.warnings : [];
+      importPath = "";
+      importName = "";
+      await onProjectsRefreshed();
+      onNavigate(`/projects/${encodeURIComponent(result.name)}/compose`);
+    } catch (err) {
+      importError = err instanceof Error ? err.message : "Failed to import project";
+    } finally {
+      importing = false;
     }
   }
 
@@ -169,7 +211,12 @@
         <ul class="home-project-list">
           {#each projects as project (project.name)}
             <li class="home-project-item">
-              <span>{project.name}</span>
+              <span
+                >{project.name}{#if project.format === "machine-profile"}
+                  <span class="badge" title="Imported machine profile — carried verbatim"
+                    >profile</span
+                  >{/if}</span
+              >
               <button
                 type="button"
                 class="btn-secondary btn-sm"
@@ -221,6 +268,53 @@
       >
       {#if createError}
         <p class="field-error">{createError}</p>
+      {/if}
+    </div>
+
+    <div class="home-card">
+      <h2>Import Machine Profile</h2>
+      <p class="field-note">
+        Imports a canonical machine-profile project directory verbatim (read-only; deploy-focused).
+      </p>
+      <div class="form-group">
+        <label for="import-project-path">Profile directory</label>
+        <input
+          id="import-project-path"
+          type="text"
+          spellcheck="false"
+          style="font-family:monospace"
+          placeholder="/path/to/anolis-projects/projects/bioreactor-v1"
+          bind:value={importPath}
+        />
+      </div>
+      <div class="form-group">
+        <label for="import-project-name">Project name (optional)</label>
+        <input
+          id="import-project-name"
+          type="text"
+          maxlength="64"
+          placeholder="defaults to the directory name"
+          autocomplete="off"
+          spellcheck="false"
+          bind:value={importName}
+        />
+      </div>
+      <button
+        id="btn-import-project"
+        type="button"
+        class="btn-primary"
+        disabled={importing}
+        onclick={handleImport}>{importing ? "Importing…" : "Import Project"}</button
+      >
+      {#if importError}
+        <p class="field-error">{importError}</p>
+      {/if}
+      {#if importWarnings.length > 0}
+        <ul class="field-note">
+          {#each importWarnings as warning, i (i)}
+            <li>{warning}</li>
+          {/each}
+        </ul>
       {/if}
     </div>
 

@@ -106,7 +106,7 @@
           onclick={() => onNavigate("/")}
         >
           <h2>Import a project</h2>
-          <p>Open an existing project from disk.</p>
+          <p>Import a canonical machine-profile project directory (carried verbatim).</p>
         </button>
       </div>
 

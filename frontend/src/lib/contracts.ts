@@ -15,6 +15,7 @@ export interface ApiErrorResponse extends UnknownRecord {
 
 export interface ProjectSummary extends UnknownRecord {
   name: string;
+  format?: "system" | "machine-profile";
   meta: UnknownRecord;
 }
 
@@ -151,6 +152,24 @@ export interface SystemConfig extends UnknownRecord {
   meta: SystemMeta;
   topology: TopologyConfig;
   paths: PathsConfig;
+}
+
+/**
+ * Imported (machine-profile) project (#226): the canonical directory is
+ * carried verbatim; this document is a read-only parsed view plus
+ * workbench-owned metadata. Discriminated from SystemConfig by `format`.
+ */
+export interface ImportedProjectDoc extends UnknownRecord {
+  format: "machine-profile";
+  meta: UnknownRecord;
+  profile: UnknownRecord;
+  warnings?: string[];
+}
+
+export type ProjectDoc = SystemConfig | ImportedProjectDoc;
+
+export function isImportedDoc(doc: ProjectDoc | null): doc is ImportedProjectDoc {
+  return doc !== null && (doc as UnknownRecord).format === "machine-profile";
 }
 
 export interface RuntimeStatusCode extends UnknownRecord {
