@@ -22,8 +22,8 @@ _SYSTEM_SCHEMA_CACHE: dict | None = None
 
 SIDECAR_NAME = machine_profile.SIDECAR_NAME
 
-FORMAT_SYSTEM = "system"
-FORMAT_MACHINE_PROFILE = "machine-profile"
+FORMAT_SYSTEM = machine_profile.FORMAT_SYSTEM
+FORMAT_MACHINE_PROFILE = machine_profile.FORMAT_MACHINE_PROFILE
 
 # Only these are copied on import (issue #226): the profile plus everything it
 # can reference. docs/, config-release/, workbench/ etc. stay in the source repo,

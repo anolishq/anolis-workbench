@@ -31,6 +31,11 @@ SIDECAR_NAME = "workbench.json"
 # this set, or the imported workspace would be missing files the profile needs.
 IMPORT_COPY = ("machine-profile.yaml", "config", "behaviors")
 
+# Workspace project formats. `system` is the legacy system.json shim retired by
+# #255; it survives only as a detection branch that triggers migration.
+FORMAT_SYSTEM = "system"
+FORMAT_MACHINE_PROFILE = "machine-profile"
+
 _PROFILE_SCHEMA_CACHE: dict[str, Any] | None = None
 _PROJECTS_PATH_RE = re.compile(r"\.\./anolis-projects/projects/([^/\s\"']+)/")
 
