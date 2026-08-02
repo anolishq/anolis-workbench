@@ -511,3 +511,33 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 def write_sidecar(project_dir: Path, sidecar: dict[str, Any]) -> None:
     _write_text_atomic(project_dir / machine_profile.SIDECAR_NAME, json.dumps(sidecar, indent=2) + "\n")
+
+
+def retarget_project(project_dir: Path, new_machine_id: str) -> None:
+    """Re-key an authored project onto a new machine_id.
+
+    Every `../anolis-projects/projects/<id>/...` token inside every config
+    references the project directory by name, and install.sh keys its path
+    rewrites on that basename. Copying a project without rewriting them would
+    make the copy deploy into the ORIGINAL's directory — so create-from-template
+    and duplicate both go through here.
+    """
+    profile = machine_profile.load_profile(project_dir)
+    old_machine_id = profile.get("machine_id")
+    if old_machine_id == new_machine_id:
+        return
+
+    pattern = re.compile(r"(\.\./anolis-projects/projects/)[a-z0-9-]+(/)")
+    for rel in machine_profile.referenced_files(profile):
+        if machine_profile.containment_error(rel) is not None:
+            continue
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        rewritten = pattern.sub(rf"\g<1>{new_machine_id}\g<2>", text)
+        if rewritten != text:
+            _write_text_atomic(path, rewritten)
+
+    profile["machine_id"] = new_machine_id
+    _write_yaml_atomic(project_dir / machine_profile.PROFILE_FILENAME, profile)

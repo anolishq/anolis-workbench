@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "format": "machine-profile",
+  "authored": true,
+  "meta": {
+    "name": "bioreactor-manual",
+    "created": "2026-04-03T00:00:00Z",
+    "profile_dir_name": "bioreactor-manual"
+  },
+  "host_paths": {
+    "runtime_executable": "build/dev-release/core/anolis-runtime",
+    "providers": {
+      "bread0": {
+        "executable": "../anolis-provider-bread/build/dev-linux-hardware-release/anolis-provider-bread"
+      },
+      "ezo0": {
+        "executable": "../anolis-provider-ezo/build/dev-linux-hardware-release/anolis-provider-ezo"
+      }
+    }
+  },
+  "launch": {
+    "variant": "manual"
+  },
+  "warnings": []
+}

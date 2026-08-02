@@ -13,9 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import deploy, installer, migrations
+from anolis_workbench.core import deploy, installer
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
@@ -56,31 +55,21 @@ def _create_job() -> ProvisionJob:
 # ---------------------------------------------------------------------------
 
 
-def _prepare_workspace(params: dict[str, Any], progress: Any) -> tuple[dict[str, Any], Path]:
-    """Authoring: ensure the local workspace project exists; return (system, project_dir)."""
+def _prepare_workspace(params: dict[str, Any], progress: Any) -> Path:
+    """Authoring: ensure the local workspace project exists; return its dir.
+
+    Since #255 a workspace project IS the canonical artifact set, so there is
+    nothing to render — deploy copies this directory verbatim.
+    """
     project = params.get("project", "bioreactor-v1")
     template = params.get("template", "bioreactor-manual")
     prefix = Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
 
-    project_dir = paths_module.SYSTEMS_ROOT / project
+    project_dir: Path = paths_module.SYSTEMS_ROOT / project
     if not project_dir.exists() or params.get("force", False):
         progress("project", f"Creating workspace project {project} from {template}")
         installer.provision_project(template, project, prefix, force=params.get("force", False))
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    system, _ = migrations.migrate_system(system)
-    return system, project_dir
-
-
-def _imported_project_dir(project: str) -> Path | None:
-    """The workspace dir when `project` names an imported (machine-profile)
-    project — those deploy verbatim via the *_profile paths (#226)."""
-    try:
-        fmt = projects_module.project_format(project)
-    except FileNotFoundError:
-        return None
-    if fmt != projects_module.FORMAT_MACHINE_PROFILE:
-        return None
-    return projects_module.project_dir(project)
+    return project_dir
 
 
 def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
@@ -92,24 +81,14 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 
     try:
         project = params.get("project", "bioreactor-v1")
-        imported_dir = _imported_project_dir(project)
-        if imported_dir is not None:
-            result = deploy.deploy_local_profile(
-                project_dir=imported_dir,
-                project_name=project,
-                prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-                variant=params.get("variant"),
-                progress_callback=_progress,
-            )
-        else:
-            system, project_dir = _prepare_workspace(params, _progress)
-            result = deploy.deploy_local(
-                system=system,
-                project_name=project,
-                workspace_dir=project_dir,
-                prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-                progress_callback=_progress,
-            )
+        project_dir = _prepare_workspace(params, _progress)
+        result = deploy.deploy_local(
+            project_dir=project_dir,
+            project_name=project,
+            prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
+            variant=params.get("variant"),
+            progress_callback=_progress,
+        )
         job.events.append(
             {
                 "stage": "done",
@@ -143,26 +122,15 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 
         # Authoring stays local; the target only receives the deployment.
         project = params.get("project", "bioreactor-v1")
-        imported_dir = _imported_project_dir(project)
-        if imported_dir is not None:
-            result = deploy.deploy_remote_profile(
-                executor=executor,
-                project_dir=imported_dir,
-                project_name=project,
-                prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-                variant=params.get("variant"),
-                progress_callback=_progress,
-            )
-        else:
-            system, project_dir = _prepare_workspace(params, _progress)
-            result = deploy.deploy_remote(
-                executor=executor,
-                system=system,
-                project_name=project,
-                workspace_dir=project_dir,
-                prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
-                progress_callback=_progress,
-            )
+        project_dir = _prepare_workspace(params, _progress)
+        result = deploy.deploy_remote(
+            executor=executor,
+            project_dir=project_dir,
+            project_name=project,
+            prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
+            variant=params.get("variant"),
+            progress_callback=_progress,
+        )
         # Auto-add host to fleet registry
         from anolis_workbench.core.fleet import auto_register_host
 
@@ -294,37 +262,19 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         if arch == "aarch64":
             arch = "arm64"
         project = params.get("project", "bioreactor-v1")
-        template = params.get("template", "bioreactor-manual")
 
         _progress("resolve", f"Building bundle for {project} ({arch})")
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="anolis-bundle-"))
-        imported_dir = _imported_project_dir(project)
-        if imported_dir is not None:
-            tarball_path = deploy.stage_bundle_profile(
-                project_dir=imported_dir,
-                project_name=project,
-                out_dir=tmp_dir,
-                arch=arch,
-                variant=params.get("variant"),
-                progress_callback=_progress,
-            )
-        else:
-            tpl_dir = paths_module.TEMPLATES_ROOT / template
-            tpl_path = tpl_dir / "system.json"
-            if not tpl_path.exists():
-                raise RuntimeError(f"Template '{template}' not found at {tpl_path}")
-            system = json.loads(tpl_path.read_text(encoding="utf-8"))
-            system, _ = migrations.migrate_system(system)
-
-            tarball_path = deploy.stage_bundle(
-                system=system,
-                project_name=project,
-                workspace_dir=tpl_dir,
-                out_dir=tmp_dir,
-                arch=arch,
-                progress_callback=_progress,
-            )
+        project_dir = _prepare_workspace(params, _progress)
+        tarball_path = deploy.stage_bundle(
+            project_dir=project_dir,
+            project_name=project,
+            out_dir=tmp_dir,
+            arch=arch,
+            variant=params.get("variant"),
+            progress_callback=_progress,
+        )
 
         with _bundle_artifacts_lock:
             _bundle_artifacts[job.job_id] = tarball_path

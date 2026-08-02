@@ -4,6 +4,7 @@ Preflight checks, process launch, stop, restart, and SSE log streaming.
 All public functions are called from server.py HTTP handlers.
 """
 
+import copy
 import json
 import os
 import pathlib
@@ -17,8 +18,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+import yaml
+
+from anolis_workbench.core import canonical, provider_schemas
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import provider_schemas
 
 _state: dict = {
     "project": None,  # active project name
@@ -230,19 +233,19 @@ def _discover_external_runtime() -> dict | None:
     from anolis_workbench.core import projects as projects_module
 
     for project_dir in sorted(systems_dir.iterdir()):
-        if not project_dir.is_dir() or not (project_dir / "system.json").exists():
+        if not project_dir.is_dir():
             continue
         try:
-            system = projects_module.get_project(project_dir.name)
-            topology = system.get("topology")
-            rt = topology.get("runtime") if isinstance(topology, dict) else None
+            document = projects_module.get_project(project_dir.name)
+            runtime_doc = active_runtime_config(document)
         except (FileNotFoundError, ValueError, OSError, AttributeError, TypeError):
-            # AttributeError/TypeError guard a system.json that parsed to a
-            # non-object (get_project is annotated -> dict but json.loads is not).
             continue
-        if not isinstance(rt, dict):
+        if not isinstance(runtime_doc, dict):
             continue
-        bind = rt.get("http_bind") or "127.0.0.1"
+        http = runtime_doc.get("http")
+        if not isinstance(http, dict):
+            continue
+        bind = http.get("bind") or "127.0.0.1"
         if bind in ("0.0.0.0", ""):
             bind = "127.0.0.1"
         # Only auto-detect a loopback-bound runtime. A non-loopback bind is a
@@ -250,7 +253,7 @@ def _discover_external_runtime() -> dict | None:
         # (operate.py) — not something to probe automatically on every status poll.
         if bind not in ("127.0.0.1", "localhost", "::1"):
             continue
-        port = rt.get("http_port")
+        port = http.get("port")
         if not isinstance(port, int):
             continue
         if _runtime_alive(bind, port):
@@ -297,23 +300,19 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     Re-renders YAML to disk before running binary checks.
     """
     from anolis_workbench.core import (
-        renderer,  # local import avoids any circular at import time
-        validator,
+        canonical_validator,  # local import avoids any circular at import time
     )
 
     checks: list[dict] = []
 
-    # Re-render YAML to disk first so --check-config sees current state
+    # Project the canonical variant to disk first, so --check-config sees the
+    # config the runtime will actually be handed.
     try:
-        renders = renderer.render(system, name, systems_dir_name=paths_module.SYSTEMS_ROOT.name)
-        for rel_path, content in renders.items():
-            out = project_dir / rel_path
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(content, encoding="utf-8")
+        launch_config = materialize_launch_config(project_dir, system)
     except Exception as exc:
         checks.append(
             {
-                "name": "Render YAML to disk",
+                "name": "Project runtime config for launch",
                 "ok": False,
                 "error": str(exc),
                 "hint": None,
@@ -322,7 +321,8 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         return {"ok": False, "checks": checks}
 
     # Check 1: Runtime binary
-    runtime_exe_value = system.get("paths", {}).get("runtime_executable", "")
+    host_paths = canonical.host_paths({"host_paths": system.get("host_paths")})
+    runtime_exe_value = host_paths.get("runtime_executable", "")
     runtime_exe = _resolve_executable_path(runtime_exe_value)
     _exists_check(
         checks,
@@ -332,9 +332,9 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     )
 
     # Check 2: Provider binaries
-    providers = system.get("topology", {}).get("providers", {})
+    providers = system.get("providers", {})
     for pid, pcfg in providers.items():
-        exe_str = system.get("paths", {}).get("providers", {}).get(pid, {}).get("executable", "")
+        exe_str = host_paths.get("providers", {}).get(pid, {}).get("executable", "")
         exe = _resolve_executable_path(exe_str)
         kind = pcfg.get("kind", "")
         # Build hints follow the org convention (releases.provider_repo) for any
@@ -353,12 +353,13 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     checks.append(_check_writable(project_dir))
 
     # Check 3b: Runtime port in use
-    rt_port = system.get("topology", {}).get("runtime", {}).get("http_port")
+    runtime_doc = active_runtime_config(system) or {}
+    rt_port = (runtime_doc.get("http") or {}).get("port")
     if rt_port is not None:
         checks.append(_check_port(rt_port))
 
     # Check 4: System-level validation
-    errors = validator.validate_system(system)
+    errors = canonical_validator.validate_project(system)
     if errors:
         for err in errors:
             checks.append({"name": "System-level validation", "ok": False, "error": err, "hint": None})
@@ -370,7 +371,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         _check_config_binary(
             "Runtime --check-config",
             runtime_exe,
-            project_dir / "anolis-runtime.yaml",
+            launch_config,
         )
     )
 
@@ -378,9 +379,10 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     # executable profile (protocol#62); _check_config_binary degrades gracefully
     # ("Not yet available") for a binary that does not recognize the flag.
     for pid in providers:
-        exe_str = system.get("paths", {}).get("providers", {}).get(pid, {}).get("executable", "")
+        exe_str = host_paths.get("providers", {}).get(pid, {}).get("executable", "")
         exe = _resolve_executable_path(exe_str)
-        yaml_path = project_dir / "providers" / f"{pid}.yaml"
+        rel = system.get("profile", {}).get("providers", {}).get(pid, {}).get("config", "")
+        yaml_path = project_dir / rel if rel else project_dir
         checks.append(
             _check_config_binary(
                 f"Provider {pid} --check-config",
@@ -522,18 +524,13 @@ def _check_config_binary(check_name: str, exe: pathlib.Path | None, yaml_path: p
 
 def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     """Start the anolis-runtime subprocess."""
-    from anolis_workbench.core import renderer
 
     current = _current_runtime_snapshot(clean_stale=True)
     if current["running"]:
         raise RuntimeError("A system is already running.")
 
-    # Re-render YAML to disk
-    renders = renderer.render(system, name, systems_dir_name=paths_module.SYSTEMS_ROOT.name)
-    for rel_path, content in renders.items():
-        out = project_dir / rel_path
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(content, encoding="utf-8")
+    # Project the canonical variant into a runnable host config.
+    launch_config = str(materialize_launch_config(project_dir, system))
 
     # Prepare log file (overwrite)
     log_path = project_dir / "logs" / "latest.log"
@@ -541,11 +538,11 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     log_file = open(log_path, "w", buffering=1, encoding="utf-8")
 
     # Build command
-    runtime_exe = _resolve_executable_path(system.get("paths", {}).get("runtime_executable", ""))
+    host = canonical.host_paths({"host_paths": system.get("host_paths")})
+    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing.")
-    runtime_config = str((project_dir / "anolis-runtime.yaml").resolve())
-    cmd = [str(runtime_exe), "--config", runtime_config]
+        raise RuntimeError("Runtime executable path is missing (set it in the project's paths).")
+    cmd = [str(runtime_exe), "--config", launch_config]
 
     proc = subprocess.Popen(
         cmd,
@@ -634,17 +631,24 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     stop()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
 
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
+    from anolis_workbench.core import projects as projects_module
+
+    system = projects_module.get_project(name)
 
     log_path = project_dir / "logs" / "latest.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "w", buffering=1, encoding="utf-8")
 
-    runtime_exe = _resolve_executable_path(system.get("paths", {}).get("runtime_executable", ""))
+    host = canonical.host_paths({"host_paths": system.get("host_paths")})
+    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing.")
-    runtime_config = str((project_dir / "anolis-runtime.yaml").resolve())
-    cmd = [str(runtime_exe), "--config", runtime_config]
+        raise RuntimeError("Runtime executable path is missing (set it in the project's paths).")
+    launch_config = str(
+        project_dir / canonical.LAUNCH_DIR / "launch" / canonical.variant_filename(launch_variant(system))
+    )
+    if not pathlib.Path(launch_config).is_file():
+        launch_config = str(materialize_launch_config(project_dir, system))
+    cmd = [str(runtime_exe), "--config", launch_config]
 
     proc = subprocess.Popen(
         cmd,
@@ -794,3 +798,68 @@ def handle_log_stream(handler, project_name: str) -> None:
                     _sse_subscribers.pop(project_name, None)
             except ValueError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Dev-launch host projection (#255)
+# ---------------------------------------------------------------------------
+
+
+def launch_variant(document: dict) -> str:
+    launch = document.get("launch")
+    variant = launch.get("variant") if isinstance(launch, dict) else None
+    if isinstance(variant, str) and variant in (document.get("variants") or {}):
+        return variant
+    variants = document.get("variants") or {}
+    return canonical.MANUAL_VARIANT if canonical.MANUAL_VARIANT in variants else next(iter(variants), "")
+
+
+def active_runtime_config(document: dict) -> dict | None:
+    variant = launch_variant(document)
+    doc = (document.get("variants") or {}).get(variant)
+    return doc if isinstance(doc, dict) else None
+
+
+def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> pathlib.Path:
+    """Project the canonical variant into a runnable host config.
+
+    The canonical files carry DEPLOY TOKENS, which only mean something after
+    install.sh rewrites them. Dev-launch needs real host paths, so we write a
+    throwaway copy under .workbench/launch/ with the sidecar's host paths
+    substituted in. The canonical files are never modified — that separation is
+    what lets one artifact set serve both deploy and dev-launch.
+    """
+    runtime_doc = active_runtime_config(document)
+    if runtime_doc is None:
+        raise RuntimeError("Project has no runtime variant to launch.")
+
+    host = canonical.host_paths({"host_paths": document.get("host_paths")})
+    provider_paths = host.get("providers", {})
+    projected = copy.deepcopy(runtime_doc)
+
+    profile_providers = document.get("profile", {}).get("providers", {})
+    for entry in projected.get("providers", []):
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("id")
+        executable = provider_paths.get(pid, {}).get("executable") if isinstance(pid, str) else None
+        if not executable:
+            raise RuntimeError(f"No host executable configured for provider '{pid}' (set it in the project's paths).")
+        entry["command"] = str(_resolve_executable_path(executable) or executable)
+        rel = profile_providers.get(pid, {}).get("config") if isinstance(pid, str) else None
+        if isinstance(rel, str):
+            entry["args"] = ["--config", str((project_dir / rel).resolve())]
+
+    automation = projected.get("automation")
+    if isinstance(automation, dict):
+        behavior = automation.get("behavior_tree")
+        if isinstance(behavior, str) and behavior.startswith("../"):
+            match = canonical.PROJECT_PATH_RE.fullmatch(behavior)
+            if match is not None:
+                automation["behavior_tree"] = str((project_dir / match.group(2) / match.group(3)).resolve())
+
+    out = project_dir / canonical.LAUNCH_DIR / "launch"
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / canonical.variant_filename(launch_variant(document))
+    target.write_text(yaml.safe_dump(projected, default_flow_style=False, sort_keys=False), encoding="utf-8")
+    return target

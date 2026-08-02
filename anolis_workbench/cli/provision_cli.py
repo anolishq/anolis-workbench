@@ -421,15 +421,12 @@ def _run_install(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — delegated to the canonical anolis install.sh.
     try:
         result = deploy.deploy_local(
-            system=system,
+            project_dir=project_dir,
             project_name=args.project,
-            workspace_dir=project_dir,
             prefix=args.install_prefix,
             no_start=args.no_start,
             dry_run=args.dry_run,
@@ -512,9 +509,8 @@ def _run_bundle(args: argparse.Namespace) -> int:
     try:
         system, workspace_dir = _load_system_for_deploy(args.template, args.system)
         tarball = deploy.stage_bundle(
-            system=system,
+            project_dir=workspace_dir,
             project_name=args.project,
-            workspace_dir=workspace_dir,
             out_dir=args.out,
             arch=arch,
             prefix=args.install_prefix,
@@ -602,16 +598,13 @@ def _run_remote(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-    system = json.loads((project_dir / "system.json").read_text(encoding="utf-8"))
-    system, _ = migrations.migrate_system(system)
 
     # 2. Deploy — push the config to the target and run install.sh there.
     try:
         result = deploy.deploy_remote(
             executor=executor,
-            system=system,
+            project_dir=project_dir,
             project_name=args.project,
-            workspace_dir=project_dir,
             prefix=args.install_prefix,
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),
@@ -668,9 +661,8 @@ def _provision_single_target(
         system, workspace_dir = _load_system_for_deploy(target.template, None)
         result = deploy.deploy_remote(
             executor=executor,
-            system=system,
+            project_dir=workspace_dir,
             project_name=target.project,
-            workspace_dir=workspace_dir,
             prefix=target.install_prefix,
             dry_run=dry_run,
         )
