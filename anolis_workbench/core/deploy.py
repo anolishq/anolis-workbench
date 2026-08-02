@@ -216,7 +216,18 @@ def materialize_imported_project_dir(
         known = ", ".join(sorted(runtime_profiles))
         raise DeployError(f"variant '{variant}' not in the profile's runtime_profiles (known: {known})")
 
-    missing = [ref for ref in machine_profile.referenced_files(profile) if not (project_dir / ref).is_file()]
+    uncarriable = [
+        f"{ref} ({problem})"
+        for ref in machine_profile.referenced_files(profile)
+        if (problem := machine_profile.containment_error(ref)) is not None
+    ]
+    if uncarriable:
+        raise DeployError(f"machine profile references files it cannot carry: {', '.join(sorted(uncarriable))}")
+    missing = [
+        ref
+        for ref in machine_profile.referenced_files(profile)
+        if machine_profile.containment_error(ref) is None and not (project_dir / ref).is_file()
+    ]
     if missing:
         raise DeployError(f"machine profile references missing files: {', '.join(sorted(missing))}")
 
@@ -226,15 +237,20 @@ def materialize_imported_project_dir(
     sidecar = machine_profile.read_sidecar(project_dir) or {}
     raw_meta = sidecar.get("meta")
     meta = raw_meta if isinstance(raw_meta, dict) else {}
-    profile_dir_name = meta.get("profile_dir_name") or profile.get("machine_id") or project_dir.name
+    profile_dir_name = str(meta.get("profile_dir_name") or profile.get("machine_id") or project_dir.name)
+    # This value builds a filesystem path; the sidecar is workbench-owned but
+    # unvalidated, so keep it to a single plain directory name.
+    if profile_dir_name in ("", ".", "..") or "/" in profile_dir_name or "\\" in profile_dir_name:
+        raise DeployError(f"invalid project directory name {profile_dir_name!r} in the imported project sidecar")
 
-    out = dest / str(profile_dir_name)
+    out = dest / profile_dir_name
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(project_dir / machine_profile.PROFILE_FILENAME, out / machine_profile.PROFILE_FILENAME)
-    for sub in ("config", "behaviors"):
-        src = project_dir / sub
-        if src.is_dir():
-            shutil.copytree(src, out / sub, copy_function=shutil.copy2)
+    for entry in machine_profile.copy_entries(profile):
+        src = project_dir / entry
+        if src.is_file():
+            shutil.copy2(src, out / entry)
+        elif src.is_dir():
+            shutil.copytree(src, out / entry, copy_function=shutil.copy2, dirs_exist_ok=True)
 
     provider_kinds = {
         pid: kind or "unknown" for pid, kind in machine_profile.derive_kinds(profile, project_dir).items()

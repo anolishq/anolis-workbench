@@ -88,6 +88,8 @@ def stop_project(handler, name: str) -> None:
     if err:
         handler._json(400, {"error": err})
         return
+    if _reject_imported(handler, name, "stop"):
+        return
     try:
         projects_module.get_project(name)
     except FileNotFoundError:

@@ -26,8 +26,9 @@ FORMAT_SYSTEM = "system"
 FORMAT_MACHINE_PROFILE = "machine-profile"
 
 # Only these are copied on import (issue #226): the profile plus everything it
-# can reference. docs/, config-release/, workbench/ etc. stay in the source repo.
-_IMPORT_COPY = ("machine-profile.yaml", "config", "behaviors")
+# can reference. docs/, config-release/, workbench/ etc. stay in the source repo,
+# and import REFUSES a profile whose references fall outside this set.
+_IMPORT_COPY = machine_profile.IMPORT_COPY
 
 
 class ProjectValidationError(ValueError):
@@ -353,15 +354,22 @@ def import_project(source_path: str, name: str) -> tuple[dict, list[str]]:
         raise ValueError(f"Project '{name}' already exists")
     source = pathlib.Path(source_path).expanduser().resolve()
     profile_dir_name = source.name
+    if profile_dir_name == "":  # e.g. "/" — deploy needs a real project dir name
+        raise ImportValidationError([f"Cannot import {source}: not a project directory"])
 
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:
         raise ImportValidationError(report.errors)
 
     pdir = project_dir(name)
+    # Claim the directory FIRST (exist_ok=False): a concurrent same-name import
+    # must lose here, before the cleanup branch below can delete a live project.
     try:
         pdir.mkdir(parents=True)
-        for entry in _IMPORT_COPY:
+    except FileExistsError as exc:
+        raise ValueError(f"Project '{name}' already exists") from exc
+    try:
+        for entry in machine_profile.copy_entries(report.profile or {}):
             src = source / entry
             if src.is_file():
                 shutil.copy2(src, pdir / entry)

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { fetchJson } from "../lib/api";
-  import type { ProjectSummary, TemplateSummary } from "../lib/contracts";
+  import { ApiResponseError, fetchJson } from "../lib/api";
+  import type { ApiErrorResponse, ProjectSummary, TemplateSummary } from "../lib/contracts";
 
   let {
     projects,
@@ -23,7 +23,7 @@
   let importPath = $state<string>("");
   let importName = $state<string>("");
   let importError = $state<string>("");
-  let importWarnings = $state<string[]>([]);
+  let importErrors = $state<Array<{ path?: string; message?: string }>>([]);
   let importing = $state<boolean>(false);
 
   // ── Update state ──────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@
 
   async function handleImport() {
     importError = "";
-    importWarnings = [];
+    importErrors = [];
     const path = importPath.trim();
     if (!path) {
       importError = "Path to the machine-profile project directory is required.";
@@ -105,12 +105,17 @@
           body: JSON.stringify(name ? { path, name } : { path }),
         },
       );
-      importWarnings = Array.isArray(result.warnings) ? result.warnings : [];
       importPath = "";
       importName = "";
       await onProjectsRefreshed();
+      // Any import warnings are persisted in the sidecar and shown by the
+      // profile view we navigate to.
       onNavigate(`/projects/${encodeURIComponent(result.name)}/compose`);
     } catch (err) {
+      if (err instanceof ApiResponseError && err.payload && typeof err.payload === "object") {
+        const payload = err.payload as ApiErrorResponse;
+        importErrors = Array.isArray(payload.errors) ? payload.errors : [];
+      }
       importError = err instanceof Error ? err.message : "Failed to import project";
     } finally {
       importing = false;
@@ -308,13 +313,13 @@
       >
       {#if importError}
         <p class="field-error">{importError}</p>
-      {/if}
-      {#if importWarnings.length > 0}
-        <ul class="field-note">
-          {#each importWarnings as warning, i (i)}
-            <li>{warning}</li>
-          {/each}
-        </ul>
+        {#if importErrors.length > 0}
+          <ul class="field-error">
+            {#each importErrors as e, i (i)}
+              <li>{e.message ?? "Validation error"}</li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </div>
 

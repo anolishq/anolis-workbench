@@ -93,7 +93,7 @@ describe("Commission.svelte (imported project)", () => {
 });
 
 describe("Home.svelte import card", () => {
-  it("imports via the API, surfaces warnings, and navigates", async () => {
+  it("imports via the API and navigates", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/projects/import")) {
@@ -145,5 +145,41 @@ describe("Home.svelte import card", () => {
     });
 
     expect(screen.getByTitle(/Imported machine profile/)).toBeInTheDocument();
+  });
+
+  it("surfaces per-error import validation messages on a 400", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(input).includes("/api/projects/import")) {
+        return jsonResponse(400, {
+          error: "Machine-profile directory failed import validation",
+          code: "import_validation_failed",
+          errors: [
+            {
+              source: "import",
+              code: "import.validation",
+              path: "$",
+              message: "Referenced file missing: config/provider-ezo.yaml",
+            },
+          ],
+        });
+      }
+      return jsonResponse(200, []);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onNavigate = vi.fn();
+
+    render(Home, {
+      props: { projects: [], templates: [], onNavigate, onProjectsRefreshed: vi.fn() },
+    });
+
+    await fireEvent.input(screen.getByLabelText("Profile directory"), {
+      target: { value: "/broken/profile-dir" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /Import Project/ }));
+
+    // The per-error detail is the whole value of the validation matrix — it
+    // must reach the operator, not just the generic headline.
+    expect(await screen.findByText(/Referenced file missing: config\/provider-ezo\.yaml/)).toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 });

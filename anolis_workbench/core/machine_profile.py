@@ -12,7 +12,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import jsonschema
@@ -25,6 +25,10 @@ PROFILE_FILENAME = "machine-profile.yaml"
 # Sidecar for imported projects — the only workbench-owned file in an imported
 # project dir (deliberately the #255 residual artifact).
 SIDECAR_NAME = "workbench.json"
+
+# What an import copies. Everything the profile references MUST resolve inside
+# this set, or the imported workspace would be missing files the profile needs.
+IMPORT_COPY = ("machine-profile.yaml", "config", "behaviors")
 
 _PROFILE_SCHEMA_CACHE: dict[str, Any] | None = None
 _PROJECTS_PATH_RE = re.compile(r"\.\./anolis-projects/projects/([^/\s\"']+)/")
@@ -53,7 +57,7 @@ def read_sidecar(project_dir: Path) -> dict[str, Any] | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):  # ValueError covers JSONDecodeError + UnicodeDecodeError
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -104,7 +108,46 @@ def referenced_files(profile: dict[str, Any]) -> list[str]:
     behaviors = profile.get("behaviors")
     if isinstance(behaviors, list):
         refs.extend(str(b) for b in behaviors if isinstance(b, str))
+    validation = profile.get("validation")
+    if isinstance(validation, dict) and isinstance(validation.get("check_http_script"), str):
+        refs.append(validation["check_http_script"])
     return refs
+
+
+def containment_error(ref: str) -> str | None:
+    """Why `ref` cannot be carried by an import, or None if it can.
+
+    A reference must be relative and must not escape the project directory.
+    An ABSOLUTE ref is the dangerous case: `Path(source) / "/etc/x"` discards
+    the left side, so a host-local file would satisfy an existence check at
+    import AND at deploy while never being carried anywhere.
+    """
+    if ref.strip() == "":
+        return "empty path"
+    if PurePosixPath(ref).is_absolute() or Path(ref).is_absolute():
+        return f"'{ref}' is an absolute path — profile references must be relative to the project directory"
+    if ".." in PurePosixPath(ref).parts:
+        return f"'{ref}' escapes the project directory"
+    return None
+
+
+def copy_entries(profile: dict[str, Any]) -> list[str]:
+    """Top-level entries an import must copy for this profile.
+
+    The base set plus any additional top-level directory the profile actually
+    references (e.g. a `validation/` script), so nothing a profile depends on
+    is silently left behind. Callers must reject uncarriable references
+    (see `containment_error`) first.
+    """
+    entries = list(IMPORT_COPY)
+    for ref in referenced_files(profile):
+        if containment_error(ref) is not None:
+            continue
+        parts = PurePosixPath(ref).parts
+        top = parts[0] if parts else ""
+        if top and top not in entries:
+            entries.append(top)
+    return entries
 
 
 def derive_kinds(profile: dict[str, Any], source_dir: Path) -> dict[str, str | None]:
@@ -157,8 +200,11 @@ def validate_project_dir(source_dir: Path, profile_dir_name: str) -> ImportRepor
         return report
 
     for ref in referenced_files(profile):
-        candidate = source_dir / ref
-        if not candidate.is_file():
+        problem = containment_error(ref)
+        if problem is not None:
+            report.errors.append(f"Referenced file {problem}")
+            continue
+        if not (source_dir / ref).is_file():
             report.errors.append(f"Referenced file missing: {ref}")
     if report.errors:
         return report
