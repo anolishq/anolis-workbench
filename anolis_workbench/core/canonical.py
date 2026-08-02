@@ -566,19 +566,22 @@ def _prune_orphans(
     its variant was removed.
 
     So: only files inside `config/` that match install.sh's own globs, and they
-    are RENAMED rather than deleted. A `.orphaned.bak` suffix takes them out of
-    install.sh's view without destroying anything.
+    are MOVED to `.workbench/retired/` rather than deleted — out of install.sh's
+    view and out of the deployed set (nothing under `.workbench/` is copied),
+    without destroying anything.
     """
     keep = set(just_written) | _owned_paths(project_dir, profile)
     candidates = set(orphaned_config_files(project_dir, profile)) | {
         path for path in previously_owned if path.parent == (project_dir / CONFIG_DIR).resolve()
     }
+    retired_dir = project_dir / LAUNCH_DIR / "retired"
     for path in sorted(candidates - keep):
         if not path.is_file():
             continue
         if not any(path.match(pattern) for pattern in _INSTALL_SH_CONFIG_GLOBS):
             continue
-        path.replace(path.with_suffix(path.suffix + ".orphaned.bak"))
+        retired_dir.mkdir(parents=True, exist_ok=True)
+        path.replace(retired_dir / path.name)
 
 
 def _load_yaml(path: Path) -> Any:

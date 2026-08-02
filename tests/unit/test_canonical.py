@@ -315,7 +315,7 @@ def test_write_retires_a_stray_config_install_sh_would_consume(tmp_path: pathlib
     canonical.write_project(pdir, _document())
 
     assert not spare.exists()
-    retired = pdir / "config" / "provider-bread.spare0.yaml.orphaned.bak"
+    retired = pdir / canonical.LAUNCH_DIR / "retired" / "provider-bread.spare0.yaml"
     assert retired.read_text(encoding="utf-8") == "staged: true\n"
 
 
