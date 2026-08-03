@@ -18,7 +18,6 @@ import requests
 
 GITHUB_API = "https://api.github.com"
 RUNTIME_REPO = "anolishq/anolis"
-PROVIDER_ORG = "anolishq"
 
 
 def _seed_from_env() -> "dict[str, str | None]":
@@ -35,11 +34,6 @@ def _seed_from_env() -> "dict[str, str | None]":
 
 
 _RELEASE_CACHE: "dict[str, str | None]" = _seed_from_env()
-
-
-def provider_repo(kind: str) -> str:
-    """Repo for a provider kind (anolishq/anolis-provider-<kind>)."""
-    return f"{PROVIDER_ORG}/anolis-provider-{kind}"
 
 
 def latest_release_version(repo: str) -> "str | None":

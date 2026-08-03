@@ -1,5 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
+  "kind": "sim",
+  "provider_version": "0.2.7",
   "source": {
     "repo": "anolishq/anolis-provider-sim",
     "path": "anolis-provider-sim-0.2.7-config-schema.json",
@@ -8,6 +10,10 @@
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "raw",
+    "templates": {
+      "asset": "anolis-provider-sim-{version}-config-schema.json",
+      "manifest_asset": "anolis-provider-sim-{version}-config-schema-manifest.json"
+    },
     "release": {
       "repo": "anolishq/anolis-provider-sim",
       "tag": "v0.2.7",

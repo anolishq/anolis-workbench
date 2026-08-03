@@ -337,8 +337,8 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         exe_str = host_paths.get("providers", {}).get(pid, {}).get("executable", "")
         exe = _resolve_executable_path(exe_str)
         kind = pcfg.get("kind", "")
-        # Build hints follow the org convention (releases.provider_repo) for any
-        # kind with a vendored config-schema envelope.
+        # A hint string only. The real repo for a kind lives in the machine
+        # profile's components.providers pin, which may be any org (#285).
         known_kind = provider_schemas.get_envelope(kind) is not None
         repo = f"anolis-provider-{kind}" if known_kind else None
         docs = "docs/" if known_kind else None

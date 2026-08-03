@@ -1,5 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
+  "kind": "bread",
+  "provider_version": "0.3.8",
   "source": {
     "repo": "anolishq/anolis-provider-bread",
     "path": "anolis-provider-bread-0.3.8-config-schema.json",
@@ -8,6 +10,10 @@
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "raw",
+    "templates": {
+      "asset": "anolis-provider-bread-{version}-config-schema.json",
+      "manifest_asset": "anolis-provider-bread-{version}-config-schema-manifest.json"
+    },
     "release": {
       "repo": "anolishq/anolis-provider-bread",
       "tag": "v0.3.8",

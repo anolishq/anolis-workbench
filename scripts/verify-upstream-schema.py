@@ -11,10 +11,12 @@ Supported schemas:
   --schema runtime-config
   --schema machine-profile
   --schema runtime-http
-  --schema provider-config-ezo
-  --schema provider-config-bread
-  --schema provider-config-sim
+  --schema provider-config-<kind>   (one per lock in contracts/upstream/providers/)
+  --all-providers                   (every provider lock, plus registry invariants)
 
+Provider kinds are NOT listed here (#285). The locks under
+`contracts/upstream/providers/` are the single declaration and this script
+discovers them, so CI covers a newly added provider without a workflow edit.
 Provider config-schema envelopes are raw JSON assets (the asset IS the schema
 document; lock distribution.asset_format == "raw").
 
@@ -22,7 +24,7 @@ Usage:
   python scripts/verify-upstream-schema.py --schema runtime-config
   python scripts/verify-upstream-schema.py --schema machine-profile --offline
   python scripts/verify-upstream-schema.py --schema runtime-config --require-release-artifact
-  python scripts/verify-upstream-schema.py --schema runtime-http --require-release-artifact
+  python scripts/verify-upstream-schema.py --all-providers --require-release-artifact
 """
 
 from __future__ import annotations
@@ -38,9 +40,15 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
+import provider_locks
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-_SCHEMA_CONFIGS: dict[str, dict[str, str]] = {
+_PROVIDER_PREFIX = "provider-config-"
+
+# The anolis-side schemas: a fixed set of three, not a registry (see the sync
+# script). Provider entries are derived from the lock directory instead.
+_ANOLIS_CONFIGS: dict[str, dict[str, str]] = {
     "runtime-config": {
         "schema_path": "anolis_workbench/schemas/runtime-config.schema.json",
         "lock_path": "contracts/upstream/anolis/runtime-config.lock.json",
@@ -53,20 +61,17 @@ _SCHEMA_CONFIGS: dict[str, dict[str, str]] = {
         "schema_path": "contracts/runtime-http.openapi.v0.yaml",
         "lock_path": "contracts/upstream/anolis/runtime-http.lock.json",
     },
-    # Provider config-schema envelopes (raw JSON assets; see the sync script).
-    "provider-config-ezo": {
-        "schema_path": "anolis_workbench/schemas/providers/ezo.config-schema.json",
-        "lock_path": "contracts/upstream/providers/ezo-config-schema.lock.json",
-    },
-    "provider-config-bread": {
-        "schema_path": "anolis_workbench/schemas/providers/bread.config-schema.json",
-        "lock_path": "contracts/upstream/providers/bread-config-schema.lock.json",
-    },
-    "provider-config-sim": {
-        "schema_path": "anolis_workbench/schemas/providers/sim.config-schema.json",
-        "lock_path": "contracts/upstream/providers/sim-config-schema.lock.json",
-    },
 }
+
+
+def _config_for(repo_root: Path, schema: str) -> dict[str, str]:
+    if schema.startswith(_PROVIDER_PREFIX):
+        kind = schema[len(_PROVIDER_PREFIX) :]
+        return {
+            "schema_path": str(provider_locks.envelope_path(repo_root, kind).relative_to(repo_root)),
+            "lock_path": str(provider_locks.lock_path(repo_root, kind).relative_to(repo_root)),
+        }
+    return _ANOLIS_CONFIGS[schema]
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -232,33 +237,8 @@ def validate_release_mode(
     return 0
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify vendored upstream schema against lock metadata.")
-    parser.add_argument(
-        "--schema",
-        required=True,
-        choices=list(_SCHEMA_CONFIGS.keys()),
-        help="Which schema to verify",
-    )
-    parser.add_argument(
-        "--repo-root",
-        default=str(_REPO_ROOT),
-        help="Repository root path (default: auto-detected)",
-    )
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Skip network fetch; validate local lock/schema only",
-    )
-    parser.add_argument(
-        "--require-release-artifact",
-        action="store_true",
-        help="Fail if lock mode is not release-artifact",
-    )
-    args = parser.parse_args()
-
-    cfg = _SCHEMA_CONFIGS[args.schema]
-    repo_root = Path(args.repo_root).resolve()
+def verify_one(repo_root: Path, schema: str, *, offline: bool, require_release_artifact: bool) -> int:
+    cfg = _config_for(repo_root, schema)
     schema_path = (repo_root / cfg["schema_path"]).resolve()
     lock_path = (repo_root / cfg["lock_path"]).resolve()
 
@@ -280,7 +260,7 @@ def main() -> int:
     distribution = lock.get("distribution") if isinstance(lock, dict) else None
     mode = distribution.get("mode") if isinstance(distribution, dict) else None
 
-    if args.require_release_artifact and mode != "release-artifact":
+    if require_release_artifact and mode != "release-artifact":
         print(
             f"ERROR: lock mode is '{mode}', but --require-release-artifact requires 'release-artifact'",
             file=sys.stderr,
@@ -288,10 +268,91 @@ def main() -> int:
         return 1
 
     if mode == "release-artifact":
-        return validate_release_mode(schema_bytes, schema_path, lock_path, lock, offline=args.offline)
+        return validate_release_mode(schema_bytes, schema_path, lock_path, lock, offline=offline)
 
     print(f"ERROR: unsupported lock mode '{mode}'", file=sys.stderr)
     return 1
+
+
+def verify_all_providers(repo_root: Path, *, offline: bool, require_release_artifact: bool) -> int:
+    """Every provider lock, plus the invariants that only make sense across the
+    whole registry — the 1:1 correspondence with the vendored envelopes, and
+    each lock agreeing with the envelope it vendored."""
+    problems = provider_locks.check_registry(repo_root)
+    if problems:
+        print("ERROR: provider registry is inconsistent", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 1
+
+    kinds = provider_locks.locked_kinds(repo_root)
+    if not kinds:
+        print("ERROR: no provider locks found under contracts/upstream/providers/", file=sys.stderr)
+        return 1
+
+    print(f"Provider registry: {len(kinds)} locked kind(s) — {', '.join(kinds)}\n")
+    failed: list[str] = []
+    for kind in kinds:
+        # Keep going after a failure so one run reports every broken kind
+        # rather than making the fix an N-round game of whack-a-mole.
+        if verify_one(
+            repo_root,
+            f"{_PROVIDER_PREFIX}{kind}",
+            offline=offline,
+            require_release_artifact=require_release_artifact,
+        ):
+            failed.append(kind)
+        print()
+    if failed:
+        print(f"ERROR: verification failed for: {', '.join(failed)}", file=sys.stderr)
+        return 1
+    print("All provider locks verified.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify vendored upstream schema against lock metadata.")
+    # NB: --schema is validated after parsing, against the RESOLVED --repo-root.
+    # argparse `choices` would have to be built before --repo-root is known,
+    # which silently validates against the wrong tree.
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--schema", metavar="NAME", help="Which schema to verify")
+    target.add_argument(
+        "--all-providers",
+        action="store_true",
+        help="Verify every provider lock and the registry invariants",
+    )
+    parser.add_argument(
+        "--repo-root",
+        default=str(_REPO_ROOT),
+        help="Repository root path (default: auto-detected)",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip network fetch; validate local lock/schema only",
+    )
+    parser.add_argument(
+        "--require-release-artifact",
+        action="store_true",
+        help="Fail if lock mode is not release-artifact",
+    )
+    args = parser.parse_args()
+    repo_root = Path(args.repo_root).resolve()
+    if args.schema is not None:
+        # Data-derived, not hardcoded: every provider lock contributes a name,
+        # so a kind becomes verifiable the moment it is locked.
+        known = sorted(_ANOLIS_CONFIGS) + [f"{_PROVIDER_PREFIX}{k}" for k in provider_locks.locked_kinds(repo_root)]
+        if args.schema not in known:
+            parser.error(f"argument --schema: invalid choice: {args.schema!r} (choose from {', '.join(known)})")
+
+    if args.all_providers:
+        return verify_all_providers(
+            repo_root, offline=args.offline, require_release_artifact=args.require_release_artifact
+        )
+    return verify_one(
+        repo_root, args.schema, offline=args.offline, require_release_artifact=args.require_release_artifact
+    )
 
 
 if __name__ == "__main__":

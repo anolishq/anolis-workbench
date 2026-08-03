@@ -70,7 +70,13 @@ export interface ProviderSchemasResponse extends UnknownRecord {
   providers: Record<string, ProviderSchemaEnvelope>;
 }
 
-export type ProviderKind = "sim" | "bread" | "ezo" | string;
+/**
+ * Any provider kind the server offers, which is whatever envelopes it serves —
+ * never a fixed set. The literals that used to be unioned here collapsed to
+ * `string` anyway, so they typed nothing and only read like an enum somebody
+ * had to extend (#285).
+ */
+export type ProviderKind = string;
 
 export interface RestartPolicy extends UnknownRecord {
   enabled?: boolean;
