@@ -81,6 +81,13 @@ line-ending = "auto"
 testpaths = [
     "tests",
 ]
+# `scripts/` holds provider_locks.py, the shared registry helper the two schema
+# scripts import as a sibling. It is deliberately outside the package (it reads
+# contracts/, which is not shipped in the wheel), so tests reach it this way
+# rather than each mutating sys.path.
+pythonpath = [
+    "scripts",
+]
 addopts = "--strict-markers -ra"
 # Deprecations are errors: the suite is deprecation-clean (audited #129), so keep
 # it that way — a new DeprecationWarning (first-party or from a dependency bump)

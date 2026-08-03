@@ -1,10 +1,14 @@
 """Provider config-schema envelope registry (#270)."""
 
 import json
+import pathlib
 
+import provider_locks  # from scripts/, on the path via pytest's `pythonpath`
 import pytest
 
 from anolis_workbench.core import provider_schemas
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
@@ -14,8 +18,14 @@ def _fresh_cache():
     provider_schemas._envelope_cache = None
 
 
-def test_available_kinds_are_the_vendored_envelopes():
-    assert provider_schemas.available_kinds() == ["bread", "ezo", "sim"]
+def test_available_kinds_are_the_locked_providers():
+    """The kinds offered at runtime are exactly the kinds the registry locks.
+
+    Asserted against the lock directory rather than a literal list: naming the
+    current three here would mean a fourth provider fails the suite, which is
+    the code change #285 exists to remove.
+    """
+    assert provider_schemas.available_kinds() == provider_locks.locked_kinds(REPO_ROOT)
 
 
 def test_envelopes_carry_the_profile_shape():
@@ -25,6 +35,10 @@ def test_envelopes_carry_the_profile_shape():
         assert isinstance(envelope["config_schema_version"], int)
         assert envelope["config_schema_version"] >= 1
         assert isinstance(envelope["schema"], dict)
+        # Not our convention to relax: install.sh fetches
+        # `anolis-provider-<kind>-<ver>-linux-<arch>.tar.gz` and runs
+        # `bin/anolis-provider-<kind>`, so the name is fixed by the deploy
+        # contract for second-party providers too.
         assert envelope["provider"] == f"anolis-provider-{kind}"
         # Load-bearing for #283: an envelope that does not say which provider
         # version it came from silently disables skew detection for that kind,

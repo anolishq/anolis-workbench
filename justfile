@@ -27,7 +27,7 @@ lint:
 check:
     uv run ruff check . --output-format=github
     uv run ruff format --check .
-    uv run mypy anolis_workbench tests
+    uv run mypy anolis_workbench tests scripts/provider_locks.py
     cd frontend && npm run format:check
     cd frontend && npm run lint
     cd frontend && npm run check

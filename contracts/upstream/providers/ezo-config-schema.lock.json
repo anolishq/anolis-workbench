@@ -1,5 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
+  "kind": "ezo",
+  "provider_version": "0.3.4",
   "source": {
     "repo": "anolishq/anolis-provider-ezo",
     "path": "anolis-provider-ezo-0.3.4-config-schema.json",
@@ -8,6 +10,10 @@
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "raw",
+    "templates": {
+      "asset": "anolis-provider-ezo-{version}-config-schema.json",
+      "manifest_asset": "anolis-provider-ezo-{version}-config-schema-manifest.json"
+    },
     "release": {
       "repo": "anolishq/anolis-provider-ezo",
       "tag": "v0.3.4",

@@ -143,7 +143,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run mypy
-        run: uv run mypy anolis_workbench tests
+        run: uv run mypy anolis_workbench tests scripts/provider_locks.py
 
   test:
     name: Unit tests
@@ -223,11 +223,12 @@ jobs:
       - name: Verify runtime-http OpenAPI lock
         run: python3 scripts/verify-upstream-schema.py --schema runtime-http --require-release-artifact
 
+      # Discovers every lock under contracts/upstream/providers/, so adding a
+      # provider needs no edit here (#285), and checks the registry invariants:
+      # locks and vendored envelopes correspond 1:1, and each lock agrees with
+      # the envelope it vendored.
       - name: Verify provider config-schema locks
-        run: |
-          python3 scripts/verify-upstream-schema.py --schema provider-config-ezo --require-release-artifact
-          python3 scripts/verify-upstream-schema.py --schema provider-config-bread --require-release-artifact
-          python3 scripts/verify-upstream-schema.py --schema provider-config-sim --require-release-artifact
+        run: python3 scripts/verify-upstream-schema.py --all-providers --require-release-artifact
 
   freeze-smoke:
     name: Freeze smoke test (Linux)
