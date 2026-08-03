@@ -313,14 +313,20 @@ def validate_project_dir(source_dir: Path, profile_dir_name: str) -> ImportRepor
                 "its config filename — deploy will rely on install.sh's own resolution."
             )
             continue
-        envelope = provider_schemas.get_envelope(kind)
-        if envelope is None:
+        resolution = provider_schemas.resolve_for_profile(profile, kind)
+        if resolution is None:
             report.warnings.append(
                 f"Provider '{pid}' (kind '{kind}'): no vendored config schema — "
                 "config carried verbatim without workbench-side validation."
             )
-        elif isinstance(config_ref, str):
-            report.warnings.extend(_envelope_warnings(source_dir / config_ref, config_ref, pid, envelope))
+            continue
+        # NB: version skew (#283) is deliberately NOT reported here. Import
+        # warnings are persisted to the sidecar and never recomputed, so a skew
+        # recorded now would survive the schema sync that resolves it — the
+        # #290 failure mode. It is derived at read time in projects.get_project
+        # instead, which covers imported projects too.
+        if isinstance(config_ref, str):
+            report.warnings.extend(_envelope_warnings(source_dir / config_ref, config_ref, pid, resolution.envelope))
 
     report.warnings.extend(_project_path_warnings(source_dir, profile, profile_dir_name))
     return report

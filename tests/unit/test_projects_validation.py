@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import pathlib
 
+import conftest
 import pytest
 
 from anolis_workbench.core import canonical, machine_profile, projects
@@ -318,3 +319,114 @@ def test_migration_warnings_survive_the_first_save(_systems_root: pathlib.Path) 
     projects.save_project("legacy", document)
 
     assert any("has no kind" in w for w in projects.get_project("legacy")["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# Version-keyed schema resolution (#283)
+# ---------------------------------------------------------------------------
+
+
+def _skew_warnings(warnings: list[str]) -> list[str]:
+    return [w for w in warnings if "pinned at" in w]
+
+
+def _packaged_sim_version() -> str:
+    from anolis_workbench.core import provider_schemas
+
+    envelope = provider_schemas.get_envelope("sim")
+    assert envelope is not None
+    version = envelope["provider_version"]
+    assert isinstance(version, str)
+    return version
+
+
+def test_get_project_warns_when_the_pin_disagrees_with_the_packaged_envelope(
+    _systems_root: pathlib.Path, canonical_project
+) -> None:
+    """The live bug #283 fixes: a machine pinned to an older provider had its
+    config validated against whichever envelope happened to be vendored, and
+    nothing said so."""
+    canonical_project(_systems_root / "skewed", machine_id="skewed")
+
+    warnings = _skew_warnings(projects.get_project("skewed")["warnings"])
+
+    assert len(warnings) == 1
+    # Both versions named, so the reader can tell which way the skew runs.
+    assert _packaged_sim_version() in warnings[0]
+    assert conftest.FIXTURE_PROVIDER_VERSIONS["sim"] in warnings[0]
+
+
+def test_matching_pin_produces_no_warning(_systems_root: pathlib.Path, canonical_project) -> None:
+    canonical_project(
+        _systems_root / "matched",
+        machine_id="matched",
+        components={
+            "runtime": {"repo": "anolishq/anolis", "version": "0.1.39"},
+            "providers": {"sim": {"repo": "anolishq/anolis-provider-sim", "version": _packaged_sim_version()}},
+        },
+    )
+
+    assert _skew_warnings(projects.get_project("matched")["warnings"]) == []
+
+
+def test_the_skew_warning_is_derived_not_persisted(_systems_root: pathlib.Path, canonical_project) -> None:
+    """Correcting the pin clears the warning on the next read.
+
+    It is never written to the sidecar, so it cannot outlive what it describes
+    the way carried warnings do (#290) — the failure mode this avoids.
+    """
+    import json
+
+    pdir = canonical_project(_systems_root / "drift", machine_id="drift")
+    assert _skew_warnings(projects.get_project("drift")["warnings"])
+
+    sidecar = json.loads((pdir / machine_profile.SIDECAR_NAME).read_text(encoding="utf-8"))
+    assert _skew_warnings(sidecar.get("warnings") or []) == []
+
+    # Round-tripping a document that CARRIES the warning must not persist it —
+    # otherwise the derived warning becomes a carried one on the first save and
+    # inherits exactly the staleness it was written to avoid.
+    projects.save_project("drift", projects.get_project("drift"))
+    sidecar = json.loads((pdir / machine_profile.SIDECAR_NAME).read_text(encoding="utf-8"))
+    assert _skew_warnings(sidecar.get("warnings") or []) == []
+
+    document = projects.get_project("drift")
+    document["profile"]["components"]["providers"]["sim"]["version"] = _packaged_sim_version()
+    projects.save_project("drift", document)
+
+    assert _skew_warnings(projects.get_project("drift")["warnings"]) == []
+    sidecar = json.loads((pdir / machine_profile.SIDECAR_NAME).read_text(encoding="utf-8"))
+    assert _skew_warnings(sidecar.get("warnings") or []) == []
+
+
+def test_skew_warns_once_per_kind_not_once_per_provider(_systems_root: pathlib.Path, canonical_project) -> None:
+    """The pin lives in components.providers, so providers of a kind share it."""
+    canonical_project(
+        _systems_root / "many",
+        machine_id="many",
+        providers={"sim0": "sim", "sim1": "sim", "sim2": "sim"},
+    )
+
+    assert len(_skew_warnings(projects.get_project("many")["warnings"])) == 1
+
+
+def test_an_unpinned_provider_never_warns(_systems_root: pathlib.Path, canonical_project) -> None:
+    """A local-build profile has not asked for a version, so there is nothing
+    for the packaged envelope to contradict."""
+    canonical_project(_systems_root / "unpinned", machine_id="unpinned", pin_components=False)
+
+    assert _skew_warnings(projects.get_project("unpinned")["warnings"]) == []
+
+
+def test_a_skewed_pin_still_validates_the_config(_systems_root: pathlib.Path, canonical_project) -> None:
+    """Warning, never error: an inexact resolution must still catch real config
+    mistakes, or the offline lab loses validation entirely."""
+    pdir = canonical_project(_systems_root / "still-checked", machine_id="still-checked")
+    document = projects.get_project("still-checked")
+    document["providers"]["sim0"]["config"]["startup_policy"] = "not-a-policy"
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("still-checked", document)
+
+    assert any(err.get("code") == "provider.schema" for err in exc_info.value.errors), exc_info.value.errors
+    assert pdir.is_dir()

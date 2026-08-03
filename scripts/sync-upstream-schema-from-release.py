@@ -106,6 +106,11 @@ def validate_envelope_shape(schema_bytes: bytes) -> None:
         raise RuntimeError("provider envelope must carry an integer config_schema_version >= 1")
     if not isinstance(doc.get("schema"), dict):
         raise RuntimeError("provider envelope 'schema' must be a JSON object")
+    # Without it the workbench cannot tell whether a machine's pin agrees with
+    # the contract it is validating against (#283) — and would say nothing.
+    provider_version = doc.get("provider_version")
+    if not isinstance(provider_version, str) or not provider_version.strip():
+        raise RuntimeError("provider envelope must carry a non-empty string provider_version")
 
 
 def sha256_bytes(data: bytes) -> str:

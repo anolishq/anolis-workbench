@@ -493,6 +493,19 @@ def _degraded_project(name: str) -> dict:
     }
 
 
+def _with_derived_warnings(document: dict) -> list[str]:
+    """Sidecar warnings plus the ones derived from the document itself.
+
+    Version skew (#283) is a pure function of the document and the packaged
+    envelopes, so it is computed here rather than recorded at import or save
+    time — correcting a pin, or syncing the envelope that resolves the skew,
+    clears it on the next read with no stale copy left behind (#290).
+    """
+    carried = document.get("warnings")
+    warnings = [w for w in carried if isinstance(w, str)] if isinstance(carried, list) else []
+    return warnings + [w for w in provider_schemas.version_skew_warnings(document) if w not in warnings]
+
+
 def get_project(name: str) -> dict:
     """The whole canonical project as one document.
 
@@ -507,6 +520,7 @@ def get_project(name: str) -> dict:
         except (machine_profile.ProfileError, canonical.CanonicalError) as exc:
             return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
+        document["warnings"] = _with_derived_warnings(document)
         return document
     if fmt == FORMAT_SYSTEM:
         # Listed (hiding it would look like deletion) but not migratable, so
@@ -648,18 +662,20 @@ def validate_project_payload(document: object, project_dir: pathlib.Path | None 
 
 
 def _validate_canonical_provider_configs(document: dict) -> list[dict[str, str]]:
-    """Each provider config against its vendored --config-schema envelope (#270)."""
+    """Each provider config against the --config-schema envelope for the version
+    the machine pins (#270, #283)."""
     errors: list[dict[str, str]] = []
     providers = document.get("providers")
     if not isinstance(providers, dict):
         return errors
+    profile = document.get("profile")
     for pid, entry in sorted(providers.items()):
         if not isinstance(entry, dict):
             continue
         kind = entry.get("kind")
         base = f"$.providers.{pid}"
-        envelope = provider_schemas.get_envelope(kind) if isinstance(kind, str) else None
-        if envelope is None:
+        resolution = provider_schemas.resolve_for_profile(profile, kind) if isinstance(kind, str) else None
+        if resolution is None:
             known = ", ".join(provider_schemas.available_kinds())
             errors.append(
                 {
@@ -671,7 +687,7 @@ def _validate_canonical_provider_configs(document: dict) -> list[dict[str, str]]
             )
             continue
         config = entry.get("config")
-        schema = envelope["schema"]
+        schema = resolution.envelope["schema"]
         validator = jsonschema.Draft202012Validator(schema)
         for err in sorted(validator.iter_errors(config), key=lambda e: list(e.path)):
             errors.append(

@@ -197,7 +197,7 @@
     {#if system && imported}
       <ProfileView doc={system} />
     {:else if editable}
-      <ProfileForm doc={editable} onChanged={markDirty} />
+      <ProfileForm doc={editable} {providerSchemas} onChanged={markDirty} />
 
       <div class="variant-bar">
         <label for="variant-select">Runtime variant</label>

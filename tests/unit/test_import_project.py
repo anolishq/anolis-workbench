@@ -132,6 +132,36 @@ def test_import_warns_on_non_inert_manual_variant(systems_root: pathlib.Path, so
     assert any("verify-inert" in w for w in warnings), warnings
 
 
+def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
+    systems_root: pathlib.Path, source_dir: pathlib.Path
+) -> None:
+    """An imported rig pins whatever it was commissioned with — routinely older
+    than the packaged envelope (#283).
+
+    The warning must come from the READ, not the import: import warnings are
+    written to the sidecar and never recomputed, so a skew recorded here would
+    survive the schema sync that resolves it (#290) and could never be cleared
+    on a project that is read-only by design.
+    """
+    profile = source_dir / "machine-profile.yaml"
+    profile.write_text(
+        profile.read_text(encoding="utf-8").replace('version: "0.3.8"', 'version: "0.3.6"'),
+        encoding="utf-8",
+    )
+
+    _, warnings = projects.import_project(str(source_dir), "rig-a")
+    assert not any("pinned at" in w for w in warnings), warnings
+
+    sidecar = json.loads((systems_root / "rig-a" / machine_profile.SIDECAR_NAME).read_text(encoding="utf-8"))
+    assert not any("pinned at" in w for w in sidecar.get("warnings") or []), sidecar
+
+    skew = [w for w in projects.get_project("rig-a")["warnings"] if "pinned at 0.3.6" in w]
+    assert len(skew) == 1, projects.get_project("rig-a")["warnings"]
+    assert "0.3.8" in skew[0]
+    # The unchanged ezo pin still matches, so it must stay quiet.
+    assert not any("ezo" in w and "pinned at" in w for w in projects.get_project("rig-a")["warnings"])
+
+
 # ---------------------------------------------------------------------------
 # CRUD behavior on imported projects
 # ---------------------------------------------------------------------------
