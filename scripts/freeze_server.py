@@ -21,29 +21,36 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_ENTRYPOINT = REPO_ROOT / "anolis_workbench" / "cli" / "main.py"
 DEFAULT_FRONTEND_INDEX = REPO_ROOT / "anolis_workbench" / "frontend" / "dist" / "index.html"
 
-# Runtime-loaded modules/resources that PyInstaller may miss without explicit hints.
-DEFAULT_HIDDEN_IMPORTS = [
-    "anolis_workbench.server.routes.compose",
-    "anolis_workbench.server.routes.commission",
-    "anolis_workbench.server.routes.onboarding",
-    "anolis_workbench.server.routes.operate",
-    "anolis_workbench.server.routes.provision",
-    "anolis_workbench.core.bundler",
-    "anolis_workbench.core.executor",
-    "anolis_workbench.core.exporter",
-    "anolis_workbench.core.fleet",
-    "anolis_workbench.core.installer",
-    "anolis_workbench.core.launcher",
-    "anolis_workbench.core.observability",
-    "anolis_workbench.core.package_validator",
-    "anolis_workbench.core.paths",
-    "anolis_workbench.core.preflight",
-    "anolis_workbench.core.projects",
-    "anolis_workbench.core.renderer",
-    "anolis_workbench.core.rollback",
-    "anolis_workbench.core.systemd",
-    "anolis_workbench.core.validator",
-]
+# Runtime-loaded modules PyInstaller may miss without explicit hints.
+#
+# DERIVED from the tree rather than hand-listed. The previous static list had
+# drifted badly: it named three modules that no longer exist (core.bundler,
+# core.preflight, core.systemd) while omitting ten that do. Phantom entries only
+# warn, but an OMISSION silently drops a module from the frozen sidecar and
+# surfaces as an ImportError at runtime, on a user's machine, long after the
+# build looked clean. A list that mirrors the filesystem should be read from the
+# filesystem.
+_HIDDEN_IMPORT_PACKAGES: tuple[str, ...] = (
+    "anolis_workbench.server.routes",
+    "anolis_workbench.core",
+)
+
+
+def _discover_hidden_imports() -> list[str]:
+    """Every non-dunder module in the packages loaded dynamically at runtime."""
+    found: list[str] = []
+    for package in _HIDDEN_IMPORT_PACKAGES:
+        package_dir = REPO_ROOT / pathlib.Path(*package.split("."))
+        if not package_dir.is_dir():
+            raise SystemExit(f"freeze_server: expected package directory not found: {package_dir}")
+        for module in sorted(package_dir.glob("*.py")):
+            if module.stem.startswith("__"):
+                continue
+            found.append(f"{package}.{module.stem}")
+    return found
+
+
+DEFAULT_HIDDEN_IMPORTS = _discover_hidden_imports()
 
 
 def _parse_args() -> argparse.Namespace:
