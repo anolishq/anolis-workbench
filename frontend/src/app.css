@@ -1389,6 +1389,13 @@ body {
   gap: 4px;
   max-width: 560px;
 }
+/* This control is a Category 2 protective stop: it commands devices that stay
+   powered and cannot remove power. Labelling it E-STOP invited an operator to
+   reach for it instead of the hardware emergency stop, so the distinction is
+   stated inline rather than left to the docs. */
+.estop-not-emergency {
+  font-weight: 600;
+}
 .estop-latched-banner {
   display: flex;
   flex-direction: column;

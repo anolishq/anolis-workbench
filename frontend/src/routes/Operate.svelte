@@ -787,10 +787,15 @@
             {estopRunning
               ? "ENGAGING…"
               : estop.software_safe_state === "none"
-                ? "E-STOP (latch only)"
-                : "E-STOP"}
+                ? "SOFTWARE STOP (latch only)"
+                : "SOFTWARE STOP"}
           </button>
           <div class="estop-info">
+            <span class="field-note estop-not-emergency">
+              Not an emergency stop. This commands devices that stay powered and needs the runtime,
+              providers and bus all working. Use the hardware emergency stop for any physical
+              hazard.
+            </span>
             {#if estop.software_safe_state === "hooks"}
               <span class="field-note"
                 >Runs the declared safe-state hooks, then latches actuation.</span
