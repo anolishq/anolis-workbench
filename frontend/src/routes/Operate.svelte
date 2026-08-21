@@ -744,9 +744,10 @@
       {/if}
     </div>
   {:else}
-    <!-- Software e-stop (wb#236) — thin trigger over POST /v0/estop -->
+    <!-- Software stop (wb#236) — thin trigger over POST /v0/estop. NOT an
+         emergency stop: it commands devices that stay powered. -->
     <div class="operate-section operate-estop-section">
-      <h3>Emergency Stop (Software)</h3>
+      <h3>Software Stop</h3>
       {#if !estop}
         <p class="placeholder">Safe-state status unavailable.</p>
       {:else if estop.latched}
@@ -787,8 +788,8 @@
             {estopRunning
               ? "ENGAGING…"
               : estop.software_safe_state === "none"
-                ? "E-STOP (latch only)"
-                : "E-STOP"}
+                ? "SOFTWARE STOP (latch only)"
+                : "SOFTWARE STOP"}
           </button>
           <div class="estop-info">
             {#if estop.software_safe_state === "hooks"}
@@ -823,8 +824,9 @@
         <div class={estopFeedbackClass}>{estopFeedback}</div>
       {/if}
       <div class="estop-disclaimer">
-        Software stop only — not a substitute for the hardware e-stop (backplane power cut). If in
-        doubt, cut power at the backplane.
+        Not an emergency stop — it commands devices that stay powered, and needs the runtime,
+        providers and bus all working. For any physical hazard use the hardware emergency stop. If
+        in doubt, cut power at the backplane.
       </div>
     </div>
 
