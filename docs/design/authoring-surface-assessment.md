@@ -1,6 +1,7 @@
 # The authoring surface: assessment and design record
 
-**Status:** decided. Filed as epic #337 on 2026-09-02.
+**Status:** decided. Filed as epic #337 on 2026-09-02, then audited and amended
+the same day — see #337 for the corrected issue set and build order.
 **Assessed against:** `anolis-workbench` v0.14.0 (`fffd095`), with `anolis` v0.1.40 (`e4db8e7`) as the upstream reference.
 
 This is the evidence base behind #337. It records the decision inventory, the
@@ -196,7 +197,7 @@ two's are not.**
 - *Task-oriented* had the highest honesty score of any submission and the
   best-reasoned architecture, but its thesis is a shell rewrite; both its critics and
   its own author said the shell rewrite should not ship. It also conflicts textually
-  with open PR #319 on the 1222-line `Operate.svelte`.
+  with PR #319 on the 1222-line `Operate.svelte` (merged 2026-09-02).
 
 ### 1. The depth control
 
@@ -451,7 +452,7 @@ else ever does. **This is a proposal for your review, not a filing plan.**
 | **S5** | Tell the truth about where the machine is and whether it answers | L | S2 | #264, #277, #275, #232's install leg, part of #230 |
 | **S6** | Templates that describe real machines | M | — | unblocks any guided flow |
 | **S7** | The guided path, as a path through the same surface | M | S1,S2,S4,S5,S6 | subsumes #229, #238, #239 |
-| **S8** | Resync the vendored runtime-config schema off v0.1.30 | S | upstream PR | prerequisite for any safe-state work |
+| **S8** | Resync the vendored runtime-config schema off v0.1.40 | S | — (unblocked today) | prerequisite for any safe-state work |
 | **S9** | Live-only safe-state editor | L | S5, S8 | anolis#251, #283, #237 |
 | **S10** | `x-anolis-consequence` in anolis-provider-sdk | S | SDK + 3 provider releases | serves #289 |
 
@@ -494,7 +495,8 @@ upstream additionally has `health` and `safety`).
 
 **1. Will you spend two cross-repo schema changes?** One in `anolis` (add
 title/description/default to `runtime-config.schema.json`, then resync the workbench
-lock off v0.1.30), one in `anolis-provider-sdk` (`x-anolis-consequence`). Neither can
+lock off v0.1.40 — v0.1.30 is the tag it is already pinned at), one in
+`anolis-provider-sdk` (`x-anolis-consequence`). Neither can
 be done from the workbench — `verify-upstream-schema.py` enforces byte-identity with
 the release asset.
 → **Lean: the runtime-config resync now, the SDK annotation filed today but off the
@@ -549,7 +551,7 @@ you need it.
 **6. Do the three tabs stay?** The task-oriented design makes the strongest case that
 Compose/Commission/Operate is the server's module layout wearing a tab bar. But it
 touches three route owners, breaks the e2e smoke that asserts the three URLs by name,
-and conflicts textually with PR #319.
+and conflicted textually with PR #319 (since merged).
 → **Lean: keep the tabs, revisit after the readiness panel has demonstrated what they
 hide.** If after S4 ships the panel is mostly rows saying "this is in a tab you did
 not know was dead", the rewrite has earned itself.
