@@ -1,7 +1,7 @@
 # The authoring surface: assessment and design record
 
 **Status:** decided. Filed as epic #337 on 2026-09-02.
-**Assessed against:** `anolis-workbench` v0.14.0, with `anolis` v0.1.40 as the upstream reference.
+**Assessed against:** `anolis-workbench` v0.14.0 (`fffd095`), with `anolis` v0.1.40 (`e4db8e7`) as the upstream reference.
 
 This is the evidence base behind #337. It records the decision inventory, the
 journey maps, the designs considered, and — most importantly — **the designs
