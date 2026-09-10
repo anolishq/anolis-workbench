@@ -272,3 +272,30 @@ def test_version_of_tag_strips_only_a_leading_v() -> None:
     assert provider_locks.version_of_tag("v1.2.3") == "1.2.3"
     assert provider_locks.version_of_tag("1.2.3") == "1.2.3"
     assert provider_locks.version_of_tag("2026.01.01") == "2026.01.01"
+
+
+def test_anolis_schema_locks_pin_one_upstream_tag() -> None:
+    """All three anolis schema locks must pin the same upstream tag.
+
+    The vendored runtime-config schema sat eleven releases behind for two
+    months, carrying no `safety` block, while CI stayed green throughout: the
+    upstream-schema check verifies each vendored copy against its OWN lock, and
+    every copy matched its own lock the whole time. Consistency was verified;
+    currency was not (#369).
+
+    This is the cheapest check that would have caught it — offline, no network,
+    no version constant to maintain. The three schemas come from one repo and
+    are released together, so a lock that has fallen behind its siblings is
+    always wrong, whatever "current" is taken to mean.
+    """
+    lock_dir = REPO_ROOT / "contracts" / "upstream" / "anolis"
+    locks = sorted(lock_dir.glob("*.lock.json"))
+
+    assert locks, f"no anolis schema locks found under {lock_dir}"
+
+    tags = {p.name: json.loads(p.read_text(encoding="utf-8"))["source"]["tag"] for p in locks}
+
+    assert len(set(tags.values())) == 1, (
+        "anolis schema locks disagree on the upstream tag; they are released "
+        f"together and must be synced together: {tags}"
+    )
