@@ -32,6 +32,12 @@
     },
     "automation": {
       "$ref": "#/$defs/automation"
+    },
+    "safety": {
+      "$ref": "#/$defs/safety"
+    },
+    "health": {
+      "$ref": "#/$defs/health"
     }
   },
   "additionalProperties": true,
@@ -356,6 +362,28 @@
       },
       "additionalProperties": true
     },
+    "health": {
+      "type": "object",
+      "properties": {
+        "staleness": {
+          "type": "object",
+          "properties": {
+            "warn_after_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Absolute age (ms) at which a device's liveness health becomes WARNING. 0 (default) derives the threshold from the poll cadence and device count (max(3 * poll_interval_ms * device_count, 2000)), so a serialized bus does not false-flap."
+            },
+            "stale_after_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Absolute age (ms) at which a device's liveness health becomes STALE. 0 (default) derives the threshold from the poll cadence and device count (max(8 * poll_interval_ms * device_count, 5000)). When both overrides are set, must be greater than warn_after_ms."
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "telemetry": {
       "type": "object",
       "properties": {
@@ -364,6 +392,11 @@
         },
         "influxdb": {
           "$ref": "#/$defs/influxdb"
+        },
+        "health_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Provider/device health snapshot ingestion cadence in milliseconds (anolis_provider_health / anolis_device_health measurements). Each snapshot performs a live provider GetHealth round-trip. 0 disables ingestion. Default 15000."
         },
         "influx_url": {
           "type": "string",
@@ -730,6 +763,37 @@
           ]
         }
       ],
+      "additionalProperties": true
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "safe_state": {
+          "$ref": "#/$defs/safe_state"
+        }
+      },
+      "additionalProperties": true
+    },
+    "safe_state": {
+      "type": "object",
+      "description": "Declared software safe-state for POST /v0/estop. Ladder: run hooks; else drive setpoints (must cover every actuating output); else zero all actuating outputs only if zero_is_safe.",
+      "properties": {
+        "hooks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_call"
+          }
+        },
+        "setpoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mode_transition_call"
+          }
+        },
+        "zero_is_safe": {
+          "type": "boolean"
+        }
+      },
       "additionalProperties": true
     }
   }

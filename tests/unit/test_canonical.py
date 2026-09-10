@@ -162,6 +162,38 @@ def test_runtime_config_errors_flags_a_broken_doc() -> None:
     assert canonical.runtime_config_errors({}) != []  # providers is required
 
 
+def test_vendored_schema_validates_the_safety_block() -> None:
+    """The vendored schema must carry `safety`, or the authoring surface is blind to it.
+
+    It was pinned at v0.1.30 for two months while canonical moved eleven releases
+    on, so a malformed safe-state declaration produced no error at all. CI stayed
+    green throughout: the upstream-schema check verifies the vendored copy against
+    its own lock, and lock and copy agreed the whole time. Nothing was watching
+    whether the pin was current.
+
+    A machine whose software stop drives nothing is the recurring defect in this
+    stack, and authoring is the cheapest place to catch it.
+    """
+    doc = _runtime_doc()
+    doc["safety"] = {"safe_state": {"hooks": "not-an-array", "zero_is_safe": "yes-please"}}
+
+    errors = canonical.runtime_config_errors(doc)
+    paths = {e.split(":", 1)[0] for e in errors}
+
+    assert "safety.safe_state.hooks" in paths, f"safety block not validated; got {errors}"
+    assert "safety.safe_state.zero_is_safe" in paths, f"safety block not validated; got {errors}"
+
+    # And a well-formed declaration passes, so the check discriminates rather
+    # than rejecting the whole section.
+    doc["safety"] = {
+        "safe_state": {
+            "hooks": [{"device_handle": "bread0/dcmt0", "function_name": "set_open_loop"}],
+            "zero_is_safe": False,
+        }
+    }
+    assert canonical.runtime_config_errors(doc) == []
+
+
 # ---------------------------------------------------------------------------
 # Profile building
 # ---------------------------------------------------------------------------
