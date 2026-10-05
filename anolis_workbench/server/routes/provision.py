@@ -254,6 +254,7 @@ def cancel_job(handler: Any, job_id: str) -> None:
 # Bundle export
 # ---------------------------------------------------------------------------
 
+_BUNDLE_ARCHS = ("arm64", "aarch64", "x86_64")
 _bundle_artifacts: dict[str, Path] = {}
 _bundle_artifacts_lock = threading.Lock()
 
@@ -308,6 +309,13 @@ def start_bundle(handler: Any) -> None:
     content_length = int(handler.headers.get("Content-Length", 0))
     body = handler.rfile.read(content_length) if content_length else b"{}"
     params = json.loads(body)
+
+    # Passed to install.sh --stage --arch verbatim; same allowlist as the
+    # provision CLI's --arch. Absent means "the host's arch".
+    arch = params.get("arch")
+    if arch is not None and arch not in _BUNDLE_ARCHS:
+        handler._json(400, {"error": f"Unsupported arch {arch!r}; expected one of {', '.join(_BUNDLE_ARCHS)}"})
+        return
 
     job = _create_job()
     thread = threading.Thread(target=_run_bundle_job, args=(job, params), daemon=True)

@@ -25,6 +25,7 @@ describe('Commission.svelte', () => {
               hint: 'Set runtime path in Compose',
             },
           ],
+          summary: { passed: 0, skipped: 0, failed: 1 },
         });
       }
       return jsonResponse(200, {});
@@ -42,10 +43,84 @@ describe('Commission.svelte', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Preflight Check' }));
 
-    expect(await screen.findByText(/Checks failed/)).toBeInTheDocument();
+    expect(await screen.findByText('0 passed · 0 skipped · 1 failed')).toBeInTheDocument();
     expect(screen.getByText('Runtime executable')).toBeInTheDocument();
     expect(screen.getByText('Runtime binary not found')).toBeInTheDocument();
     expect(screen.getByText('Set runtime path in Compose')).toBeInTheDocument();
+  });
+
+  it('counts a skipped preflight check as skipped, never as passed', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = pathFromInput(input);
+      if (path === '/api/projects/demo/preflight') {
+        return jsonResponse(200, {
+          ok: true,
+          // A binary that exists but predates --check-config: the shape
+          // launcher._check_config_binary returns as "Not yet available".
+          checks: [
+            { name: 'Provider sim0 binary exists', ok: true, error: null, hint: null },
+            { name: 'Provider sim0 --check-config', ok: null, note: 'Not yet available' },
+          ],
+          summary: { passed: 1, skipped: 1, failed: 0 },
+        });
+      }
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Preflight Check' }));
+
+    expect(await screen.findByText('1 passed · 1 skipped · 0 failed')).toBeInTheDocument();
+    expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
+    expect(screen.getByText('Not yet available')).toBeInTheDocument();
+    // Nothing failed, so Launch stays available.
+    expect(screen.getByRole('button', { name: /Launch/ })).toBeEnabled();
+  });
+
+  it('builds the bundle for the architecture the user chose', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { job_id: 'job-1' }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal(
+      'EventSource',
+      class {
+        onmessage: ((ev: MessageEvent) => void) | null = null;
+        close(): void {}
+      },
+    );
+
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+
+    const arch = screen.getByLabelText('Target architecture') as HTMLSelectElement;
+    expect(arch.value).toBe('arm64');
+    expect(screen.getByRole('option', { name: 'Raspberry Pi (arm64)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'x86_64' })).toBeInTheDocument();
+
+    await fireEvent.change(arch, { target: { value: 'x86_64' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Export Bundle' }));
+
+    await waitFor(() => {
+      const call = (fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit]>).find(
+        ([input]) => pathFromInput(input) === '/api/provision/bundle',
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: 'demo', arch: 'x86_64' });
+    });
   });
 
   it('shows launch in-flight state while launch request is pending', async () => {
