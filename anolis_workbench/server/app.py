@@ -80,7 +80,12 @@ def resolve_config(
 
 FRONTEND_DIR = paths_module.FRONTEND_DIR
 
-_WORKSPACE_ROUTE_RE = re.compile(r"^/projects/[^/]+(?:/(?:compose|commission|operate))?/?$")
+# The SPA fallback's route table: these must equal the client's EXACT_ROUTES
+# and WORKSPACES (frontend/src/lib/routes.ts). Both sides' tests compare them
+# against tests/fixtures/spa-routes.json, so a route added to one side fails.
+_SPA_EXACT_ROUTES = ("/", "/fleet")
+_WORKSPACES = ("compose", "commission", "operate")
+_WORKSPACE_ROUTE_RE = re.compile(rf"^/projects/[^/]+(?:/(?:{'|'.join(_WORKSPACES)}))?/?$")
 
 _MIME = {
     ".html": "text/html; charset=utf-8",
@@ -238,7 +243,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path: str) -> None:
         decoded = urllib.parse.unquote(path)
-        if decoded == "/" or _WORKSPACE_ROUTE_RE.match(decoded):
+        if decoded in _SPA_EXACT_ROUTES or _WORKSPACE_ROUTE_RE.match(decoded):
             self._serve_index()
             return
 

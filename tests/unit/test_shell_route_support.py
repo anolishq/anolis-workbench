@@ -191,6 +191,35 @@ def test_shell_routes_resolve_to_workbench_index(workbench_server: dict[str, Any
         _http_json(base_url, "/api/projects/wb-route-test", method="DELETE")
 
 
+_SPA_ROUTES_FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "spa-routes.json"
+
+
+def test_server_route_lists_match_the_shared_fixture() -> None:
+    # frontend/tests/unit/routes.test.ts asserts the client's EXACT_ROUTES and
+    # WORKSPACES equal the same fixture, so a route added to one side only
+    # fails one of the two tests. A client route the server does not serve
+    # 404s on reload, bookmark or shared link (#347).
+    from anolis_workbench.server import app
+
+    fixture = json.loads(_SPA_ROUTES_FIXTURE.read_text(encoding="utf-8"))
+    assert list(app._SPA_EXACT_ROUTES) == fixture["exact_routes"]
+    assert list(app._WORKSPACES) == fixture["workspaces"]
+
+
+def test_server_spa_fallback_matches_client_routes(workbench_server: dict[str, Any]) -> None:
+    base_url = workbench_server["base_url"]
+    fixture = json.loads(_SPA_ROUTES_FIXTURE.read_text(encoding="utf-8"))
+
+    for path in fixture["client_routes"]:
+        code, body, _headers = _http_bytes(base_url, path)
+        assert code == 200, (path, code)
+        assert b"Anolis Workbench" in body, path
+
+    for path in fixture["not_client_routes"]:
+        code, _body, _headers = _http_bytes(base_url, path)
+        assert code == 404, (path, code)
+
+
 def test_status_and_static_assets_are_served(workbench_server: dict[str, Any]) -> None:
     base_url = workbench_server["base_url"]
 

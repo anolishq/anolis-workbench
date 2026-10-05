@@ -17,15 +17,13 @@
     WorkbenchConfig,
   } from "./lib/contracts";
   import { describeCrossProjectRunningBanner, evaluateNavigationPrompts } from "./lib/guards";
+  import { parseRoute, WORKSPACES, type Route, type WorkspaceName } from "./lib/routes";
 
-  type WorkspaceName = "compose" | "commission" | "operate";
-  type Route = { path: string; project: string | null; workspace: WorkspaceName | null };
   type NavigateOptions = {
     replaceHistory?: boolean;
     historyAlreadySet?: boolean;
     bypassGuards?: boolean;
   };
-  const WORKSPACES: WorkspaceName[] = ["compose", "commission", "operate"];
 
   // ── State ────────────────────────────────────────────────────────────────
   let providerSchemas = $state<ProviderSchemasResponse | null>(null);
@@ -58,16 +56,6 @@
   );
 
   // ── Navigation ────────────────────────────────────────────────────────────
-  function parseRoute(path: string): Route | null {
-    if (path === "/") return { path: "/", project: null, workspace: null };
-    if (path === "/fleet") return { path: "/fleet", project: null, workspace: null };
-    const match = path.match(/^\/projects\/([^/]+)(?:\/(compose|commission|operate))?\/?$/);
-    if (!match) return null;
-    const project = decodeURIComponent(match[1]);
-    const ws = (match[2] || "compose") as WorkspaceName;
-    return { path: `/projects/${encodeURIComponent(project)}/${ws}`, project, workspace: ws };
-  }
-
   function updateWindowComposerConfig({ telemetryUrl }: { telemetryUrl?: string }): void {
     const next = { ...(window.__ANOLIS_COMPOSER__ ?? {}) };
     if (typeof telemetryUrl === "string" && telemetryUrl.trim()) {
