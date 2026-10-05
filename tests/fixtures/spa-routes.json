@@ -1,0 +1,16 @@
+{
+  "description": "Client/server SPA route parity. exact_routes and workspaces must equal the client's EXACT_ROUTES/WORKSPACES (frontend/src/lib/routes.ts) and the server's _SPA_EXACT_ROUTES/_WORKSPACES (server/app.py). client_routes must be accepted by parseRoute and served index.html; not_client_routes rejected by both. Checked by frontend/tests/unit/routes.test.ts and tests/unit/test_shell_route_support.py.",
+  "exact_routes": ["/", "/fleet"],
+  "workspaces": ["compose", "commission", "operate"],
+  "client_routes": [
+    "/",
+    "/fleet",
+    "/projects/demo",
+    "/projects/demo/",
+    "/projects/demo/compose",
+    "/projects/demo/commission",
+    "/projects/demo/operate",
+    "/projects/demo/operate/"
+  ],
+  "not_client_routes": ["/fleet/extra", "/projects", "/projects/demo/unknown", "/projects/demo/compose/extra", "/nowhere"]
+}
