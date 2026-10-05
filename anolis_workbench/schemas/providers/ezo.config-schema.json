@@ -1,7 +1,7 @@
 {
   "config_schema_version": 1,
   "provider": "anolis-provider-ezo",
-  "provider_version": "0.3.4",
+  "provider_version": "0.3.5",
   "schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -33,10 +33,18 @@
           "query_delay_us": {
             "type": "integer",
             "title": "Query delay (µs)",
-            "description": "Delay between an EZO command write and its reply read.",
+            "description": "Delay between an EZO command write and its reply read. A single transaction's latency — not a sampling cadence (see sample_interval_ms).",
             "minimum": 1,
             "maximum": 2147483647,
             "default": 300000
+          },
+          "sample_interval_ms": {
+            "type": "integer",
+            "title": "Expected sample interval (ms)",
+            "description": "How often this provider expects its samples to be refreshed. It has no sampling thread of its own — it samples when read — so set this to the runtime's polling.interval_ms. Signal freshness bounds and the advertised poll hint derive from it.",
+            "minimum": 1,
+            "maximum": 86400000,
+            "default": 2500
           },
           "timeout_ms": {
             "type": "integer",

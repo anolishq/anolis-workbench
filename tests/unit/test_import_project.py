@@ -143,9 +143,16 @@ def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
     survive the schema sync that resolves it (#290) and could never be cleared
     on a project that is read-only by design.
     """
+    from anolis_workbench.core import provider_schemas
+
+    ezo_envelope = provider_schemas.get_envelope("ezo")
+    assert ezo_envelope is not None
     profile = source_dir / "machine-profile.yaml"
     profile.write_text(
-        profile.read_text(encoding="utf-8").replace('version: "0.3.8"', 'version: "0.3.6"'),
+        profile.read_text(encoding="utf-8")
+        .replace('version: "0.3.8"', 'version: "0.3.6"')
+        # Pin ezo to whatever is packaged, so it is the kind with no skew.
+        .replace('version: "0.3.4"', f'version: "{ezo_envelope["provider_version"]}"'),
         encoding="utf-8",
     )
 

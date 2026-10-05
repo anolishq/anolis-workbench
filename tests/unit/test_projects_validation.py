@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import copy
 import pathlib
+import zipfile
 
 import conftest
 import pytest
+import yaml
 
-from anolis_workbench.core import canonical, machine_profile, projects
+from anolis_workbench.core import canonical, exporter, machine_profile, projects, provider_schemas
 
 TEMPLATES_ROOT = pathlib.Path(__file__).parent.parent.parent / "anolis_workbench" / "templates"
 FIXTURES_ROOT = pathlib.Path(__file__).parent.parent / "fixtures"
@@ -170,6 +172,37 @@ def test_validate_unique_annotations_catch_duplicate_device_ids() -> None:
     errors = projects.validate_project_payload(document)
     unique = [e for e in errors if e["code"] == "provider.unique"]
     assert any(e["path"] == "$.providers.sim0.config.devices" for e in unique), errors
+
+
+def test_ezo_sample_interval_validates_and_survives_save_and_export(
+    _systems_root: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """provider-ezo 0.3.5 added hardware.sample_interval_ms, and its hardware
+    object is additionalProperties: false — an envelope older than 0.3.5
+    rejects the provider's own example config (#304)."""
+    ezo_envelope = provider_schemas.get_envelope("ezo")
+    assert ezo_envelope is not None
+    document = _load_template("mixed-bus-mock")
+    # Pin ezo to the packaged version: the fixture pins 0.3.4, whose binary
+    # would reject the key this test authors.
+    ezo_version = ezo_envelope["provider_version"]
+    document["profile"]["components"]["providers"]["ezo"]["version"] = ezo_version
+    document["profile"]["compatibility"]["providers"]["ezo0"]["version"] = ezo_version
+    # Not the envelope default (2500), so a value that was dropped and
+    # re-defaulted would not pass.
+    document["providers"]["ezo0"]["config"]["hardware"]["sample_interval_ms"] = 4321
+
+    assert projects.validate_project_payload(document) == []
+    projects.save_project("mixed-bus-mock", document)
+    reread = projects.get_project("mixed-bus-mock")
+    assert reread["providers"]["ezo0"]["config"]["hardware"]["sample_interval_ms"] == 4321
+    assert not any("pinned at" in w for w in reread["warnings"]), reread["warnings"]
+
+    package = tmp_path / "out.anpkg"
+    exporter.build_package(_systems_root / "mixed-bus-mock", package)
+    with zipfile.ZipFile(package) as archive:
+        exported = yaml.safe_load(archive.read("providers/ezo0.yaml"))
+    assert exported["hardware"]["sample_interval_ms"] == 4321
 
 
 def test_save_project_writes_the_canonical_layout(_systems_root: pathlib.Path) -> None:
