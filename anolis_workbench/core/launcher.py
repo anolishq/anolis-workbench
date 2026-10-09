@@ -390,6 +390,9 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
                 yaml_path,
             )
         )
+        # The provider says what it needs from this host (executable profile
+        # v1 §6); the workbench relays it and knows no transport itself.
+        checks.append(_check_host_binary(f"Provider {pid} --check-host", exe, yaml_path))
 
     ok = all(c.get("ok") is not False for c in checks)
     return {"ok": ok, "checks": checks}
@@ -515,6 +518,58 @@ def _check_config_binary(check_name: str, exe: pathlib.Path | None, yaml_path: p
         return {"name": check_name, "ok": False, "error": "Timed out (10s)", "hint": None}
     except OSError as exc:
         return {"name": check_name, "ok": False, "error": str(exc), "hint": None}
+
+
+def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pathlib.Path) -> dict:
+    """Run a provider's --check-host as the user the dev launch runs as.
+
+    Exit 0 is met (unknown requirements do not fail), 1 is unmet, 2 could not
+    evaluate. A non-zero exit with no JSON on stdout is no answer — a provider
+    that predates the verb — and is skipped, as install.sh's preflight does.
+    """
+    if exe is None or not exe.exists():
+        return {"name": check_name, "ok": None, "note": "Binary missing — skipped"}
+    if not yaml_path.exists():
+        return {"name": check_name, "ok": None, "note": "Config not yet rendered"}
+    try:
+        result = subprocess.run(
+            [str(exe), "--check-host", str(yaml_path)],
+            cwd=str(paths_module.DATA_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {"name": check_name, "ok": False, "error": "Timed out (10s)", "hint": None}
+    except OSError as exc:
+        return {"name": check_name, "ok": False, "error": str(exc), "hint": None}
+
+    try:
+        envelope = json.loads(result.stdout)
+    except ValueError:
+        envelope = None
+    requirements = envelope.get("requirements") if isinstance(envelope, dict) else None
+    if not isinstance(requirements, list):
+        if result.returncode == 0:
+            return {"name": check_name, "ok": None, "note": "No host requirements reported"}
+        return {"name": check_name, "ok": None, "note": "Not yet available"}
+
+    reqs = [r for r in requirements if isinstance(r, dict)]
+    unmet = [r for r in reqs if r.get("status") == "unmet"]
+    unknown = [r for r in reqs if r.get("status") == "unknown"]
+    note = "; ".join(f"{r.get('id', '?')} unknown: {r.get('detail', '')}" for r in unknown) or None
+    if result.returncode == 0:
+        return {"name": check_name, "ok": True, "error": None, "hint": None, "note": note}
+    if result.returncode == 1:
+        return {
+            "name": check_name,
+            "ok": False,
+            "error": "; ".join(f"{r.get('id', '?')}: {r.get('detail', '')}" for r in unmet) or "unmet",
+            "hint": "; ".join(str(r["remedy"]) for r in unmet if r.get("remedy")) or None,
+            "note": note,
+        }
+    error = (result.stderr or "").strip()[:200] or f"exit {result.returncode}"
+    return {"name": check_name, "ok": False, "error": f"Could not evaluate host requirements: {error}", "hint": None}
 
 
 # ---------------------------------------------------------------------------

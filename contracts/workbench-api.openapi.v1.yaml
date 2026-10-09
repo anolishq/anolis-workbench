@@ -875,7 +875,9 @@ components:
       description: >-
         A single preflight check result. ok is true (passed), false (failed),
         or null (skipped). When ok is false, error is a non-null string and
-        hint may be non-null. When ok is null, note is a non-null string.
+        hint may be non-null. When ok is null, note is a non-null string; a
+        passed or failed check may also carry a note (a provider's host
+        requirements it could not evaluate).
       properties:
         name:
           type: string
@@ -895,7 +897,7 @@ components:
         note:
           type: string
           nullable: true
-          description: Informational note when ok is null (skipped)
+          description: Informational note; always set when ok is null (skipped)
       additionalProperties: true
 
     PreflightResponse:
