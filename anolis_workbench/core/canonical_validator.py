@@ -31,22 +31,6 @@ def _resolve_workbench_port(default: int = 3010) -> int:
         return default
 
 
-def _parse_i2c_address(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if text == "":
-        return None
-    try:
-        return int(text, 0)  # provider schemas allow an int or an 0x-prefixed string
-    except ValueError:
-        return None
-
-
 def _as_mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -75,7 +59,6 @@ def validate_project(document: dict[str, Any], project_dir: Any = None) -> list[
     errors.extend(_variant_errors(profile, variants, machine_id, providers))
     errors.extend(_provider_coherence_errors(profile, variants, providers))
     errors.extend(_pinned_provider_errors(profile, variants))
-    errors.extend(_i2c_conflict_errors(providers))
     errors.extend(_port_errors(variants))
     errors.extend(_bind_errors(variants))
     if project_dir is not None:
@@ -246,42 +229,6 @@ def _pinned_provider_errors(profile: dict[str, Any], variants: dict[str, Any]) -
                 f"profile's pinned components ({known}). install.sh refuses a provider command that "
                 "does not resolve to a pinned component."
             )
-    return errors
-
-
-def _i2c_conflict_errors(providers: dict[str, Any]) -> list[str]:
-    """Cross-provider bus conflicts — capability-driven, no kind list.
-
-    Within-provider duplicates are the provider schema's job (x-anolis-unique).
-    """
-    errors: list[str] = []
-    owned: dict[tuple[str, int], str] = {}
-    for pid, entry in sorted(providers.items()):
-        config = entry.get("config") if isinstance(entry, dict) else None
-        if not isinstance(config, dict):
-            continue
-        hardware = config.get("hardware")
-        if not isinstance(hardware, dict):
-            continue
-        bus_path = hardware.get("bus_path")
-        if not isinstance(bus_path, str) or bus_path == "":
-            continue
-        devices = config.get("devices")
-        if not isinstance(devices, list):
-            continue
-        for device in devices:
-            if not isinstance(device, dict):
-                continue
-            address = _parse_i2c_address(device.get("address"))
-            if address is None:
-                continue
-            key = (bus_path, address)
-            if key in owned and owned[key] != pid:
-                errors.append(
-                    f"I2C address 0x{address:02X} on bus '{bus_path}' is claimed by both '{owned[key]}' and '{pid}'."
-                )
-            elif key not in owned:
-                owned[key] = pid
     return errors
 
 

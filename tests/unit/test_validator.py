@@ -49,18 +49,6 @@ def _make_system(providers=None, runtime_port=8080, runtime_providers=None):
     }
 
 
-def _bus_provider(bus_path: str, devices: list) -> dict:
-    """A provider entry whose native config declares an I2C bus + devices."""
-    return {
-        "kind": "bread",
-        "config": {
-            "hardware": {"bus_path": bus_path},
-            "discovery": {"mode": "manual"},
-            "devices": devices,
-        },
-    }
-
-
 # ---------------------------------------------------------------------------
 # Test: clean system produces no errors
 # ---------------------------------------------------------------------------
@@ -117,94 +105,6 @@ def test_reserved_workbench_port_collision():
     system = _make_system(runtime_port=3010)
     errors = validator.validate_system(system)
     assert any("3010" in e for e in errors), errors
-
-
-# ---------------------------------------------------------------------------
-# Test: cross-provider I2C address conflicts (capability-driven — any provider
-# whose config carries hardware.bus_path + addressed devices participates)
-# ---------------------------------------------------------------------------
-
-
-def test_duplicate_i2c_address():
-    system = _make_system(
-        providers={
-            "bread0": _bus_provider("/dev/i2c-1", [{"id": "dev0", "type": "rlht", "address": "0x62"}]),
-            "ezo0": {
-                "kind": "ezo",
-                "config": {
-                    "hardware": {"bus_path": "/dev/i2c-1"},
-                    "discovery": {"mode": "manual"},
-                    "devices": [{"id": "dev1", "type": "ph", "address": "0x62"}],
-                },
-            },
-        },
-        runtime_providers=[{"id": "bread0"}, {"id": "ezo0"}],
-    )
-    system["paths"]["providers"] = {
-        "bread0": {"executable": "../anolis-provider-bread/build/bread"},
-        "ezo0": {"executable": "../anolis-provider-ezo/build/ezo"},
-    }
-    errors = validator.validate_system(system)
-    assert any("0x62" in e for e in errors), errors
-
-
-def test_duplicate_i2c_address_mixed_literal_formats():
-    """Decimal and hex literals for the same address must conflict on same bus."""
-    system = _make_system(
-        providers={
-            "bread0": _bus_provider("/dev/i2c-1", [{"id": "dev0", "type": "rlht", "address": "20"}]),
-            "ezo0": _bus_provider("/dev/i2c-1", [{"id": "dev1", "type": "ph", "address": "0x14"}]),
-        },
-        runtime_providers=[{"id": "bread0"}, {"id": "ezo0"}],
-    )
-    errors = validator.validate_system(system)
-    assert any("0x14" in e for e in errors), errors
-
-
-def test_same_address_different_bus_is_ok():
-    """Same address on different bus paths must NOT produce an error."""
-    system = _make_system(
-        providers={
-            "bread0": _bus_provider("/dev/i2c-1", [{"id": "dev0", "type": "rlht", "address": "0x62"}]),
-            "ezo0": _bus_provider("/dev/i2c-2", [{"id": "dev1", "type": "ph", "address": "0x62"}]),
-        },
-        runtime_providers=[{"id": "bread0"}, {"id": "ezo0"}],
-    )
-    errors = validator.validate_system(system)
-    address_errors = [e for e in errors if "0x62" in e]
-    assert address_errors == [], address_errors
-
-
-def test_same_provider_duplicate_address_left_to_provider_schema():
-    """Within-provider duplicates are the schema's job (x-anolis-unique), not the cross-provider check."""
-    system = _make_system(
-        providers={
-            "bread0": _bus_provider(
-                "/dev/i2c-1",
-                [
-                    {"id": "dev0", "type": "rlht", "address": "0x62"},
-                    {"id": "dev1", "type": "dcmt", "address": "0x62"},
-                ],
-            ),
-        },
-        runtime_providers=[{"id": "bread0"}],
-    )
-    errors = validator.validate_system(system)
-    address_errors = [e for e in errors if "0x62" in e]
-    assert address_errors == [], address_errors
-
-
-def test_provider_without_bus_capability_is_ignored():
-    """A provider whose config has no hardware.bus_path takes no part in bus checks."""
-    system = _make_system(
-        providers={
-            "sim0": {"kind": "sim", "config": {"devices": [{"id": "d0", "type": "tempctl"}]}},
-            "bread0": _bus_provider("/dev/i2c-1", [{"id": "dev0", "type": "rlht", "address": "0x62"}]),
-        },
-        runtime_providers=[{"id": "sim0"}, {"id": "bread0"}],
-    )
-    errors = validator.validate_system(system)
-    assert errors == [] or all("0x62" not in e for e in errors), errors
 
 
 # ---------------------------------------------------------------------------
@@ -303,11 +203,6 @@ if __name__ == "__main__":
         test_runtime_executable_required,
         test_duplicate_provider_ids,
         test_reserved_workbench_port_collision,
-        test_duplicate_i2c_address,
-        test_duplicate_i2c_address_mixed_literal_formats,
-        test_same_address_different_bus_is_ok,
-        test_same_provider_duplicate_address_left_to_provider_schema,
-        test_provider_without_bus_capability_is_ignored,
         test_provider_in_runtime_missing_from_topology,
         test_provider_in_topology_missing_from_runtime,
         test_missing_executable_path,

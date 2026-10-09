@@ -16,25 +16,6 @@ def _resolve_workbench_port(default: int = 3010) -> int:
         return default
 
 
-def _parse_i2c_address(value: object) -> int | None:
-    """Parse I2C addresses from canonical hex or decimal string/int forms."""
-    if isinstance(value, int):
-        return value
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if text == "":
-        return None
-    try:
-        return int(text, 0)
-    except ValueError:
-        pass
-    try:
-        return int(text, 16)
-    except ValueError:
-        return None
-
-
 def validate_system(system: dict) -> list[str]:
     """
     Returns a list of error strings. Empty list means the system is valid.
@@ -65,38 +46,6 @@ def validate_system(system: dict) -> list[str]:
     reserved_workbench_port = _resolve_workbench_port()
     if runtime_http_port == reserved_workbench_port:
         errors.append(f"Runtime HTTP port {reserved_workbench_port} conflicts with the workbench control server port.")
-
-    # Cross-provider I2C conflicts — capability-driven: any provider whose
-    # native config declares hardware.bus_path plus addressed devices takes
-    # part, regardless of kind. Within-provider duplicates are the provider
-    # schema's job (x-anolis-unique); the cross-provider view is workbench's.
-    owned: dict = {}
-    for pid, pcfg in providers.items():
-        config = pcfg.get("config")
-        if not isinstance(config, dict):
-            continue
-        hardware = config.get("hardware")
-        if not isinstance(hardware, dict):
-            continue
-        bus_path = hardware.get("bus_path", "")
-        if not bus_path:
-            continue
-        devices = config.get("devices")
-        if not isinstance(devices, list):
-            continue
-        for dev in devices:
-            if not isinstance(dev, dict):
-                continue
-            addr = _parse_i2c_address(dev.get("address", ""))
-            if addr is None:
-                continue
-            key = (bus_path, addr)
-            if key in owned and owned[key] != pid:
-                errors.append(
-                    f"I2C address 0x{addr:02X} on bus '{bus_path}' is claimed by both '{owned[key]}' and '{pid}'."
-                )
-            elif key not in owned:
-                owned[key] = pid
 
     for p in runtime_providers:
         pid = p.get("id")
