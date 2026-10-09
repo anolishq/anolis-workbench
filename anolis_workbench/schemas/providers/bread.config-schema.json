@@ -1,7 +1,7 @@
 {
   "config_schema_version": 1,
   "provider": "anolis-provider-bread",
-  "provider_version": "0.3.8",
+  "provider_version": "0.5.0",
   "schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -40,7 +40,8 @@
           },
           "timeout_ms": {
             "type": "integer",
-            "title": "I/O timeout (ms)",
+            "title": "Reply timeout (ms)",
+            "description": "How long to wait for a device's CRUMBS reply before the read fails.",
             "minimum": 1,
             "maximum": 2147483647,
             "default": 100
@@ -51,6 +52,13 @@
             "minimum": 0,
             "maximum": 2147483647,
             "default": 2
+          },
+          "max_bus_hz": {
+            "type": "integer",
+            "title": "Maximum bus clock (Hz)",
+            "description": "The highest I2C clock these devices tolerate on this machine. --check-host and startup compare it with the bus's configured clock; unset skips that check.",
+            "minimum": 1,
+            "maximum": 5000000
           }
         },
         "required": [

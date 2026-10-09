@@ -15,7 +15,7 @@ import shutil
 
 import pytest
 
-from anolis_workbench.core import deploy, machine_profile, projects
+from anolis_workbench.core import deploy, machine_profile, projects, provider_schemas
 
 FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "imported-profile"
 
@@ -145,7 +145,7 @@ def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
     """
     profile = source_dir / "machine-profile.yaml"
     profile.write_text(
-        profile.read_text(encoding="utf-8").replace('version: "0.3.8"', 'version: "0.3.6"'),
+        profile.read_text(encoding="utf-8").replace('version: "0.5.0"', 'version: "0.3.6"'),
         encoding="utf-8",
     )
 
@@ -157,7 +157,8 @@ def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
 
     skew = [w for w in projects.get_project("rig-a")["warnings"] if "pinned at 0.3.6" in w]
     assert len(skew) == 1, projects.get_project("rig-a")["warnings"]
-    assert "0.3.8" in skew[0]
+    vendored = (provider_schemas.get_envelope("bread") or {}).get("provider_version")
+    assert vendored and vendored in skew[0]
     # The unchanged ezo pin still matches, so it must stay quiet.
     assert not any("ezo" in w and "pinned at" in w for w in projects.get_project("rig-a")["warnings"])
 
