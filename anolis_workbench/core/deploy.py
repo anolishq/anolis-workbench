@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import requests
@@ -31,11 +32,25 @@ logger = logging.getLogger(__name__)
 # A real install downloads binaries and waits for systemd health.
 INSTALL_TIMEOUT_S = 1800.0
 
+# The Debian convention for "a reboot is pending" (tmpfs, so a reboot clears
+# it). A project's host prep writes it; the workbench only reports it.
+REBOOT_REQUIRED_PATH = "/run/reboot-required"
+
+# install.sh prefixes every host-preflight line with this, and indents the
+# per-requirement detail under it.
+_PREFLIGHT_MARK = "host preflight:"
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 ProgressCallback = Callable[[str, str], None]
 
 
 class DeployError(RuntimeError):
     """Raised when a deployment cannot be materialized or install.sh fails."""
+
+    def __init__(self, message: str, *, host_preflight: list[str] | None = None, reboot_pending: bool = False) -> None:
+        super().__init__(message)
+        self.host_preflight = host_preflight or []
+        self.reboot_pending = reboot_pending
 
 
 @dataclass
@@ -53,6 +68,11 @@ class DeployResult:
     runtime_version: str
     prefix: str
     output: str
+    # install.sh's host-preflight block, ANSI stripped; non-empty on success
+    # only when --allow-unmet-host let unmet requirements through, or a
+    # provider gave no answer.
+    host_preflight: list[str] = field(default_factory=list)
+    reboot_pending: bool = False
 
 
 def materialize_project_dir(
@@ -295,6 +315,7 @@ def _install_args(
     dry_run: bool,
     with_telemetry_export: bool = False,
     variant: str | None = None,
+    allow_unmet_host: bool = False,
 ) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
@@ -310,6 +331,8 @@ def _install_args(
     # on the operator's host.
     if with_telemetry_export:
         args.append("--with-telemetry-export")
+    if allow_unmet_host:
+        args.append("--allow-unmet-host")
     return args
 
 
@@ -321,19 +344,57 @@ def _push_dir(executor: Executor, local_dir: pathlib.Path, remote_root: str) -> 
         executor.write_file(remote_path, local.read_bytes())
 
 
+def host_preflight_block(stdout: str) -> list[str]:
+    """install.sh's host-preflight lines, ANSI stripped: the first line carrying
+    the preflight mark, through every following line that carries it or is
+    indented detail. Empty when install.sh never reached the preflight."""
+    lines = _ANSI_RE.sub("", stdout).splitlines()
+    start = next((i for i, line in enumerate(lines) if _PREFLIGHT_MARK in line), None)
+    if start is None:
+        return []
+    block = [lines[start]]
+    for line in lines[start + 1 :]:
+        if _PREFLIGHT_MARK not in line and not line.startswith(" "):
+            break
+        block.append(line)
+    return block
+
+
+def _preflight_needs_attention(block: list[str]) -> bool:
+    return any(line.startswith(("✗", "⚠")) for line in block)
+
+
+def _reboot_pending(executor: Executor) -> bool:
+    """Advisory only: a target we cannot ask is reported as not pending."""
+    try:
+        return executor.file_exists(REBOOT_REQUIRED_PATH)
+    except Exception:  # noqa: BLE001 — never mask the deploy's own outcome
+        logger.warning("could not check %s on the target", REBOOT_REQUIRED_PATH, exc_info=True)
+        return False
+
+
 def _run_install_sh(
     executor: Executor,
     install_sh: str,
     args: list[str],
     progress: ProgressCallback | None,
-) -> str:
+) -> tuple[str, list[str], bool]:
+    """Run install.sh; return (stdout, host-preflight block worth showing, reboot pending)."""
     result = executor.run(["bash", install_sh, *args], sudo=True, timeout=INSTALL_TIMEOUT_S)
+    block = host_preflight_block(result.stdout)
+    reboot = _reboot_pending(executor)
     if result.returncode != 0:
-        tail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-15:])
-        raise DeployError(f"install.sh failed (exit {result.returncode}):\n{tail}")
+        if block and _preflight_needs_attention(block):
+            detail = "\n".join(block)
+        else:
+            detail = "\n".join(_ANSI_RE.sub("", result.stdout + "\n" + result.stderr).strip().splitlines()[-15:])
+        message = f"install.sh failed (exit {result.returncode}):\n{detail}"
+        if reboot:
+            message += f"\nA reboot is pending on the target ({REBOOT_REQUIRED_PATH}); reboot it, then deploy again."
+        raise DeployError(message, host_preflight=block, reboot_pending=reboot)
     if progress:
         progress("install", "install.sh completed")
-    return result.stdout
+    return result.stdout, (block if _preflight_needs_attention(block) else []), reboot
 
 
 def deploy_local(
@@ -345,6 +406,7 @@ def deploy_local(
     dry_run: bool = False,
     with_telemetry_export: bool = False,
     variant: str | None = None,
+    allow_unmet_host: bool = False,
     executor: Executor | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -363,7 +425,7 @@ def deploy_local(
         _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
         install_sh = fetch_install_sh(mat.runtime_version, tmp)
         _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
-        output = _run_install_sh(
+        output, preflight, reboot = _run_install_sh(
             executor,
             str(install_sh),
             _install_args(
@@ -373,6 +435,7 @@ def deploy_local(
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
                 variant=variant,
+                allow_unmet_host=allow_unmet_host,
             ),
             progress_callback,
         )
@@ -381,6 +444,8 @@ def deploy_local(
         runtime_version=mat.runtime_version,
         prefix=str(prefix),
         output=output,
+        host_preflight=preflight,
+        reboot_pending=reboot,
     )
 
 
@@ -394,6 +459,7 @@ def deploy_remote(
     dry_run: bool = False,
     with_telemetry_export: bool = False,
     variant: str | None = None,
+    allow_unmet_host: bool = False,
     remote_staging: str = "/tmp/anolis-deploy",
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -416,7 +482,7 @@ def deploy_remote(
         executor.write_file(remote_install, install_sh.read_bytes())
 
         _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
-        output = _run_install_sh(
+        output, preflight, reboot = _run_install_sh(
             executor,
             remote_install,
             _install_args(
@@ -426,6 +492,7 @@ def deploy_remote(
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
                 variant=variant,
+                allow_unmet_host=allow_unmet_host,
             ),
             progress_callback,
         )
@@ -434,6 +501,8 @@ def deploy_remote(
         runtime_version=mat.runtime_version,
         prefix=str(prefix),
         output=output,
+        host_preflight=preflight,
+        reboot_pending=reboot,
     )
 
 

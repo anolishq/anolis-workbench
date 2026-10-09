@@ -81,6 +81,13 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     return project_dir
 
 
+def _deploy_error_fields(exc: Exception) -> dict[str, Any]:
+    """The host-preflight block and reboot flag a failed deploy carries."""
+    if not isinstance(exc, deploy.DeployError):
+        return {}
+    return {"host_preflight": exc.host_preflight, "reboot_pending": exc.reboot_pending}
+
+
 def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
     """Run install in a background thread, pushing events to the job."""
 
@@ -96,19 +103,24 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )
         job.events.append(
             {
                 "stage": "done",
-                "summary": {"runtime_version": result.runtime_version},
+                "summary": {
+                    "runtime_version": result.runtime_version,
+                    "host_preflight": result.host_preflight,
+                    "reboot_pending": result.reboot_pending,
+                },
             }
         )
         job.status = "done"
     except Exception as exc:
         job.error = str(exc)
         job.status = "failed"
-        job.events.append({"stage": "error", "detail": str(exc)})
+        job.events.append({"stage": "error", "detail": str(exc), **_deploy_error_fields(exc)})
 
 
 def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
@@ -138,6 +150,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )
         # Auto-add host to fleet registry
@@ -151,14 +164,18 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.events.append(
             {
                 "stage": "done",
-                "summary": {"runtime_version": result.runtime_version},
+                "summary": {
+                    "runtime_version": result.runtime_version,
+                    "host_preflight": result.host_preflight,
+                    "reboot_pending": result.reboot_pending,
+                },
             }
         )
         job.status = "done"
     except Exception as exc:
         job.error = str(exc)
         job.status = "failed"
-        job.events.append({"stage": "error", "detail": str(exc)})
+        job.events.append({"stage": "error", "detail": str(exc), **_deploy_error_fields(exc)})
     finally:
         if executor is not None:
             executor.close()
