@@ -493,7 +493,9 @@ def test_provider_run_by_no_variant_is_a_warning_not_an_error() -> None:
     assert any("run by no runtime variant" in w for w in canonical_validator.project_warnings(doc))
 
 
-def test_cross_provider_i2c_conflict_is_capability_driven() -> None:
+def test_shared_bus_address_is_left_to_the_runtime() -> None:
+    """Two providers naming one bus address is not the workbench's to judge: the
+    providers publish claims and the runtime refuses the conflict (anolis#318)."""
     doc = _document()
     doc["profile"]["providers"]["ezo0"] = {"config": canonical.provider_config_relpath("ezo", "ezo0")}
     doc["profile"]["components"]["providers"]["ezo"] = {"repo": "anolishq/anolis-provider-ezo", "version": "0.3.4"}
@@ -515,7 +517,7 @@ def test_cross_provider_i2c_conflict_is_capability_driven() -> None:
         }
     )
     errors = canonical_validator.validate_project(doc)
-    assert any("0x0A" in e and "claimed by both" in e for e in errors), errors
+    assert not any("claimed by both" in e for e in errors), errors
 
 
 def test_workbench_port_conflict_is_reported() -> None:

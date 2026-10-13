@@ -114,3 +114,69 @@ def test_preflight_degrades_for_binaries_without_the_verb(project) -> None:
     assert check["ok"] is None
     assert check["note"] == "Not yet available"
     assert result["ok"] is True  # a missing verb must not fail preflight
+
+
+# --check-host (executable profile v1 §6): the provider says what it needs from
+# this host; the workbench relays it. Envelopes below are bread 0.5.0's shape.
+_UNMET_ENVELOPE = (
+    '{"check_host_version":1,"provider":"anolis-provider-bread","requirements":['
+    '{"id":"i2c.bus_present","status":"met","detail":"/dev/i2c-1 exists"},'
+    '{"id":"i2c.bus_access","status":"unmet","detail":"camlab cannot open /dev/i2c-1 read-write",'
+    '"remedy":"add camlab to group i2c"},'
+    '{"id":"i2c.bus_clock","status":"unknown","detail":"the platform does not expose i2c-1 bus clock"}]}'
+)
+_MET_ENVELOPE = (
+    '{"check_host_version":1,"provider":"anolis-provider-bread","requirements":['
+    '{"id":"i2c.bus_present","status":"met","detail":"/dev/i2c-1 exists"}]}'
+)
+
+
+def _verbs(check_host: str) -> str:
+    """A provider stub that passes --check-config and answers --check-host as given."""
+    return f'case "$1" in --check-config) exit 0;; --check-host) {check_host};; *) exit 64;; esac'
+
+
+def test_preflight_reports_unmet_host_requirements_with_their_remedy(project) -> None:
+    pdir, document = project(_verbs(f"echo '{_UNMET_ENVELOPE}'; exit 1"))
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    check = _check(result, "Provider sim0 --check-host")
+    assert check["ok"] is False
+    assert check["error"] == "i2c.bus_access: camlab cannot open /dev/i2c-1 read-write"
+    assert check["hint"] == "add camlab to group i2c"
+    assert "i2c.bus_clock unknown" in (check["note"] or "")
+    assert result["ok"] is False
+
+
+def test_preflight_passes_met_host_requirements(project) -> None:
+    pdir, document = project(_verbs(f"echo '{_MET_ENVELOPE}'; exit 0"))
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    check = _check(result, "Provider sim0 --check-host")
+    assert check["ok"] is True
+    assert check["note"] is None
+    assert result["ok"] is True
+
+
+def test_preflight_skips_a_provider_without_check_host(project) -> None:
+    # The conformance rule install.sh uses too: non-zero with no JSON is no answer.
+    pdir, document = project(_verbs('echo "usage: provider --config FILE"; exit 2'))
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    check = _check(result, "Provider sim0 --check-host")
+    assert check["ok"] is None
+    assert check["note"] == "Not yet available"
+    assert result["ok"] is True
+
+
+def test_preflight_fails_when_host_requirements_cannot_be_evaluated(project) -> None:
+    pdir, document = project(_verbs(f"echo '{_MET_ENVELOPE}'; echo 'cannot read config' >&2; exit 2"))
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    check = _check(result, "Provider sim0 --check-host")
+    assert check["ok"] is False
+    assert "cannot read config" in (check["error"] or "")

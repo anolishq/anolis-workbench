@@ -59,6 +59,12 @@ def _parse_args() -> argparse.Namespace:
         help="Run install.sh in dry-run mode (the workspace project is still created).",
     )
     install_parser.add_argument(
+        "--allow-unmet-host",
+        action="store_true",
+        help="Install even if a provider reports unmet host requirements (install.sh --allow-unmet-host); "
+        "those providers start with no devices until the host is fixed and the service restarted.",
+    )
+    install_parser.add_argument(
         "--no-start",
         action="store_true",
         help="Install but do not start the runtime service.",
@@ -172,6 +178,12 @@ def _parse_args() -> argparse.Namespace:
         "--force",
         action="store_true",
         help="Overwrite an existing local workspace project.",
+    )
+    remote_parser.add_argument(
+        "--allow-unmet-host",
+        action="store_true",
+        help="Install even if a provider reports unmet host requirements (install.sh --allow-unmet-host); "
+        "those providers start with no devices until the host is fixed and the service restarted.",
     )
     remote_parser.add_argument(
         "--no-start",
@@ -416,6 +428,22 @@ def _provision_workspace(args: argparse.Namespace) -> Path:
     )
 
 
+def _print_host_followups(result: deploy.DeployResult) -> None:
+    """What a successful deploy still needs from the host: requirements it let
+    through (--allow-unmet-host, or a provider with no answer), and a reboot."""
+    if result.host_preflight:
+        print()
+        print("  Host preflight:")
+        for line in result.host_preflight:
+            print(f"    {line}")
+    if result.reboot_pending:
+        print()
+        print(
+            f"  ⚠ A reboot is pending on the target ({deploy.REBOOT_REQUIRED_PATH}); "
+            "reboot it before relying on hardware."
+        )
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
     import os
@@ -452,6 +480,7 @@ def _run_install(args: argparse.Namespace) -> int:
             no_start=args.no_start,
             dry_run=args.dry_run,
             with_telemetry_export=_wants_telemetry_export(args),
+            allow_unmet_host=args.allow_unmet_host,
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
@@ -486,6 +515,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print()
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
+        _print_host_followups(result)
         print()
         print("Next steps:")
         print("  systemctl status anolis-runtime")
@@ -631,6 +661,7 @@ def _run_remote(args: argparse.Namespace) -> int:
             prefix=args.install_prefix,
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),
+            allow_unmet_host=args.allow_unmet_host,
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
@@ -649,6 +680,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print()
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
+    _print_host_followups(result)
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")

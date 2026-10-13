@@ -49,10 +49,15 @@ PROJECT_DIR="${HOME}/.anolis/systems/${PROJECT}"
     || { echo "workspace machine-profile.yaml missing"; exit 1; }
 
 # --- Reset the target -------------------------------------------------------
-log "Uninstalling (reset target)"
+# Side B must run the install.sh side A ran: the release the project pins.
+# `latest` compared the workbench against a newer install.sh (#422).
+RUNTIME_VERSION=$(uv run python -c \
+    'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["components"]["runtime"]["version"])' \
+    "${PROJECT_DIR}/machine-profile.yaml")
+log "Uninstalling (reset target) with install.sh v${RUNTIME_VERSION}"
 INSTALL_SH="${WORK}/install.sh"
 curl -fsSL -o "${INSTALL_SH}" \
-    "https://github.com/anolishq/anolis/releases/latest/download/install.sh"
+    "https://github.com/anolishq/anolis/releases/download/v${RUNTIME_VERSION}/install.sh"
 chmod +x "${INSTALL_SH}"
 sudo "${INSTALL_SH}" --uninstall
 [[ ! -d "${PREFIX}" ]] || { echo "uninstall left ${PREFIX} behind"; exit 1; }

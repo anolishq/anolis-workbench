@@ -427,3 +427,190 @@ def test_stage_bundle_does_not_pass_variant_to_install_sh(
         variant="automation",
     )
     assert "--variant" not in recorded[0]
+
+
+# ---------------------------------------------------------------------------
+# Host preflight and a pending reboot (#417)
+# ---------------------------------------------------------------------------
+
+# install.sh v0.1.43's stdout, verbatim with its colour codes, from a run on a
+# Raspberry Pi 4 with the service user taken out of the bus's group.
+_PREFLIGHT_UNMET_STDOUT = (
+    "\x1b[0;32m✓ root check\x1b[0m\n\nAnolis Provisioning\n━━━━━━━━━━━━━━━━━━━\n\n"
+    "\x1b[0;32m✓ install binaries: anolis-provider-ezo anolis-provider-bread anolis-runtime \x1b[0m\n"
+    "\x1b[0;33m→ config (providers): 2 preserved, 0 written\x1b[0m\n"
+    "\x1b[0;32m✓ host preflight: anolis-runtime runs as anolis\x1b[0m\n"
+    "\x1b[0;31m✗ host preflight: bread0: host requirements unmet\x1b[0m\n"
+    "    i2c.bus_access (unmet): anolis cannot open /dev/i2c-1 read-write (group 'i2c', mode 0660)\n"
+    "      fix: add anolis to group 'i2c', the group that owns the node on this host, and start a new login"
+    " or restart the service\n"
+    "\x1b[0;31m✗ host preflight: ezo0: host requirements unmet\x1b[0m\n"
+    "    i2c.bus_access (unmet): anolis cannot open /dev/i2c-1 read-write (group 'i2c', mode 0660)\n"
+    "      fix: add anolis to group 'i2c', the group that owns the node on this host, and start a new login"
+    " or restart the service\n"
+    "  Fix the host (the project's host prep, then any reboot it asks for) and re-run,\n"
+    "  or pass --allow-unmet-host to install now and fix the host after.\n"
+    "\x1b[0;31m✗ host preflight: requirements unmet\x1b[0m\n"
+)
+
+# The same release's stdout around a passing preflight.
+_PREFLIGHT_MET_STDOUT = (
+    "\x1b[0;33m→ config (providers): 2 preserved, 0 written\x1b[0m\n"
+    "\x1b[0;32m✓ host preflight: anolis-runtime runs as anolis\x1b[0m\n"
+    "\x1b[0;32m✓ host preflight: bread0: host requirements met\x1b[0m\n"
+    "\x1b[0;32m✓ host preflight: ezo0: host requirements met\x1b[0m\n"
+    "\x1b[0;32m✓ manifest: written\x1b[0m\n"
+    "\x1b[0;32m✓ health: runtime responding (v0.1.43)\x1b[0m\n"
+)
+
+# Composed from install.sh's own --allow-unmet-host branch (phase_host_preflight).
+_PREFLIGHT_ALLOWED_STDOUT = (
+    "\x1b[0;32m✓ host preflight: anolis-runtime runs as anolis\x1b[0m\n"
+    "\x1b[0;31m✗ host preflight: bread0: host requirements unmet\x1b[0m\n"
+    "    i2c.bus_clock (unmet): i2c-1 is configured for 100000 Hz, above this config's maximum of 50000 Hz\n"
+    "      fix: set i2c-1's clock to at most 50000 Hz in the platform's configuration\n"
+    "\x1b[0;33m⚠ host preflight: continuing (--allow-unmet-host); those providers start up not ready\x1b[0m\n"
+    "  Once the host is fixed, restart the service (or reboot): providers check the host only at startup.\n"
+    "\x1b[0;32m✓ manifest: written\x1b[0m\n"
+)
+
+
+class _ScriptedExecutor(RecordingExecutor):
+    """install.sh's exit code and stdout as given; /run/reboot-required as given."""
+
+    def __init__(self, returncode: int, stdout: str, *, reboot: bool = False) -> None:
+        super().__init__(returncode)
+        self.stdout = stdout
+        self.reboot = reboot
+
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
+        self.commands.append({"cmd": list(cmd), "sudo": sudo, "timeout": timeout})
+        return RunResult(returncode=self.returncode, stdout=self.stdout, stderr="")
+
+    def file_exists(self, path):
+        return self.reboot and path == deploy.REBOOT_REQUIRED_PATH
+
+
+def test_host_preflight_block_is_the_whole_preflight_without_colour() -> None:
+    block = deploy.host_preflight_block(_PREFLIGHT_UNMET_STDOUT)
+    assert block[0] == "✓ host preflight: anolis-runtime runs as anolis"
+    assert block[-1] == "✗ host preflight: requirements unmet"
+    assert sum("fix: add anolis to group 'i2c'" in line for line in block) == 2
+    assert not any("\x1b" in line for line in block)
+    assert not any("install binaries" in line for line in block)
+
+
+def test_host_preflight_block_stops_at_the_next_phase() -> None:
+    block = deploy.host_preflight_block(_PREFLIGHT_MET_STDOUT)
+    assert block == [
+        "✓ host preflight: anolis-runtime runs as anolis",
+        "✓ host preflight: bread0: host requirements met",
+        "✓ host preflight: ezo0: host requirements met",
+    ]
+    assert deploy.host_preflight_block("✓ verify: all checksums pass\n") == []
+
+
+def test_failed_preflight_reports_every_provider_and_its_fix(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two providers' unmet requirements are 9 lines; the old last-15-lines tail
+    also carried colour codes and whatever stderr came after."""
+    _stub_fetch(monkeypatch)
+    executor = _ScriptedExecutor(1, _PREFLIGHT_UNMET_STDOUT)
+    with pytest.raises(deploy.DeployError) as info:
+        deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=executor)
+    message = str(info.value)
+    assert "bread0: host requirements unmet" in message
+    assert "ezo0: host requirements unmet" in message
+    assert message.count("fix: add anolis to group 'i2c'") == 2
+    assert "--allow-unmet-host" in message
+    assert "\x1b" not in message
+    assert "install binaries" not in message
+    assert info.value.host_preflight[-1] == "✗ host preflight: requirements unmet"
+    assert info.value.reboot_pending is False
+
+
+def test_failure_before_the_preflight_keeps_the_output_tail(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    stdout = "\x1b[0;32m✓ root check\x1b[0m\n\x1b[0;31m✗ verify: checksum mismatch for anolis-runtime\x1b[0m\n"
+    executor = _ScriptedExecutor(1, stdout)
+    with pytest.raises(deploy.DeployError, match="checksum mismatch") as info:
+        deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=executor)
+    assert info.value.host_preflight == []
+    assert "\x1b" not in str(info.value)
+
+
+def test_allow_unmet_host_is_an_explicit_opt_in(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=executor)
+    assert "--allow-unmet-host" not in executor.commands[0]["cmd"]
+
+    executor = RecordingExecutor()
+    deploy.deploy_remote(
+        executor=executor, project_dir=project_dir, project_name="deploy-fixture", allow_unmet_host=True
+    )
+    assert "--allow-unmet-host" in executor.commands[-1]["cmd"]
+
+
+def test_success_carries_the_preflight_only_when_it_needs_attention(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    met = deploy.deploy_local(
+        project_dir=project_dir, project_name="deploy-fixture", executor=_ScriptedExecutor(0, _PREFLIGHT_MET_STDOUT)
+    )
+    assert met.host_preflight == []
+
+    allowed = deploy.deploy_local(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        allow_unmet_host=True,
+        executor=_ScriptedExecutor(0, _PREFLIGHT_ALLOWED_STDOUT),
+    )
+    assert any("i2c.bus_clock (unmet)" in line for line in allowed.host_preflight)
+    assert any(line.startswith("⚠ host preflight: continuing") for line in allowed.host_preflight)
+
+
+def test_reboot_pending_is_reported_on_success_and_failure(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    ok = deploy.deploy_remote(
+        executor=_ScriptedExecutor(0, _PREFLIGHT_MET_STDOUT, reboot=True),
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+    )
+    assert ok.reboot_pending is True
+    assert (
+        deploy.deploy_local(
+            project_dir=project_dir, project_name="deploy-fixture", executor=_ScriptedExecutor(0, _PREFLIGHT_MET_STDOUT)
+        ).reboot_pending
+        is False
+    )
+
+    with pytest.raises(deploy.DeployError, match="reboot is pending") as info:
+        deploy.deploy_local(
+            project_dir=project_dir,
+            project_name="deploy-fixture",
+            executor=_ScriptedExecutor(1, _PREFLIGHT_UNMET_STDOUT, reboot=True),
+        )
+    assert info.value.reboot_pending is True
+
+
+def test_a_target_that_cannot_be_asked_is_not_reported_as_pending(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+
+    class _Unreachable(_ScriptedExecutor):
+        def file_exists(self, path):
+            raise OSError("connection reset")
+
+    with pytest.raises(deploy.DeployError, match="ezo0: host requirements unmet") as info:
+        deploy.deploy_local(
+            project_dir=project_dir, project_name="deploy-fixture", executor=_Unreachable(1, _PREFLIGHT_UNMET_STDOUT)
+        )
+    assert info.value.reboot_pending is False
