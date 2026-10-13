@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "anolis-workbench"
-version = "0.14.0"
+version = "0.15.0"
 description = "Anolis commissioning workbench with handoff export tooling."
 readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
@@ -14,17 +14,18 @@ dependencies = [
     "jsonschema>=4.22.0,<5.0.0",
     "requests>=2.32.0,<3.0.0",
     "psutil>=7.2.2,<7.3.0",
+    "paramiko>=3.4.0,<6.0.0",
 ]
 
 [project.optional-dependencies]
-ssh = [
-    "paramiko>=3.4.0,<6.0.0",
-]
+# Kept so `pip install anolis-workbench[ssh]` and `--extra ssh` still resolve;
+# paramiko is a core dependency since remote setup is offered on every install.
+ssh = []
 dev = [
     "ruff>=0.15.0,<1.0.0",
     "pytest>=8.0.0,<10.0.0",
     "pytest-timeout>=2.0.0,<3.0.0",
-    "mypy>=2.3.0,<2.4.0",
+    "mypy>=2.4.0,<2.5.0",
     "types-requests>=2.31.0",
     "types-psutil>=5.9.0",
     "types-PyYAML>=6.0.0",
