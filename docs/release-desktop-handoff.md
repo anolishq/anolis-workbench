@@ -49,8 +49,11 @@ Desktop job flow:
    path and run `tauri build` per target (`.msi`, `.deb` + `.AppImage`,
    `.dmg`).
 5. `sbom` — Syft CycloneDX SBOMs for the Python, Node and Rust trees. This job
-   is `continue-on-error: true`, so a failed SBOM does not block
-   `create-release`; check the SBOM assets by hand (below).
+   is `continue-on-error: true`, which keeps a failed SBOM from failing the
+   run. `create-release` needs it, though, and GitHub documents that a failed
+   job skips the jobs that need it without saying whether `continue-on-error`
+   changes that. Treat a failed `sbom` as possibly blocking `create-release`,
+   and check the SBOM assets (below).
 6. `create-release` — normalize asset names, push the `v<version>` tag, and
    create the GitHub Release with the wheel and sdist, the installers, the
    SBOMs and `metrics.json`. It needs `validate`, `build-python`,
@@ -86,3 +89,7 @@ Desktop job flow:
    GitHub Release. Re-running the workflow for the same version recovers —
    no tag exists yet, so `validate` passes, and the publish step uses
    `skip-existing: true`.
+3. Re-running only the failed jobs of the same run also recovers, without
+   rebuilding: GitHub re-runs the failed jobs and the ones they gated. 0.15.0
+   went out this way after `smoke-test` failed because PyPI's index had not
+   yet listed the new version.
