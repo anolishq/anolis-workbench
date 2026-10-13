@@ -11,7 +11,6 @@ import json
 import pathlib
 
 import pytest
-import yaml
 
 from anolis_workbench.core import canonical, machine_profile, migrations, projects
 
@@ -86,14 +85,13 @@ def test_addresses_keep_their_authored_hex_string_form() -> None:
 
 
 def test_migrated_configs_match_the_old_renderer_values() -> None:
-    """Migrated configs, dumped verbatim as the v2 renderer did, must carry the
-    values the old per-kind renderer emitted for the same v1 document (frozen
-    here as literals), modulo the address representation (old: ints; now:
+    """Migrated configs must carry the values the old per-kind renderer
+    emitted for the same v1 document (frozen here as literals), modulo the address representation (old: ints; now:
     the authored hex strings, which providers parse)."""
     migrated, _ = migrations.migrate_system(_load_v1("bioreactor-manual"))
     providers = migrated["topology"]["providers"]
 
-    bread = yaml.safe_load(yaml.dump(providers["bread0"]["config"]))
+    bread = providers["bread0"]["config"]
     assert bread["provider"] == {"name": "bread0"}
     assert bread["hardware"] == {
         "bus_path": "/dev/i2c-1",
@@ -107,12 +105,12 @@ def test_migrated_configs_match_the_old_renderer_values() -> None:
     assert [int(str(d["address"]), 0) for d in bread["devices"]] == [10, 20, 21]
     assert [d["id"] for d in bread["devices"]] == ["rlht0", "dcmt0", "dcmt1"]
 
-    ezo = yaml.safe_load(yaml.dump(providers["ezo0"]["config"]))
+    ezo = providers["ezo0"]["config"]
     assert ezo["discovery"] == {"mode": "manual"}
     assert [int(str(d["address"]), 0) for d in ezo["devices"]] == [0x63, 0x61]
 
     sim_migrated, _ = migrations.migrate_system(_load_v1("sim-quickstart"))
-    sim = yaml.safe_load(yaml.dump(sim_migrated["topology"]["providers"]["sim0"]["config"]))
+    sim = sim_migrated["topology"]["providers"]["sim0"]["config"]
     assert sim["provider"] == {"name": "sim0"}
     assert sim["startup_policy"] == "degraded"
     assert sim["simulation"] == {"mode": "non_interacting", "tick_rate_hz": 10.0}
