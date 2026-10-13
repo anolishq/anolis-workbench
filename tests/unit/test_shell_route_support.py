@@ -178,6 +178,10 @@ def test_shell_routes_resolve_to_workbench_index(workbench_server: dict[str, Any
     try:
         for path in (
             "/",
+            # A reload, bookmark or shared link of /fleet returned a JSON 404 (#347).
+            "/fleet",
+            # A path the client does not know: the SPA sends it back to "/".
+            "/nowhere",
             "/projects/wb-route-test",
             "/projects/wb-route-test/compose",
             "/projects/wb-route-test/commission",
@@ -189,35 +193,6 @@ def test_shell_routes_resolve_to_workbench_index(workbench_server: dict[str, Any
             assert "text/html" in content_type, (path, content_type)
     finally:
         _http_json(base_url, "/api/projects/wb-route-test", method="DELETE")
-
-
-_SPA_ROUTES_FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "spa-routes.json"
-
-
-def test_server_route_lists_match_the_shared_fixture() -> None:
-    # frontend/tests/unit/routes.test.ts asserts the client's EXACT_ROUTES and
-    # WORKSPACES equal the same fixture, so a route added to one side only
-    # fails one of the two tests. A client route the server does not serve
-    # 404s on reload, bookmark or shared link (#347).
-    from anolis_workbench.server import app
-
-    fixture = json.loads(_SPA_ROUTES_FIXTURE.read_text(encoding="utf-8"))
-    assert list(app._SPA_EXACT_ROUTES) == fixture["exact_routes"]
-    assert list(app._WORKSPACES) == fixture["workspaces"]
-
-
-def test_server_spa_fallback_matches_client_routes(workbench_server: dict[str, Any]) -> None:
-    base_url = workbench_server["base_url"]
-    fixture = json.loads(_SPA_ROUTES_FIXTURE.read_text(encoding="utf-8"))
-
-    for path in fixture["client_routes"]:
-        code, body, _headers = _http_bytes(base_url, path)
-        assert code == 200, (path, code)
-        assert b"Anolis Workbench" in body, path
-
-    for path in fixture["not_client_routes"]:
-        code, _body, _headers = _http_bytes(base_url, path)
-        assert code == 404, (path, code)
 
 
 def test_status_and_static_assets_are_served(workbench_server: dict[str, Any]) -> None:
@@ -240,10 +215,13 @@ def test_status_and_static_assets_are_served(workbench_server: dict[str, Any]) -
 
 
 def test_unknown_static_path_returns_not_found(workbench_server: dict[str, Any]) -> None:
+    # The SPA fallback must not answer for a missing file or an unknown API
+    # route: a client fetching either has to see the 404, not index.html.
     base_url = workbench_server["base_url"]
-    status_code, payload = _http_json(base_url, "/missing.asset")
-    assert status_code == 404
-    assert payload.get("error") == "Not found"
+    for path in ("/missing.asset", "/assets/missing.js", "/api/nonexistent"):
+        status_code, payload = _http_json(base_url, path)
+        assert status_code == 404, path
+        assert payload.get("error") == "Not found", path
 
 
 def test_invalid_project_name_is_rejected(workbench_server: dict[str, Any]) -> None:
