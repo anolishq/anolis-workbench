@@ -290,6 +290,9 @@
         headers: { "Content-Type": "application/json" },
         body: "{}",
       });
+      // The result gated this launch only. If the runtime later stops on its
+      // own, the idle bar must ask for a fresh preflight, as doStop does.
+      preflightResults = null;
       startHealthPolling();
       connectLogs();
       startCommissionHealthPolling();
@@ -481,11 +484,16 @@
           type="button"
           disabled={launchRunning ||
             runningForOther ||
-            (preflightResults !== null && !preflightResults.ok)}
+            preflightRunning ||
+            preflightResults === null ||
+            !preflightResults.ok}
           onclick={doLaunch}
         >
           {launchRunning ? "Launching…" : "Launch →"}
         </button>
+        {#if preflightResults === null && !preflightRunning}
+          <span class="field-note">Run a preflight check to enable Launch.</span>
+        {/if}
         {#if preflightResults !== null}
           <span
             class="launch-summary"
