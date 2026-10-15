@@ -28,6 +28,8 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
             output="",
             host_preflight=["⚠ host preflight: continuing (--allow-unmet-host); those providers start up not ready"],
             reboot_pending=True,
+            preserved=["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"],
+            runtime_config_kept=True,
         )
 
     monkeypatch.setattr(deploy, "deploy_local", _deploy)
@@ -40,6 +42,8 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
     assert summary["runtime_version"] == "0.1.43"
     assert summary["host_preflight"][0].startswith("⚠ host preflight: continuing")
     assert summary["reboot_pending"] is True
+    assert summary["preserved"] == ["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"]
+    assert summary["runtime_config_kept"] is True
 
 
 def test_allow_unmet_host_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,3 +72,73 @@ def test_error_event_carries_the_preflight_block(calls, monkeypatch: pytest.Monk
     assert event["stage"] == "error"
     assert event["host_preflight"] == block
     assert event["reboot_pending"] is False
+
+
+def test_a_project_the_job_seeds_is_marked_as_onboarding_created(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """First-run detection skips this project, so a failed install keeps onboarding (#424)."""
+    import json
+
+    from anolis_workbench.core import installer
+    from anolis_workbench.core import paths as paths_module
+
+    def _seed(template: str, project: str, prefix: pathlib.Path, *, force: bool = False) -> pathlib.Path:
+        project_dir = tmp_path / project
+        project_dir.mkdir()
+        (project_dir / "workbench.json").write_text(json.dumps({"meta": {"name": project, "template": template}}))
+        return project_dir
+
+    monkeypatch.setattr(paths_module, "SYSTEMS_ROOT", tmp_path)
+    monkeypatch.setattr(installer, "provision_project", _seed)
+
+    project_dir = provision._prepare_workspace({}, lambda *args: None)
+
+    meta = json.loads((project_dir / "workbench.json").read_text())["meta"]
+    assert meta == {"name": "sim-quickstart", "template": "sim-quickstart", "created_by": "onboarding"}
+
+    (tmp_path / "my-rig").mkdir()
+    (tmp_path / "my-rig" / "workbench.json").write_text(json.dumps({"meta": {"name": "my-rig"}}))
+    provision._prepare_workspace({"project": "my-rig"}, lambda *args: None)
+    assert "created_by" not in json.loads((tmp_path / "my-rig" / "workbench.json").read_text())["meta"]
+
+
+def test_remote_job_deploys_the_named_project_with_its_variant(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commission's Deploy to device posts project, variant and target (#275)."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.43", prefix="/opt/anolis", output="")
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j3")
+    provision._run_remote_job(
+        job, {"project": "rig", "variant": "automation", "target": "pi@rig", "with_telemetry_export": True}
+    )
+
+    assert job.status == "done"
+    assert calls[0]["project_name"] == "rig"
+    assert calls[0]["variant"] == "automation"
+    assert calls[0]["with_telemetry_export"] is True
+
+
+def test_telemetry_export_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commission's install option reaches deploy as with_telemetry_export (#229)."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.43", prefix="/opt/anolis", output="")
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    for value in (True, None, "true", 1):
+        provision._run_install_job(provision.ProvisionJob(job_id="j"), {"with_telemetry_export": value})
+    assert [c["with_telemetry_export"] for c in calls] == [True, False, False, False]

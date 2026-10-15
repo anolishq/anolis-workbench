@@ -137,6 +137,9 @@ class _Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "telemetry_url": self.config.telemetry_url,
+                    # Operate must not name the launched project as the target
+                    # of a /v0 call that goes elsewhere (#264).
+                    "runtime_url_override": bool(operate.runtime_url_override()),
                 },
             )
         elif path == "/api/update-check":
@@ -172,9 +175,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._trigger_update()
         elif path == "/api/rollback":
             self._trigger_rollback()
-        elif path.startswith("/api/provision/cancel/"):
-            job_id = path.split("/")[-1]
-            provision.cancel_job(self, job_id)
         elif path == "/api/projects":
             compose.create_project(self)
         elif path == "/api/projects/import":
