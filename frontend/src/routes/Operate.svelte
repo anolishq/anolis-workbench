@@ -836,12 +836,15 @@
                 : "the runtime"}.
             </span>
             {@render safeStateFix()}
-            <!-- Not under hooks: the runtime counts setpoint coverage only, so
-                 a hooks safe state reports a false gap until anolishq/anolis#253. -->
-            {#if (estop.software_safe_state === "setpoints" || estop.software_safe_state === "zero") && estop.uncovered_actuating_functions > 0}
+            <!-- The runtime counts actuating functions with no matching setpoint
+                 on every rung, and picks setpoints only when that count is 0.
+                 Under hooks it is a false gap (anolishq/anolis#253) and under
+                 zero every actuator is zeroed anyway, so it only means
+                 something under none: why setpoints were not chosen. -->
+            {#if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
               <span class="field-error">
-                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint
-                and will not be driven.
+                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
+                which is why setpoints are not used.
               </span>
             {/if}
           </div>
