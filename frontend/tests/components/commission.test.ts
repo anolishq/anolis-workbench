@@ -379,6 +379,7 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     });
     await fireEvent.change(variant, { target: { value: 'automation' } });
     await fireEvent.click(screen.getByLabelText('Also install telemetry-export'));
+    await fireEvent.click(screen.getByLabelText('Also install observability (InfluxDB + Grafana)'));
     await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
 
     await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
@@ -390,6 +391,7 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
           variant: 'automation',
           target: 'pi@rig',
           with_telemetry_export: true,
+          with_observability: true,
         },
       },
     ]);

@@ -118,6 +118,7 @@
   let deployHost = $state<string>("");
   let deployVariantChoice = $state<string>("");
   let deployTelemetryExport = $state<boolean>(false);
+  let deployObservability = $state<boolean>(false);
   let deployRunning = $state<boolean>(false);
   let deployProgress = $state<string[]>([]);
   let deployOutcome = $state<DeployOutcome | null>(null);
@@ -471,6 +472,7 @@
     const body: Record<string, unknown> = { project: projectName };
     if (deployVariant) body.variant = deployVariant;
     if (deployTelemetryExport) body.with_telemetry_export = true;
+    if (deployObservability) body.with_observability = true;
     if (deployTarget === "remote") body.target = host;
     try {
       const started = await fetchJson<{ job_id: string }>(
@@ -877,6 +879,14 @@
     <p class="field-note">
       It is installed inert and starts once its tokens are set in /etc/anolis/telemetry-export.env
       on the target.
+    </p>
+    <label>
+      <input type="checkbox" disabled={deployRunning} bind:checked={deployObservability} />
+      Also install observability (InfluxDB + Grafana)
+    </label>
+    <p class="field-note">
+      Installed on the target beside the runtime. Grafana listens on the target's 127.0.0.1:3000
+      only: reach it over an ssh tunnel.
     </p>
     <button
       type="button"
