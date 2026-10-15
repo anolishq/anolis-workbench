@@ -122,6 +122,8 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,
+                    "preserved": result.preserved,
+                    "runtime_config_kept": result.runtime_config_kept,
                 },
             }
         )
@@ -177,6 +179,8 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,
+                    "preserved": result.preserved,
+                    "runtime_config_kept": result.runtime_config_kept,
                 },
             }
         )
