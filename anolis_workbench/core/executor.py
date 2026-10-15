@@ -15,12 +15,14 @@ from pathlib import Path
 # Allowlist of binaries that executors are permitted to invoke.
 # Commands not in this set are rejected to prevent command injection.
 #
-# Boundary: this guards Executor call sites only (deploy, rollback, the
-# workbench service, remote probes). Dev-launch and its preflight run the
-# user's own runtime and provider binaries with subprocess directly, from the
-# paths the user set in the project's host paths. That is by design: those
-# binaries are inside the trust boundary, and this allowlist could not express
-# a user-chosen path anyway, because _validate_command keeps only the basename.
+# Boundary: this guards Executor call sites only (deploy, bundle staging,
+# rollback, the workbench service, remote probes). Dev-launch and its
+# preflight run the user's own runtime and provider binaries with subprocess
+# directly, from the paths the user set in the project's host paths, and
+# `anolis-validate --runtime-bin` runs the runtime it is given. That is by
+# design: those binaries are inside the trust boundary, and this allowlist
+# could not express a user-chosen path anyway, because _validate_command keeps
+# only the basename.
 _ALLOWED_COMMANDS: set[str] = {
     "bash",
     "cat",
