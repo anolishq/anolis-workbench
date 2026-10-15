@@ -1,3 +1,20 @@
+<script lang="ts" module>
+  // The running provision job outlives a reload; this lets the view reattach
+  // to its stream, which replays from the first event (#348).
+  const PENDING_JOB_KEY = "anolis-workbench.provision-job";
+
+  export type PendingJob = { jobId: string; url: string; body: Record<string, unknown> };
+
+  export function readPendingJob(): PendingJob | null {
+    try {
+      const raw = sessionStorage.getItem(PENDING_JOB_KEY);
+      return raw ? (JSON.parse(raw) as PendingJob) : null;
+    } catch {
+      return null;
+    }
+  }
+</script>
+
 <script lang="ts">
   import { fetchJson } from "../lib/api";
 
@@ -43,8 +60,8 @@
   let startError = $state<string>("");
   let starting = $state<boolean>(false);
 
-  // choose -> running -> result. Onboarding is an overlay, not a route: the job
-  // lives in this component only, so a reload loses the view (#348).
+  // choose -> running -> result. Onboarding is an overlay, not a route; a
+  // reload reattaches to the job kept under PENDING_JOB_KEY (#348).
   let phase = $state<"choose" | "running" | "result">("choose");
   let progress = $state<{ stage: string; detail: string }[]>([]);
   let result = $state<ProvisionResult | null>(null);
@@ -66,6 +83,7 @@
     phase = "result";
     source?.close();
     source = null;
+    sessionStorage.removeItem(PENDING_JOB_KEY);
   }
 
   function onEvent(data: ProvisionEvent): void {
@@ -87,8 +105,8 @@
         rebootPending: data.reboot_pending ?? false,
       });
     } else if (data.stage === "status") {
-      // The stream's closing frame; reached without done/error only when a job
-      // ended some other way (cancelled).
+      // The stream's closing frame; reached without done/error only if a job
+      // ended without reporting either.
       finish({
         ok: data.status === "done",
         runtimeVersion: "",
@@ -101,6 +119,28 @@
     }
   }
 
+  function attach(job: PendingJob): void {
+    lastRequest = { url: job.url, body: job.body };
+    progress = [];
+    result = null;
+    confirmingUnmet = false;
+    phase = "running";
+    source = new EventSource(`/api/provision/status/${job.jobId}`);
+    source.onmessage = (ev: MessageEvent<string>) => onEvent(JSON.parse(ev.data) as ProvisionEvent);
+    source.onerror = () => {
+      // A closed stream after done/error is the normal end, not a loss.
+      if (result) return;
+      finish({
+        ok: false,
+        runtimeVersion: "",
+        error:
+          "Lost the connection to the workbench while installing. The install may still be running on the target.",
+        hostPreflight: [],
+        rebootPending: false,
+      });
+    };
+  }
+
   async function startJob(url: string, body: Record<string, unknown>): Promise<void> {
     starting = true;
     startError = "";
@@ -110,26 +150,9 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      lastRequest = { url, body };
-      progress = [];
-      result = null;
-      confirmingUnmet = false;
-      phase = "running";
-      source = new EventSource(`/api/provision/status/${started.job_id}`);
-      source.onmessage = (ev: MessageEvent<string>) =>
-        onEvent(JSON.parse(ev.data) as ProvisionEvent);
-      source.onerror = () => {
-        // A closed stream after done/error is the normal end, not a loss.
-        if (result) return;
-        finish({
-          ok: false,
-          runtimeVersion: "",
-          error:
-            "Lost the connection to the workbench while installing. The install may still be running on the target.",
-          hostPreflight: [],
-          rebootPending: false,
-        });
-      };
+      const job = { jobId: started.job_id, url, body };
+      sessionStorage.setItem(PENDING_JOB_KEY, JSON.stringify(job));
+      attach(job);
     } catch (err) {
       startError = err instanceof Error ? err.message : "Failed to start provisioning";
     } finally {
@@ -182,6 +205,8 @@
 
   // Load status on component init
   loadStatus();
+  const pending = readPendingJob();
+  if (pending) attach(pending);
 </script>
 
 <section id="onboarding" class="workspace visible">
@@ -195,7 +220,7 @@
       <div class="onboarding-progress" aria-live="polite">
         <h2>Installing…</h2>
         <p class="onboarding-note">
-          Keep this window open. Reloading loses this view; the install keeps running.
+          Reloading this page reattaches to the install; it keeps running either way.
         </p>
         <ol class="onboarding-stages">
           {#each progress as step, i (i)}

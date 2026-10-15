@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import App from "../../src/App.svelte";
 import Onboarding from "../../src/routes/Onboarding.svelte";
-import { jsonResponse } from "./helpers";
+import { jsonResponse, pathFromInput } from "./helpers";
 
 // install.sh v0.1.43's host-preflight block, as the deploy job carries it
 // (ANSI stripped), from a run with the service user out of the bus's group.
@@ -72,6 +73,10 @@ async function startLocal(): Promise<DrivenEventSource> {
   return DrivenEventSource.instances.at(-1)!;
 }
 
+beforeEach(() => {
+  sessionStorage.clear();
+});
+
 describe("Onboarding.svelte — install progress and result (#228)", () => {
   it("stays in onboarding and shows stages live instead of navigating away", async () => {
     const { onNavigate } = setup();
@@ -79,7 +84,7 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
 
     expect(source.url).toBe("/api/provision/status/job-1");
     expect(onNavigate).not.toHaveBeenCalled();
-    expect(screen.getByText(/Reloading loses this view/)).toBeInTheDocument();
+    expect(screen.getByText(/Reloading this page reattaches/)).toBeInTheDocument();
 
     source.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
     expect(await screen.findByText("Fetching install.sh v0.1.43")).toBeInTheDocument();
@@ -240,5 +245,82 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
 
     expect(await screen.findByText(/install already running/)).toBeInTheDocument();
     expect(DrivenEventSource.instances.length).toBe(0);
+  });
+});
+
+describe("Onboarding.svelte — a reload reattaches to the running job (#348)", () => {
+  it("reattaches to the same job's stream after a reload and rebuilds it from the replay", async () => {
+    setup();
+    const first = await startLocal();
+    first.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    const second = DrivenEventSource.instances.at(-1)!;
+    expect(DrivenEventSource.instances.length).toBe(2);
+    expect(second.url).toBe("/api/provision/status/job-1");
+    expect(screen.getByText("Installing…")).toBeInTheDocument();
+
+    second.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
+    second.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+  });
+
+  it("keeps Install anyway working after a reload, with the original request", async () => {
+    const { posts } = setup(["job-1", "job-2"]);
+    await startLocal();
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+    DrivenEventSource.instances.at(-1)!.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Confirm: install anyway" }));
+
+    await waitFor(() => expect(posts.length).toBe(2));
+    expect(posts[1]).toEqual({ url: "/api/provision/install", body: { allow_unmet_host: true } });
+  });
+
+  it("forgets the job once it has ended, so the next load starts at the choice", async () => {
+    setup();
+    const source = await startLocal();
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+    await screen.findByText("anolis-runtime v0.1.43 is installed.");
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(1);
+    expect(screen.getByRole("button", { name: /Set up this device/ })).toBeInTheDocument();
+  });
+
+  it("reopens onboarding in the shell on a reload, although the install has created a project", async () => {
+    setup();
+    await startLocal();
+    cleanup();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === "/api/projects")
+          return jsonResponse(200, [{ name: "sim-quickstart", meta: {} }]);
+        if (path === "/api/status")
+          return jsonResponse(200, { running: false, active_project: null });
+        if (path === "/api/templates") return jsonResponse(200, []);
+        if (path === "/api/provider-schemas") return jsonResponse(200, { providers: {} });
+        return jsonResponse(200, {});
+      }),
+    );
+    history.replaceState({}, "", "/");
+    render(App);
+
+    expect(await screen.findByText("Installing…")).toBeInTheDocument();
+    expect(DrivenEventSource.instances.at(-1)!.url).toBe("/api/provision/status/job-1");
   });
 });

@@ -3,7 +3,7 @@
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Home from "./routes/Home.svelte";
   import Fleet from "./routes/Fleet.svelte";
-  import Onboarding from "./routes/Onboarding.svelte";
+  import Onboarding, { readPendingJob } from "./routes/Onboarding.svelte";
   import Compose from "./routes/Compose.svelte";
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
@@ -242,8 +242,11 @@
         refreshStatus(),
       ]);
 
-      // Check first-run onboarding when no projects exist
-      if (projects.length === 0) {
+      // Onboarding reopens on a provision job it started, which by then has
+      // created its project; otherwise only on first run with no projects.
+      if (readPendingJob()) {
+        showOnboarding = true;
+      } else if (projects.length === 0) {
         try {
           const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
           if (ob.first_run) {
