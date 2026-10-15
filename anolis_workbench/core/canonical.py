@@ -237,6 +237,16 @@ def influx_token_error(doc: Any) -> str | None:
     )
 
 
+def strip_influx_token(doc: Any) -> bool:
+    """Drop an authored `telemetry.influxdb.token`; True when one was there."""
+    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
+    influxdb = telemetry.get("influxdb") if isinstance(telemetry, dict) else None
+    if not isinstance(influxdb, dict) or influx_token_error(doc) is None:
+        return False
+    del influxdb["token"]
+    return True
+
+
 # install.sh's inertness gate is an AWK PASS OVER THE RAW YAML, not a structural
 # read of the parsed document, and mirroring it structurally drifts in both
 # directions: it misses an `enabled:` that only appears as a wrapped line of a
