@@ -60,33 +60,64 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     );
   });
 
-  it.each([
-    ['hooks', 2],
-    ['zero', 1],
-  ])('under %s, shows the %i actuating function(s) the e-stop will not drive', async (rung, n) => {
-    renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }));
+  describe('at runtime 0.1.45, where the count is what the active rung will not drive', () => {
+    const NEW = '0.1.45';
 
-    expect(
-      await screen.findByText(`${n} actuating function(s) the e-stop will not drive.`),
-    ).toBeInTheDocument();
+    it.each([
+      ['hooks', 2],
+      ['zero', 1],
+    ])('under %s, shows the %i actuating function(s) the e-stop will not drive', async (rung, n) => {
+      renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }, NEW));
+
+      expect(
+        await screen.findByText(`${n} actuating function(s) the e-stop will not drive.`),
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
+      ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
+      ['zero', /latches actuation, then tries to drive every actuating function to zero/],
+    ])('under %s with 0 undriven, shows its note and no count line', async (rung, note) => {
+      renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: 0 }, NEW));
+
+      expect(await screen.findByText(note)).toBeInTheDocument();
+      expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
+    });
+
+    it('under none, says the e-stop drives nothing and shows no count', async () => {
+      renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }, NEW));
+
+      expect(await screen.findByText(/The e-stop drives nothing/)).toBeInTheDocument();
+      expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
+    });
   });
 
-  it.each([
-    ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
-    ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
-    ['zero', /latches actuation, then tries to drive every actuating function to zero/],
-  ])('under %s with 0 undriven, shows its note and no count line', async (rung, note) => {
-    renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: 0 }));
+  describe.each([
+    ['0.1.44', '0.1.44'],
+    ['an unknown version', ''],
+    ['an unparsable version', 'dev-build'],
+  ])('at %s, where the count is functions with no matching setpoint', (_label, version) => {
+    it.each([
+      ['hooks', 7],
+      ['zero', 3],
+    ])('under %s, shows no count line for %i', async (rung, n) => {
+      renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }, version));
 
-    expect(await screen.findByText(note)).toBeInTheDocument();
-    expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
-  });
+      expect(await screen.findByText(/^As reported by /)).toBeInTheDocument();
+      expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
+    });
 
-  it('under none, says the e-stop drives nothing and shows no count', async () => {
-    renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }));
+    it('under none, shows the count as the reason setpoints are not used', async () => {
+      renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }, version));
 
-    expect(await screen.findByText(/The e-stop drives nothing/)).toBeInTheDocument();
-    expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /4 actuating function\(s\) have no declared safe setpoint, which is why setpoints are not used/,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
+    });
   });
 
   it('says not observed when the runtime has not answered, and still names the file', async () => {
