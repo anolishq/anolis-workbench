@@ -634,13 +634,27 @@ def test_a_target_that_cannot_be_asked_is_not_reported_as_pending(
 # phase_config_providers messages, colour codes included, for a redeploy with
 # --variant over an installed machine.
 _PRESERVED_STDOUT = (
+    "\x1b[0;33m→ backup: incoming binaries identical to installed — .prev preserved for rollback\x1b[0m\n"
     "\x1b[0;32m✓ install binaries: anolis-runtime \x1b[0m\n"
     "\x1b[0;33m→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)\x1b[0m\n"
     "\x1b[0;33m⚠ config (runtime): --variant 'manual' NOT applied; "
     "/opt/anolis/config/runtime.yaml is preserved.\x1b[0m\n"
     "  To switch variants, remove /opt/anolis/config/runtime.yaml and re-run, or edit it directly.\n"
+    "\x1b[0;33m→ auth: existing API token preserved (/etc/anolis/runtime.env)\x1b[0m\n"
     "\x1b[0;33m→ config (providers): 2 preserved, 0 written\x1b[0m\n"
+    "\x1b[0;33m→ telemetry-export: venv present (preserved)\x1b[0m\n"
+    "\x1b[0;33m→ telemetry-export: config exists (preserved)\x1b[0m\n"
     "\x1b[0;32m✓ manifest: written\x1b[0m\n"
+)
+
+# install.sh's own way to switch variants: remove runtime.yaml and re-run. The
+# runtime config is written fresh; the token, provider configs and binaries are
+# still kept.
+_VARIANT_SWITCH_STDOUT = (
+    "\x1b[0;33m→ backup: incoming binaries identical to installed — .prev preserved for rollback\x1b[0m\n"
+    "\x1b[0;32m✓ config (runtime): installed variant 'automation'\x1b[0m\n"
+    "\x1b[0;33m→ auth: existing API token preserved (/etc/anolis/runtime.env)\x1b[0m\n"
+    "\x1b[0;33m→ config (providers): 2 preserved, 0 written\x1b[0m\n"
 )
 
 # The same phases on a fresh install.
@@ -662,8 +676,25 @@ def test_preserved_lines_name_what_install_sh_kept() -> None:
         "→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)",
         "⚠ config (runtime): --variant 'manual' NOT applied; /opt/anolis/config/runtime.yaml is preserved.",
         "→ config (providers): 2 preserved, 0 written",
+        "→ telemetry-export: config exists (preserved)",
     ]
     assert deploy.preserved_lines(_FRESH_STDOUT) == []
+
+
+def test_a_variant_switch_does_not_report_the_runtime_config_as_kept(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The token and the backup are kept on every redeploy; they are not the
+    runtime config, and a fresh runtime.yaml must not read as kept."""
+    _stub_fetch(monkeypatch)
+    result = deploy.deploy_local(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        variant="manual",
+        executor=_ScriptedExecutor(0, _VARIANT_SWITCH_STDOUT),
+    )
+    assert result.runtime_config_kept is False
+    assert result.preserved == ["→ config (providers): 2 preserved, 0 written"]
 
 
 def test_a_redeploy_says_before_install_sh_runs_that_the_config_is_kept(
@@ -690,6 +721,7 @@ def test_a_redeploy_says_before_install_sh_runs_that_the_config_is_kept(
         )
     ]
     assert result.preserved[1].startswith("⚠ config (runtime): --variant 'manual' NOT applied")
+    assert result.runtime_config_kept is True
 
 
 def test_a_fresh_install_carries_no_notice_and_nothing_preserved(

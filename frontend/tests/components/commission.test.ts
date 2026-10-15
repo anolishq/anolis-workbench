@@ -352,6 +352,10 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     );
     const doc = createProjectDocument('demo');
     doc.profile.runtime_profiles.automation = 'config/anolis-runtime.automation.yaml';
+    doc.variants.automation = {
+      ...doc.variants.manual,
+      automation: { enabled: true, behavior_tree: 'behaviors/main.xml' },
+    };
     render(Commission, {
       props: {
         projectName: 'demo',
@@ -405,10 +409,11 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
         host_preflight: [],
         reboot_pending: false,
         preserved: ["⚠ config (runtime): --variant 'automation' NOT applied; /opt/anolis/config/runtime.yaml is preserved."],
+        runtime_config_kept: true,
       },
     });
     expect(await screen.findByText('Deployed')).toBeInTheDocument();
-    expect(screen.getByText(/configuration was kept; the runtime runs it/)).toBeInTheDocument();
+    expect(screen.getByText(/existing runtime config was kept; the runtime runs it/)).toBeInTheDocument();
     expect(screen.getByText(/--variant 'automation' NOT applied/)).toBeInTheDocument();
     expect(source.closed).toBe(true);
   });
@@ -434,6 +439,37 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     });
     expect(await screen.findByText('Deploy failed')).toBeInTheDocument();
     expect(screen.getByText(/checksum mismatch/)).toBeInTheDocument();
+  });
+
+  it('does not call a freshly written runtime config kept after a variant switch', async () => {
+    setup();
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // install.sh after "remove runtime.yaml and re-run": runtime.yaml was
+    // written fresh, the provider configs were kept.
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.43',
+        preserved: ['→ config (providers): 2 preserved, 0 written'],
+        runtime_config_kept: false,
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.queryByText(/runtime config was kept/)).not.toBeInTheDocument();
+    expect(screen.getByText(/left these existing configs in place/)).toBeInTheDocument();
+    expect(screen.getByText(/2 preserved, 0 written/)).toBeInTheDocument();
+  });
+
+  it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
+    setup();
+    expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'automation (fresh install refuses this)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
   });
 
   it('says before deploying that an existing runtime config is kept', () => {

@@ -28,6 +28,7 @@
       host_preflight?: string[];
       reboot_pending?: boolean;
       preserved?: string[];
+      runtime_config_kept?: boolean;
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -40,6 +41,7 @@
     hostPreflight: string[];
     rebootPending: boolean;
     preserved: string[];
+    runtimeConfigKept: boolean;
   };
 
   let status = $state<OnboardingStatus | null>(null);
@@ -84,6 +86,7 @@
         hostPreflight: data.summary?.host_preflight ?? [],
         rebootPending: data.summary?.reboot_pending ?? false,
         preserved: data.summary?.preserved ?? [],
+        runtimeConfigKept: data.summary?.runtime_config_kept === true,
       });
     } else if (data.stage === "error") {
       finish({
@@ -93,6 +96,7 @@
         hostPreflight: data.host_preflight ?? [],
         rebootPending: data.reboot_pending ?? false,
         preserved: [],
+        runtimeConfigKept: false,
       });
     } else if (data.stage === "status") {
       // The stream's closing frame; reached without done/error only when a job
@@ -104,6 +108,7 @@
         hostPreflight: [],
         rebootPending: false,
         preserved: [],
+        runtimeConfigKept: false,
       });
     } else {
       progress = [...progress, { stage: data.stage, detail: data.detail ?? "" }];
@@ -138,6 +143,7 @@
           hostPreflight: [],
           rebootPending: false,
           preserved: [],
+          runtimeConfigKept: false,
         });
       };
     } catch (err) {
@@ -220,11 +226,11 @@
           {#if result.runtimeVersion}
             <p>anolis-runtime v{result.runtimeVersion} is installed.</p>
           {/if}
+          {#if result.runtimeConfigKept}
+            <p>The existing runtime config was kept; the runtime runs it, not the quickstart's.</p>
+          {/if}
           {#if result.preserved.length}
-            <p>
-              The existing install's configuration was kept; the runtime runs it, not the
-              quickstart's:
-            </p>
+            <p>install.sh left these existing configs in place:</p>
             <pre class="onboarding-preflight">{result.preserved.join("\n")}</pre>
           {/if}
           {#if result.hostPreflight.length}
