@@ -9,6 +9,7 @@
     EstopStatus,
     FunctionSpec,
     ParameterDefinition,
+    ProjectDoc,
     ProviderHealth,
     RuntimeApiStatus,
     RuntimeStatus,
@@ -16,6 +17,7 @@
     UnknownRecord,
     WorkbenchConfig,
   } from "../lib/contracts";
+  import { activeVariant, variantRelpath } from "../lib/canonical";
   import {
     coerceParameterValue,
     deriveOperateAvailability,
@@ -43,9 +45,11 @@
 
   let {
     projectName,
+    system = null,
     runtimeStatus,
   }: {
     projectName: string | null;
+    system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
   } = $props();
 
@@ -62,6 +66,10 @@
     typeof runtimeStatus?.active_project === "string" ? runtimeStatus.active_project : null,
   );
   const available = $derived(running && runningProject === projectName);
+  // Where an operator declares the safe state (#346): the dev-launch copy is
+  // the project's own variant file; an installed target keeps its own config,
+  // which a redeploy does not overwrite.
+  const safeStateFile = $derived(variantRelpath(activeVariant(system)));
 
   // ── Operate state ─────────────────────────────────────────────────────────
   let mode = $state<string>("--");
@@ -730,6 +738,14 @@
   }
 </script>
 
+{#snippet safeStateFix()}
+  <span class="field-note" data-testid="safe-state-fix">
+    Declared under <code>safety.safe_state</code> in the project's
+    <code>{safeStateFile}</code> for dev-launch, or in
+    <code>/opt/anolis/config/runtime.yaml</code> on an installed target, which survives redeploys.
+  </span>
+{/snippet}
+
 <section id="workspace-operate" class="workspace visible">
   <div class="workspace-header">
     <h2>Operate</h2>
@@ -749,7 +765,10 @@
     <div class="operate-section operate-estop-section">
       <h3>Software Stop</h3>
       {#if !estop}
-        <p class="placeholder">Safe-state status unavailable.</p>
+        <p class="placeholder">
+          Software safe-state: not observed. The runtime has not reported it.
+        </p>
+        {@render safeStateFix()}
       {:else if estop.latched}
         <div class="estop-latched-banner">
           <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
@@ -811,7 +830,15 @@
                 e-stop to make the machine safe.
               </span>
             {/if}
-            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+            <span class="field-note">
+              As reported by {runtimeStatusData?.version
+                ? `runtime v${runtimeStatusData.version}`
+                : "the runtime"}.
+            </span>
+            {@render safeStateFix()}
+            <!-- Not under hooks: the runtime counts setpoint coverage only, so
+                 a hooks safe state reports a false gap until anolishq/anolis#253. -->
+            {#if (estop.software_safe_state === "setpoints" || estop.software_safe_state === "zero") && estop.uncovered_actuating_functions > 0}
               <span class="field-error">
                 {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint
                 and will not be driven.

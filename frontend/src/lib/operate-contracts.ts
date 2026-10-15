@@ -167,6 +167,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
   const r = asObject(payload);
   return {
     status: asObject(r.status) as RuntimeApiStatus["status"],
+    version: typeof r.version === "string" ? r.version : "",
     mode: typeof r.mode === "string" ? r.mode : "UNKNOWN",
     uptime_seconds: toFinite(r.uptime_seconds) ?? 0,
     polling_interval_ms: toFinite(r.polling_interval_ms) ?? 0,

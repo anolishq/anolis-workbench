@@ -159,6 +159,7 @@ describe("operate-contracts extractors", () => {
 
     expect(extractRuntimeStatus({})).toEqual({
       status: {},
+      version: "",
       mode: "UNKNOWN",
       uptime_seconds: 0,
       polling_interval_ms: 0,
