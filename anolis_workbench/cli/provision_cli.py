@@ -386,6 +386,25 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_observability(result: deploy.DeployResult) -> None:
+    """What install.sh's observability phase said. It warns and still exits
+    0 on every failure, so without this an offline target reports success
+    with nothing installed."""
+    lines = deploy.observability_lines(result.output)
+    print()
+    print("  Observability (install.sh):")
+    if not lines:
+        print("    install.sh printed no observability lines; the end of its output:")
+        lines = deploy._ANSI_RE.sub("", result.output).strip().splitlines()[-10:]
+        print("\n".join(f"    {line}" for line in lines))
+        print("\nWARNING: observability: install.sh did not report on it — check the output above", file=sys.stderr)
+        return
+    for line in lines:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in lines):
+        print("\nWARNING: observability: install.sh reported a problem — see the lines above", file=sys.stderr)
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
     import os
@@ -452,6 +471,8 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_host_followups(result)
+        if _wants_observability(args):
+            _print_observability(result)
         print()
         print("Next steps:")
         print("  systemctl status anolis-runtime")
@@ -611,6 +632,8 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
+    if _wants_observability(args):
+        _print_observability(result)
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")

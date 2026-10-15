@@ -129,6 +129,76 @@ class TestObservabilityFlag:
         assert provision_cli._run_remote(provision_cli._parse_args()) == 0
         assert seen["with_observability"] is True
 
+    # install.sh's observability phase reports every failure as a warning
+    # and still exits 0, so its lines are the only signal the CLI gets.
+    _OFFLINE = (
+        "\x1b[32m✓ runtime installed\x1b[0m\n"
+        "\x1b[33m⚠ observability: vendor apt repos unreachable (offline?) — skipped\x1b[0m\n"
+        "  The runtime install is unaffected; re-run with --with-observability once online.\n"
+        "✓ health: runtime answering\n"
+    )
+
+    def _run_install_with_output(self, tmp_path, monkeypatch: pytest.MonkeyPatch, output: str, *flags: str) -> int:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+
+        result = deploy.DeployResult(project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install", *flags])
+        return provision_cli._run_install(provision_cli._parse_args())
+
+    def test_install_surfaces_an_observability_warning(self, tmp_path, monkeypatch, capsys) -> None:
+        assert self._run_install_with_output(tmp_path, monkeypatch, self._OFFLINE, "--with-observability") == 0
+        out, err = capsys.readouterr()
+        assert "⚠ observability: vendor apt repos unreachable (offline?) — skipped" in out
+        assert "re-run with --with-observability once online" in out
+        assert "health: runtime answering" not in out
+        assert "WARNING" in err and "observability" in err
+
+    def test_remote_surfaces_the_grafana_lines(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+        from anolis_workbench.core import executor as executor_module
+
+        output = (
+            "✓ observability: influxdb bootstrapped\n"
+            "✓ Grafana: http://localhost:3000\n"
+            "  ssh -L 3000:127.0.0.1:3000 pi@host\n"
+        )
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        result = deploy.DeployResult(project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host", "--with-observability"])
+        assert provision_cli._run_remote(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "Grafana: http://localhost:3000" in out
+        assert "ssh -L 3000:127.0.0.1:3000 pi@host" in out
+        assert "WARNING" not in err
+
+    def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        assert self._run_install_with_output(tmp_path, monkeypatch, "✓ a\n✓ b\n", "--with-observability") == 0
+        out, err = capsys.readouterr()
+        assert "✓ b" in out
+        assert "WARNING" in err
+
+    def test_install_without_the_flag_shows_no_observability_section(self, tmp_path, monkeypatch, capsys) -> None:
+        assert self._run_install_with_output(tmp_path, monkeypatch, self._OFFLINE) == 0
+        out, err = capsys.readouterr()
+        assert "observability:" not in out
+        assert err == ""
+
     @pytest.mark.parametrize(
         "argv",
         [

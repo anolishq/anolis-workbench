@@ -365,6 +365,28 @@ def host_preflight_block(stdout: str) -> list[str]:
     return block
 
 
+_OBSERVABILITY_MARKS = ("observability:", "Grafana:")
+
+
+def observability_lines(stdout: str) -> list[str]:
+    """install.sh's observability and Grafana lines, ANSI stripped, each with
+    the indented detail that follows it. install.sh reports every
+    observability failure as a warning and still exits 0, so these lines
+    are the only place a failure shows."""
+    lines = _ANSI_RE.sub("", stdout).splitlines()
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if any(mark in line for mark in _OBSERVABILITY_MARKS):
+            out.append(line)
+            in_block = True
+        elif in_block and line.startswith(" ") and line.strip():
+            out.append(line)
+        else:
+            in_block = False
+    return out
+
+
 def _preflight_needs_attention(block: list[str]) -> bool:
     return any(line.startswith(("✗", "⚠")) for line in block)
 
