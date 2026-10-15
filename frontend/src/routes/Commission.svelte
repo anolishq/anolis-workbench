@@ -15,7 +15,7 @@
     type RuntimeApiStatus,
     type RuntimeStatus,
   } from "../lib/contracts";
-  import { activeVariant, MANUAL_VARIANT } from "../lib/canonical";
+  import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "../lib/canonical";
 
   let {
     projectName,
@@ -100,6 +100,7 @@
       host_preflight?: string[];
       reboot_pending?: boolean;
       preserved?: string[];
+      runtime_config_kept?: boolean;
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -111,6 +112,7 @@
     hostPreflight: string[];
     rebootPending: boolean;
     preserved: string[];
+    runtimeConfigKept: boolean;
   };
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
@@ -437,6 +439,7 @@
         hostPreflight: data.summary?.host_preflight ?? [],
         rebootPending: data.summary?.reboot_pending ?? false,
         preserved: data.summary?.preserved ?? [],
+        runtimeConfigKept: data.summary?.runtime_config_kept === true,
       };
     }
     if (data.stage === "error" || data.stage === "status") {
@@ -447,6 +450,7 @@
         hostPreflight: data.host_preflight ?? [],
         rebootPending: data.reboot_pending ?? false,
         preserved: [],
+        runtimeConfigKept: false,
       };
     }
     return null;
@@ -497,6 +501,7 @@
             hostPreflight: [],
             rebootPending: false,
             preserved: [],
+            runtimeConfigKept: false,
           });
         };
       });
@@ -578,10 +583,11 @@
       {#if outcome.runtimeVersion}
         <p>anolis-runtime v{outcome.runtimeVersion} is installed.</p>
       {/if}
+      {#if outcome.runtimeConfigKept}
+        <p>The existing runtime config was kept; the runtime runs it, not this project's.</p>
+      {/if}
       {#if outcome.preserved.length}
-        <p>
-          The existing install's configuration was kept; the runtime runs it, not this project's:
-        </p>
+        <p>install.sh left these existing configs in place:</p>
         <pre class="deploy-output">{outcome.preserved.join("\n")}</pre>
       {/if}
       {#if outcome.hostPreflight.length}
@@ -851,9 +857,12 @@
       onchange={(e) => (deployVariantChoice = e.currentTarget.value)}
     >
       {#each variants as v (v)}
-        <option value={v}>{v}</option>
+        <option value={v}>
+          {inertnessViolation(system?.variants?.[v]) ? `${v} (fresh install refuses this)` : v}
+        </option>
       {/each}
     </select>
+    <p class="field-note">Deploys the saved project; unsaved edits are not included.</p>
     <p class="field-note">
       A fresh install accepts only a variant that boots inert. On a device that already has a
       runtime config, install.sh keeps that config: this project's runtime config and the variant
