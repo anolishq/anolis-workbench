@@ -243,10 +243,11 @@
       ]);
 
       // Onboarding reopens on a provision job it started, which by then has
-      // created its project; otherwise only on first run with no projects.
+      // created its project. Otherwise first run lasts until a deploy has
+      // succeeded, whatever projects a failed attempt left behind (#424).
       if (readPendingJob()) {
         showOnboarding = true;
-      } else if (projects.length === 0) {
+      } else {
         try {
           const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
           if (ob.first_run) {
@@ -379,7 +380,7 @@
       <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {runtimeStatus} />
+    <Operate {projectName} {system} {runtimeStatus} />
   {/if}
 </main>
 
