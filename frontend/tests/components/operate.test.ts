@@ -42,6 +42,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     renderOperate(status({ software_safe_state: 'setpoints', uncovered_actuating_functions: 0 }));
 
     expect(await screen.findByText('As reported by runtime v0.1.44.')).toBeInTheDocument();
+    expect(screen.getByText(/Latches actuation, then drives the declared safe setpoints/)).toBeInTheDocument();
     const fix = screen.getByTestId('safe-state-fix');
     expect(fix).toHaveTextContent('safety.safe_state');
     expect(fix).toHaveTextContent("the project's config/anolis-runtime.manual.yaml for dev-launch");
@@ -59,7 +60,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
   it('shows no uncovered count under zero, which zeroes every actuator', async () => {
     renderOperate(status({ software_safe_state: 'zero', uncovered_actuating_functions: 3 }));
 
-    expect(await screen.findByText(/drives every actuating function to zero/)).toBeInTheDocument();
+    expect(await screen.findByText(/latches actuation, then tries to drive every actuating function to zero/)).toBeInTheDocument();
     expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
   });
 
@@ -77,7 +78,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
   it('shows no uncovered count under hooks, where the runtime reports a false gap', async () => {
     renderOperate(status({ software_safe_state: 'hooks', uncovered_actuating_functions: 7 }));
 
-    expect(await screen.findByText(/Runs the declared safe-state hooks/)).toBeInTheDocument();
+    expect(await screen.findByText(/Latches actuation, then runs the declared safe-state hooks/)).toBeInTheDocument();
     expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
   });
 
