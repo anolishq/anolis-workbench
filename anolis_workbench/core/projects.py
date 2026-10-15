@@ -377,6 +377,36 @@ def _degraded_project(name: str) -> dict:
     }
 
 
+SAFE_STATE_WARNING = (
+    "If any of these providers actuates, the software stop latches and drives nothing. "
+    "Operate shows what the runtime reports."
+)
+
+
+def safe_state_warnings(document: dict) -> list[str]:
+    """One warning per variant that runs providers but declares no safe state (#371).
+
+    Whether a function actuates is only known to the runtime, from live
+    capabilities, so this is no safety verdict: a sensor-only variant warns
+    too. It names what POST /v0/estop would do if a provider does actuate.
+    """
+    variants = document.get("variants")
+    if not isinstance(variants, dict):
+        return []
+    warnings: list[str] = []
+    for name, variant in variants.items():
+        if not isinstance(variant, dict) or not variant.get("providers"):
+            continue
+        safety = variant.get("safety")
+        safe_state = safety.get("safe_state") if isinstance(safety, dict) else None
+        if isinstance(safe_state, dict) and (
+            safe_state.get("hooks") or safe_state.get("setpoints") or safe_state.get("zero_is_safe") is True
+        ):
+            continue
+        warnings.append(f"Variant '{name}' has providers and no safety.safe_state. {SAFE_STATE_WARNING}")
+    return warnings
+
+
 def _with_derived_warnings(document: dict) -> list[str]:
     """Sidecar warnings plus the ones derived from the document itself.
 
@@ -387,7 +417,8 @@ def _with_derived_warnings(document: dict) -> list[str]:
     """
     carried = document.get("warnings")
     warnings = [w for w in carried if isinstance(w, str)] if isinstance(carried, list) else []
-    return warnings + [w for w in provider_schemas.version_skew_warnings(document) if w not in warnings]
+    derived = provider_schemas.version_skew_warnings(document) + safe_state_warnings(document)
+    return warnings + [w for w in derived if w not in warnings]
 
 
 def get_project(name: str) -> dict:
@@ -511,6 +542,9 @@ def save_project(name: str, document: dict) -> None:
     sidecar["format"] = FORMAT_MACHINE_PROFILE
     sidecar["authored"] = True
     meta = _meta_of(sidecar)
+    # A project onboarding seeded stops being onboarding's once the user saves
+    # it: it then ends first-run like any project of their own (#424).
+    meta.pop("created_by", None)
     meta.setdefault("name", name)
     meta["profile_dir_name"] = document.get("profile", {}).get("machine_id") or meta.get("profile_dir_name")
     sidecar["meta"] = meta
@@ -696,6 +730,7 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
             # token as well as the profile.
             canonical.retarget_project(pdir, canonical.machine_id_from_name(new_name))
         meta = _meta_of(sidecar)
+        meta.pop("created_by", None)  # a copy is the user's, not onboarding's (#424)
         meta["name"] = new_name
         meta["created"] = datetime.now(timezone.utc).isoformat()
         if canonical.is_authored(sidecar):

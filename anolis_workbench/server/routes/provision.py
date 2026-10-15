@@ -13,12 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import deploy, installer, releases
+from anolis_workbench.core import canonical, deploy, installer, machine_profile, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 DEFAULT_TEMPLATE = "sim-quickstart"
+
+# Sidecar meta.created_by on a project a provision job seeded from a template
+# (Onboarding's setup cards). First-run detection ignores such a project, so a
+# failed first install keeps the way back into onboarding (#424).
+CREATED_BY_PROVISION = "onboarding"
 
 # ---------------------------------------------------------------------------
 # Job management
@@ -30,10 +35,9 @@ class ProvisionJob:
     """In-progress or completed provision job."""
 
     job_id: str
-    status: str = "running"  # running | done | failed | cancelled
+    status: str = "running"  # running | done | failed
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
-    _cancel: bool = field(default=False, repr=False)
 
 
 _jobs: dict[str, ProvisionJob] = {}
@@ -78,6 +82,10 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     if not project_dir.exists() or replace:
         progress("project", f"Creating workspace project {project} from {template}")
         installer.provision_project(template, project, prefix, force=replace)
+        sidecar = machine_profile.read_sidecar(project_dir) or {}
+        meta = sidecar.get("meta")
+        sidecar["meta"] = {**(meta if isinstance(meta, dict) else {}), "created_by": CREATED_BY_PROVISION}
+        canonical.write_sidecar(project_dir, sidecar)
     return project_dir
 
 
@@ -103,6 +111,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            with_telemetry_export=params.get("with_telemetry_export") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )
@@ -113,6 +122,8 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,
+                    "preserved": result.preserved,
+                    "runtime_config_kept": result.runtime_config_kept,
                 },
             }
         )
@@ -150,6 +161,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            with_telemetry_export=params.get("with_telemetry_export") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )
@@ -168,6 +180,8 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,
+                    "preserved": result.preserved,
+                    "runtime_config_kept": result.runtime_config_kept,
                 },
             }
         )
@@ -242,7 +256,7 @@ def get_status(handler: Any, job_id: str) -> None:
             handler.wfile.flush()
             sent += 1
 
-        if job.status in ("done", "failed", "cancelled"):
+        if job.status in ("done", "failed"):
             # Send final status event
             final = json.dumps({"stage": "status", "status": job.status, "error": job.error})
             handler.wfile.write(f"data: {final}\n\n".encode())
@@ -250,21 +264,6 @@ def get_status(handler: Any, job_id: str) -> None:
             break
 
         time.sleep(0.2)
-
-
-def cancel_job(handler: Any, job_id: str) -> None:
-    """POST /api/provision/cancel/<job_id> — cancel a running job."""
-    job = _get_job(job_id)
-    if job is None:
-        handler._json(404, {"error": f"Job {job_id} not found"})
-        return
-
-    if job.status == "running":
-        job._cancel = True
-        job.status = "cancelled"
-        handler._json(200, {"job_id": job_id, "status": "cancelled"})
-    else:
-        handler._json(409, {"error": f"Job already {job.status}"})
 
 
 # ---------------------------------------------------------------------------
