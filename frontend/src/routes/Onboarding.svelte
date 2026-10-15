@@ -1,3 +1,20 @@
+<script lang="ts" module>
+  // The running provision job outlives a reload; this lets the view reattach
+  // to its stream, which replays from the first event (#348).
+  const PENDING_JOB_KEY = "anolis-workbench.provision-job";
+
+  export type PendingJob = { jobId: string; url: string; body: Record<string, unknown> };
+
+  export function readPendingJob(): PendingJob | null {
+    try {
+      const raw = sessionStorage.getItem(PENDING_JOB_KEY);
+      return raw ? (JSON.parse(raw) as PendingJob) : null;
+    } catch {
+      return null;
+    }
+  }
+</script>
+
 <script lang="ts">
   import { fetchJson } from "../lib/api";
 
@@ -23,7 +40,13 @@
     detail?: string;
     status?: string;
     error?: string | null;
-    summary?: { runtime_version?: string; host_preflight?: string[]; reboot_pending?: boolean };
+    summary?: {
+      runtime_version?: string;
+      host_preflight?: string[];
+      reboot_pending?: boolean;
+      preserved?: string[];
+      runtime_config_kept?: boolean;
+    };
     host_preflight?: string[];
     reboot_pending?: boolean;
   };
@@ -34,6 +57,8 @@
     error: string;
     hostPreflight: string[];
     rebootPending: boolean;
+    preserved: string[];
+    runtimeConfigKept: boolean;
   };
 
   let status = $state<OnboardingStatus | null>(null);
@@ -43,8 +68,8 @@
   let startError = $state<string>("");
   let starting = $state<boolean>(false);
 
-  // choose -> running -> result. Onboarding is an overlay, not a route: the job
-  // lives in this component only, so a reload loses the view (#348).
+  // choose -> running -> result. Onboarding is an overlay, not a route; a
+  // reload reattaches to the job kept under PENDING_JOB_KEY (#348).
   let phase = $state<"choose" | "running" | "result">("choose");
   let progress = $state<{ stage: string; detail: string }[]>([]);
   let result = $state<ProvisionResult | null>(null);
@@ -61,6 +86,38 @@
     }
   }
 
+  // Storage is best-effort: an install already started must still get its
+  // view when sessionStorage refuses a write; only the reload path is lost.
+  function rememberJob(job: PendingJob): void {
+    try {
+      sessionStorage.setItem(PENDING_JOB_KEY, JSON.stringify(job));
+    } catch {
+      /* the view attaches anyway; a reload just cannot reattach */
+    }
+  }
+
+  function forgetJob(): void {
+    try {
+      sessionStorage.removeItem(PENDING_JOB_KEY);
+    } catch {
+      /* nothing more to do */
+    }
+  }
+
+  // A dropped stream is not the end of the job, so it keeps the job for a
+  // reload; only a server that no longer knows the job (a 404) forgets it.
+  async function forgetIfGone(jobId: string): Promise<void> {
+    const ctrl = new AbortController();
+    try {
+      const res = await fetch(`/api/provision/status/${jobId}`, { signal: ctrl.signal });
+      if (res.status === 404) forgetJob();
+    } catch {
+      /* unreachable: keep the job */
+    } finally {
+      ctrl.abort();
+    }
+  }
+
   function finish(next: ProvisionResult): void {
     result = next;
     phase = "result";
@@ -68,37 +125,74 @@
     source = null;
   }
 
+  // The job reported its end (done, error or the closing status frame).
+  function finishJob(next: ProvisionResult): void {
+    forgetJob();
+    finish(next);
+  }
+
   function onEvent(data: ProvisionEvent): void {
     if (result) return;
     if (data.stage === "done") {
-      finish({
+      finishJob({
         ok: true,
         runtimeVersion: data.summary?.runtime_version ?? "",
         error: "",
         hostPreflight: data.summary?.host_preflight ?? [],
         rebootPending: data.summary?.reboot_pending ?? false,
+        preserved: data.summary?.preserved ?? [],
+        runtimeConfigKept: data.summary?.runtime_config_kept === true,
       });
     } else if (data.stage === "error") {
-      finish({
+      finishJob({
         ok: false,
         runtimeVersion: "",
         error: data.detail ?? "Install failed",
         hostPreflight: data.host_preflight ?? [],
         rebootPending: data.reboot_pending ?? false,
+        preserved: [],
+        runtimeConfigKept: false,
       });
     } else if (data.stage === "status") {
-      // The stream's closing frame; reached without done/error only when a job
-      // ended some other way (cancelled).
-      finish({
+      // The stream's closing frame; reached without done/error only if a job
+      // ended without reporting either.
+      finishJob({
         ok: data.status === "done",
         runtimeVersion: "",
         error: data.error ?? `Install ${data.status ?? "ended"}`,
         hostPreflight: [],
         rebootPending: false,
+        preserved: [],
+        runtimeConfigKept: false,
       });
     } else {
       progress = [...progress, { stage: data.stage, detail: data.detail ?? "" }];
     }
+  }
+
+  function attach(job: PendingJob): void {
+    lastRequest = { url: job.url, body: job.body };
+    progress = [];
+    result = null;
+    confirmingUnmet = false;
+    phase = "running";
+    source = new EventSource(`/api/provision/status/${job.jobId}`);
+    source.onmessage = (ev: MessageEvent<string>) => onEvent(JSON.parse(ev.data) as ProvisionEvent);
+    source.onerror = () => {
+      // A closed stream after done/error is the normal end, not a loss.
+      if (result) return;
+      void forgetIfGone(job.jobId);
+      finish({
+        ok: false,
+        runtimeVersion: "",
+        error:
+          "Lost the connection to the workbench while installing. The install may still be running on the target.",
+        hostPreflight: [],
+        rebootPending: false,
+        preserved: [],
+        runtimeConfigKept: false,
+      });
+    };
   }
 
   async function startJob(url: string, body: Record<string, unknown>): Promise<void> {
@@ -110,26 +204,9 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      lastRequest = { url, body };
-      progress = [];
-      result = null;
-      confirmingUnmet = false;
-      phase = "running";
-      source = new EventSource(`/api/provision/status/${started.job_id}`);
-      source.onmessage = (ev: MessageEvent<string>) =>
-        onEvent(JSON.parse(ev.data) as ProvisionEvent);
-      source.onerror = () => {
-        // A closed stream after done/error is the normal end, not a loss.
-        if (result) return;
-        finish({
-          ok: false,
-          runtimeVersion: "",
-          error:
-            "Lost the connection to the workbench while installing. The install may still be running on the target.",
-          hostPreflight: [],
-          rebootPending: false,
-        });
-      };
+      const job = { jobId: started.job_id, url, body };
+      rememberJob(job);
+      attach(job);
     } catch (err) {
       startError = err instanceof Error ? err.message : "Failed to start provisioning";
     } finally {
@@ -182,6 +259,8 @@
 
   // Load status on component init
   loadStatus();
+  const pending = readPendingJob();
+  if (pending) attach(pending);
 </script>
 
 <section id="onboarding" class="workspace visible">
@@ -195,7 +274,7 @@
       <div class="onboarding-progress" aria-live="polite">
         <h2>Installing…</h2>
         <p class="onboarding-note">
-          Keep this window open. Reloading loses this view; the install keeps running.
+          Reloading this page reattaches to the install; it keeps running either way.
         </p>
         <ol class="onboarding-stages">
           {#each progress as step, i (i)}
@@ -209,6 +288,13 @@
           <h2>Installed</h2>
           {#if result.runtimeVersion}
             <p>anolis-runtime v{result.runtimeVersion} is installed.</p>
+          {/if}
+          {#if result.runtimeConfigKept}
+            <p>The existing runtime config was kept; the runtime runs it, not the quickstart's.</p>
+          {/if}
+          {#if result.preserved.length}
+            <p>install.sh left these existing configs in place:</p>
+            <pre class="onboarding-preflight">{result.preserved.join("\n")}</pre>
           {/if}
           {#if result.hostPreflight.length}
             <p>The host preflight needs attention:</p>
@@ -287,6 +373,11 @@
           <p>Import a canonical machine-profile project directory (carried verbatim).</p>
         </button>
       </div>
+
+      <p class="onboarding-note">
+        On a device that already has anolis installed, install.sh keeps the existing runtime and
+        provider configs: they are not replaced with the quickstart's.
+      </p>
 
       {#if startError}
         <p class="field-error">{startError}</p>
