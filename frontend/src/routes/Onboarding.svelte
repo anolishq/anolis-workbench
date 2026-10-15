@@ -78,18 +78,55 @@
     }
   }
 
+  // Storage is best-effort: an install already started must still get its
+  // view when sessionStorage refuses a write; only the reload path is lost.
+  function rememberJob(job: PendingJob): void {
+    try {
+      sessionStorage.setItem(PENDING_JOB_KEY, JSON.stringify(job));
+    } catch {
+      /* the view attaches anyway; a reload just cannot reattach */
+    }
+  }
+
+  function forgetJob(): void {
+    try {
+      sessionStorage.removeItem(PENDING_JOB_KEY);
+    } catch {
+      /* nothing more to do */
+    }
+  }
+
+  // A dropped stream is not the end of the job, so it keeps the job for a
+  // reload; only a server that no longer knows the job (a 404) forgets it.
+  async function forgetIfGone(jobId: string): Promise<void> {
+    const ctrl = new AbortController();
+    try {
+      const res = await fetch(`/api/provision/status/${jobId}`, { signal: ctrl.signal });
+      if (res.status === 404) forgetJob();
+    } catch {
+      /* unreachable: keep the job */
+    } finally {
+      ctrl.abort();
+    }
+  }
+
   function finish(next: ProvisionResult): void {
     result = next;
     phase = "result";
     source?.close();
     source = null;
-    sessionStorage.removeItem(PENDING_JOB_KEY);
+  }
+
+  // The job reported its end (done, error or the closing status frame).
+  function finishJob(next: ProvisionResult): void {
+    forgetJob();
+    finish(next);
   }
 
   function onEvent(data: ProvisionEvent): void {
     if (result) return;
     if (data.stage === "done") {
-      finish({
+      finishJob({
         ok: true,
         runtimeVersion: data.summary?.runtime_version ?? "",
         error: "",
@@ -97,7 +134,7 @@
         rebootPending: data.summary?.reboot_pending ?? false,
       });
     } else if (data.stage === "error") {
-      finish({
+      finishJob({
         ok: false,
         runtimeVersion: "",
         error: data.detail ?? "Install failed",
@@ -107,7 +144,7 @@
     } else if (data.stage === "status") {
       // The stream's closing frame; reached without done/error only if a job
       // ended without reporting either.
-      finish({
+      finishJob({
         ok: data.status === "done",
         runtimeVersion: "",
         error: data.error ?? `Install ${data.status ?? "ended"}`,
@@ -130,6 +167,7 @@
     source.onerror = () => {
       // A closed stream after done/error is the normal end, not a loss.
       if (result) return;
+      void forgetIfGone(job.jobId);
       finish({
         ok: false,
         runtimeVersion: "",
@@ -151,7 +189,7 @@
         body: JSON.stringify(body),
       });
       const job = { jobId: started.job_id, url, body };
-      sessionStorage.setItem(PENDING_JOB_KEY, JSON.stringify(job));
+      rememberJob(job);
       attach(job);
     } catch (err) {
       startError = err instanceof Error ? err.message : "Failed to start provisioning";

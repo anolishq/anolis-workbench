@@ -44,7 +44,9 @@ class DrivenEventSource {
   }
 }
 
-function setup(jobIds: string[] = ["job-1"]) {
+/** `probeStatus` answers a plain GET of a job's status URL, which the view
+ *  makes after a dropped stream to learn whether the server still has it. */
+function setup(jobIds: string[] = ["job-1"], probeStatus = 200) {
   DrivenEventSource.instances = [];
   vi.stubGlobal("EventSource", DrivenEventSource as unknown as typeof EventSource);
   const posts: { url: string; body: Record<string, unknown> }[] = [];
@@ -58,6 +60,7 @@ function setup(jobIds: string[] = ["job-1"]) {
         runtime_path: "",
       });
     }
+    if (url.startsWith("/api/provision/status/")) return jsonResponse(probeStatus, {});
     posts.push({ url, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
     return jsonResponse(202, { job_id: ids.shift() ?? "job-x" });
   });
@@ -322,5 +325,71 @@ describe("Onboarding.svelte — a reload reattaches to the running job (#348)", 
 
     expect(await screen.findByText("Installing…")).toBeInTheDocument();
     expect(DrivenEventSource.instances.at(-1)!.url).toBe("/api/provision/status/job-1");
+  });
+});
+
+describe("Onboarding.svelte — storage and dropped streams (#348)", () => {
+  /** A sessionStorage whose `refuse` method throws, as a full or denied
+   *  store does. The shared afterEach unstubs it. */
+  function refusingStorage(refuse: "setItem" | "removeItem"): void {
+    const items = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+      clear: () => items.clear(),
+    };
+    storage[refuse] = () => {
+      throw new DOMException("refused", "QuotaExceededError");
+    };
+    vi.stubGlobal("sessionStorage", storage);
+  }
+
+  it("attaches to a started install even when sessionStorage refuses the write", async () => {
+    refusingStorage("setItem");
+    const { posts } = setup();
+
+    await startLocal();
+
+    expect(posts.length).toBe(1);
+    expect(DrivenEventSource.instances.length).toBe(1);
+    expect(screen.getByText("Installing…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set up this device/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the result even when sessionStorage refuses the removal", async () => {
+    refusingStorage("removeItem");
+    setup();
+    const source = await startLocal();
+
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+  });
+
+  it("keeps the job after a dropped stream, so a reload reattaches to it", async () => {
+    setup();
+    const first = await startLocal();
+
+    first.fail();
+    await screen.findByText(/Lost the connection to the workbench while installing/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(2);
+    expect(DrivenEventSource.instances[1].url).toBe("/api/provision/status/job-1");
+  });
+
+  it("forgets the job after a dropped stream when the server no longer has it", async () => {
+    setup(["job-1"], 404);
+    const first = await startLocal();
+
+    first.fail();
+    await waitFor(() => expect(sessionStorage.getItem("anolis-workbench.provision-job")).toBeNull());
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(1);
   });
 });
