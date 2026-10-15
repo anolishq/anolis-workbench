@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from anolis_workbench.core import fleet
+
 
 def _systems_root() -> Path:
     """Return the systems root directory (~/.anolis/systems)."""
@@ -30,16 +34,39 @@ def _has_runtime() -> bool:
     return Path(_runtime_path()).is_file()
 
 
+def _fleet_registry_path() -> Path:
+    """Return the fleet registry a successful remote deploy writes to."""
+    return fleet._FLEET_REGISTRY_PATH
+
+
+def _has_fleet_entry() -> bool:
+    """Check if the fleet registry lists at least one target."""
+    path = _fleet_registry_path()
+    if not path.is_file():
+        return False
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    targets = raw.get("targets") if isinstance(raw, dict) else None
+    return isinstance(targets, list) and any(isinstance(t, dict) for t in targets)
+
+
 def get_onboarding_status(handler: Any) -> None:
     """GET /api/onboarding — return first-run detection status."""
     has_projects = _has_projects()
     has_runtime = _has_runtime()
-    first_run = not has_projects and not has_runtime
+    has_fleet_entry = _has_fleet_entry()
+    # First run lasts until a deploy has succeeded: a local one leaves the
+    # runtime binary, a remote one registers its host. A project alone is no
+    # sign of either, since the install job creates it before install.sh runs.
+    first_run = not has_runtime and not has_fleet_entry
 
     data = {
         "first_run": first_run,
         "has_projects": has_projects,
         "has_runtime": has_runtime,
+        "has_fleet_entry": has_fleet_entry,
         "runtime_path": _runtime_path(),
     }
     handler._json(200, data)
