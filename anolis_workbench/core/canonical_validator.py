@@ -145,6 +145,9 @@ def _variant_errors(
             continue
         for message in canonical.runtime_config_errors(doc):
             errors.append(f"Runtime variant '{variant}': {message}")
+        token_error = canonical.influx_token_error(doc)
+        if token_error is not None:
+            errors.append(f"Runtime variant '{variant}': {token_error}")
         if machine_id:
             declared_kinds = {pid: entry.get("kind") for pid, entry in providers.items() if isinstance(entry, dict)}
             errors.extend(

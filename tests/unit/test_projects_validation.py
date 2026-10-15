@@ -202,6 +202,25 @@ def test_save_project_rejects_an_off_host_bind_without_auth(_systems_root: pathl
     assert any("authentication" in err.get("message", "") for err in exc_info.value.errors)
 
 
+def test_save_project_rejects_an_authored_influx_token(_systems_root: pathlib.Path) -> None:
+    """The runtime applies INFLUXDB_TOKEN from its environment only when the
+    config's token is empty, so an authored token shadows the target's own."""
+    document = _load_template("sim-quickstart")
+    _manual(document)["telemetry"] = {"enabled": False, "influxdb": {"token": "dev-token"}}
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("authored-token", document)
+    assert any("INFLUXDB_TOKEN" in err.get("message", "") for err in exc_info.value.errors)
+
+
+def test_an_empty_influx_token_is_allowed(_systems_root: pathlib.Path) -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["telemetry"] = {"enabled": False, "influxdb": {"token": ""}}
+
+    projects.save_project("empty-token", document)
+    assert (_systems_root / "empty-token" / machine_profile.PROFILE_FILENAME).is_file()
+
+
 def test_an_off_host_bind_with_auth_is_allowed(_systems_root: pathlib.Path) -> None:
     document = _load_template("sim-quickstart")
     _manual(document)["http"]["bind"] = "0.0.0.0"
