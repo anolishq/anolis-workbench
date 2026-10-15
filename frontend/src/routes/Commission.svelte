@@ -101,6 +101,7 @@
       reboot_pending?: boolean;
       preserved?: string[];
       runtime_config_kept?: boolean;
+      grafana_access?: string[];
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -113,6 +114,7 @@
     rebootPending: boolean;
     preserved: string[];
     runtimeConfigKept: boolean;
+    grafanaAccess: string[];
   };
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
@@ -442,6 +444,7 @@
         rebootPending: data.summary?.reboot_pending ?? false,
         preserved: data.summary?.preserved ?? [],
         runtimeConfigKept: data.summary?.runtime_config_kept === true,
+        grafanaAccess: data.summary?.grafana_access ?? [],
       };
     }
     if (data.stage === "error" || data.stage === "status") {
@@ -453,6 +456,7 @@
         rebootPending: data.reboot_pending ?? false,
         preserved: [],
         runtimeConfigKept: false,
+        grafanaAccess: [],
       };
     }
     return null;
@@ -506,6 +510,7 @@
             rebootPending: false,
             preserved: [],
             runtimeConfigKept: false,
+            grafanaAccess: [],
           });
         };
       });
@@ -597,6 +602,10 @@
       {#if outcome.hostPreflight.length}
         <p>The host preflight needs attention:</p>
         <pre class="deploy-output">{outcome.hostPreflight.join("\n")}</pre>
+      {/if}
+      {#if outcome.grafanaAccess.length}
+        <p>Reaching Grafana:</p>
+        <pre class="deploy-output">{outcome.grafanaAccess.join("\n")}</pre>
       {/if}
     {:else}
       <strong>Deploy failed</strong>
