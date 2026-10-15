@@ -314,6 +314,7 @@ def _install_args(
     no_start: bool,
     dry_run: bool,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
 ) -> list[str]:
@@ -331,6 +332,10 @@ def _install_args(
     # on the operator's host.
     if with_telemetry_export:
         args.append("--with-telemetry-export")
+    # Likewise observability (anolishq/anolis#162): InfluxDB + Grafana are
+    # installed natively on the target, beside the runtime.
+    if with_observability:
+        args.append("--with-observability")
     if allow_unmet_host:
         args.append("--allow-unmet-host")
     return args
@@ -405,6 +410,7 @@ def deploy_local(
     no_start: bool = False,
     dry_run: bool = False,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
     executor: Executor | None = None,
@@ -434,6 +440,7 @@ def deploy_local(
                 no_start=no_start,
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
+                with_observability=with_observability,
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),
@@ -458,6 +465,7 @@ def deploy_remote(
     no_start: bool = False,
     dry_run: bool = False,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
     remote_staging: str = "/tmp/anolis-deploy",
@@ -491,6 +499,7 @@ def deploy_remote(
                 no_start=no_start,
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
+                with_observability=with_observability,
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),

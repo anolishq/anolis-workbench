@@ -79,6 +79,75 @@ class TestProfileFlagRemoved:
         assert exc.value.code == 2
 
 
+class TestObservabilityFlag:
+    """--with-observability is forwarded to install.sh, which installs InfluxDB
+    and Grafana natively on the target. The workbench no longer deploys a
+    Docker stack on the machine it runs on."""
+
+    @staticmethod
+    def _result() -> object:
+        from anolis_workbench.core import deploy
+
+        return deploy.DeployResult(project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output="")
+
+    def test_install_forwards_flag(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from anolis_workbench.cli import provision_cli
+
+        seen: dict[str, object] = {}
+
+        def _deploy_local(**kwargs: object) -> object:
+            seen.update(kwargs)
+            return self._result()
+
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", _deploy_local)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install", "--with-observability"])
+        assert provision_cli._run_install(provision_cli._parse_args()) == 0
+        assert seen["with_observability"] is True
+
+    def test_remote_forwards_flag(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import executor as executor_module
+
+        seen: dict[str, object] = {}
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        def _deploy_remote(**kwargs: object) -> object:
+            seen.update(kwargs)
+            return self._result()
+
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", _deploy_remote)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host", "--with-observability"])
+        assert provision_cli._run_remote(provision_cli._parse_args()) == 0
+        assert seen["with_observability"] is True
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["anolis-provision", "install", "--start-observability"],
+            ["anolis-provision", "remote", "--target", "pi@host", "--start-observability"],
+        ],
+    )
+    def test_start_observability_flag_removed(self, monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exc:
+            _parse_args()
+        assert exc.value.code == 2
+
+    def test_docker_observability_module_removed(self) -> None:
+        import importlib.util
+
+        assert importlib.util.find_spec("anolis_workbench.core.observability") is None
+
+
 def test_every_workspace_subcommand_can_be_provisioned(tmp_path, monkeypatch) -> None:
     """`bundle` has no --force (bundling must never replace a project), so
     _provision_workspace has to tolerate its absence. Drive the REAL parser —

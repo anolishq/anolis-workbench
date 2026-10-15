@@ -65,6 +65,19 @@ anolis-validate <package.anpkg>
 python contracts/validate-handoff-packages.py <package.anpkg>
 ```
 
+Provision with observability (InfluxDB + Grafana installed natively on the
+target by the runtime's `install.sh --with-observability`):
+
+```sh
+anolis-provision install --with-observability
+anolis-provision remote --target user@host --with-observability
+```
+
+To keep InfluxDB and Grafana on a separate monitoring host instead, run the
+compose stack from the runtime release asset
+`anolis-<version>-observability.tar.gz` on that host; the workbench does not
+deploy it.
+
 ## Frontend Tests
 
 ```sh
