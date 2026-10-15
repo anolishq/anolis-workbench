@@ -66,12 +66,13 @@ def test_remote_done_event_says_how_to_reach_grafana(calls, monkeypatch: pytest.
     monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
     monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
     job = provision.ProvisionJob(job_id="j4")
-    provision._run_remote_job(job, {"project": "rig", "target": "pi@10.0.0.5", "port": 2200})
-
-    assert job.events[-1]["summary"]["grafana_access"] == deploy.grafana_access(
-        output, ssh_target="pi@10.0.0.5", ssh_port=2200
+    provision._run_remote_job(
+        job, {"project": "rig", "target": "pi@10.0.0.5", "port": 2200, "key_file": "/home/me/.ssh/rig"}
     )
-    assert job.events[-1]["summary"]["grafana_access"][1] == "  ssh -p 2200 -L 3000:127.0.0.1:3000 pi@10.0.0.5"
+
+    assert job.events[-1]["summary"]["grafana_access"][1] == (
+        "  ssh -p 2200 -i /home/me/.ssh/rig -L 3000:127.0.0.1:3000 pi@10.0.0.5"
+    )
 
 
 def test_local_done_event_has_no_grafana_access_without_observability(calls, monkeypatch: pytest.MonkeyPatch) -> None:

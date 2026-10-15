@@ -899,11 +899,37 @@ def test_grafana_access_is_the_address_only_when_install_sh_put_grafana_on_the_n
     ]
 
 
-def test_grafana_access_on_a_local_install_is_localhost() -> None:
+def test_grafana_access_on_a_local_install_is_this_machine() -> None:
+    """A local install may be an appliance browsed from elsewhere, so say
+    whose localhost it is and how to reach it from another machine."""
     assert deploy.grafana_access(_install_sh_output("x86-loopback")) == [
-        "Grafana: http://localhost:3000",
+        "Grafana: http://localhost:3000 on this machine",
+        "  from another machine: ssh -L 3000:127.0.0.1:3000 <user>@<this machine>, then http://localhost:3000",
         _PASSWORD_NOTE,
     ]
+
+
+def test_grafana_access_on_a_local_install_on_the_network() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network")) == [
+        "Grafana: port 3000 on this machine's network address (http://localhost:3000 on this machine)",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_tunnel_names_the_ssh_key() -> None:
+    lines = deploy.grafana_access(
+        _install_sh_output("pi-loopback"), ssh_target="pi@rig", ssh_port=2222, ssh_key="/home/me/keys/rig key"
+    )
+    assert lines[1] == "  ssh -p 2222 -i '/home/me/keys/rig key' -L 3000:127.0.0.1:3000 pi@rig"
+
+
+@pytest.mark.parametrize("host", ["fd00::5", "[fd00::5]"])
+def test_grafana_access_brackets_an_ipv6_target(host: str) -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network"), ssh_target=f"pi@{host}")[0] == (
+        "Grafana: http://[fd00::5]:3000"
+    )
+    tunnel = deploy.grafana_access(_install_sh_output("pi-loopback"), ssh_target=f"pi@{host}")[1]
+    assert tunnel == "  ssh -L 3000:127.0.0.1:3000 pi@fd00::5"
 
 
 def test_grafana_access_is_empty_when_the_observability_step_did_not_finish() -> None:

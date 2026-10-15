@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import pathlib
 import re
+import shlex
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -438,23 +439,40 @@ GRAFANA_PASSWORD_NOTE = (
 )
 
 
-def grafana_access(stdout: str, *, ssh_target: str | None = None, ssh_port: int = 22) -> list[str]:
+def grafana_access(
+    stdout: str, *, ssh_target: str | None = None, ssh_port: int = 22, ssh_key: str | None = None
+) -> list[str]:
     """How to reach Grafana after an observability install, from install.sh's
     own summary, and where its admin password lives. The password itself is
-    never read. `ssh_target` is the `user@host` a remote deploy reached; None
-    for a local install. Empty when install.sh did not report Grafana up."""
+    never read. `ssh_target` is the `user@host` a remote deploy reached, with
+    the port and key it used; None for a local install. Empty when install.sh
+    did not report Grafana up."""
     lines = _ANSI_RE.sub("", stdout).splitlines()
-    if ssh_target is not None and any(_GRAFANA_NETWORK_RE.match(line) for line in lines):
-        host = ssh_target.split("@", 1)[-1]
-        return [f"Grafana: http://{host}:3000", GRAFANA_PASSWORD_NOTE]
-    if not any(_GRAFANA_LOOPBACK_RE.match(line) or _GRAFANA_NETWORK_RE.match(line) for line in lines):
+    on_network = any(_GRAFANA_NETWORK_RE.match(line) for line in lines)
+    if not on_network and not any(_GRAFANA_LOOPBACK_RE.match(line) for line in lines):
         return []
     if ssh_target is None:
-        return ["Grafana: http://localhost:3000", GRAFANA_PASSWORD_NOTE]
-    port = f"-p {ssh_port} " if ssh_port != 22 else ""
+        # A local install may be an appliance browsed from another machine,
+        # so say whose localhost this is, as install.sh's summary does.
+        if on_network:
+            return [
+                "Grafana: port 3000 on this machine's network address (http://localhost:3000 on this machine)",
+                GRAFANA_PASSWORD_NOTE,
+            ]
+        return [
+            "Grafana: http://localhost:3000 on this machine",
+            "  from another machine: ssh -L 3000:127.0.0.1:3000 <user>@<this machine>, then http://localhost:3000",
+            GRAFANA_PASSWORD_NOTE,
+        ]
+    user, _, host = ssh_target.rpartition("@")
+    host = host.removeprefix("[").removesuffix("]")
+    if on_network:
+        url_host = f"[{host}]" if ":" in host else host
+        return [f"Grafana: http://{url_host}:3000", GRAFANA_PASSWORD_NOTE]
+    options = (f"-p {ssh_port} " if ssh_port != 22 else "") + (f"-i {shlex.quote(ssh_key)} " if ssh_key else "")
     return [
         "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
-        f"  ssh {port}-L 3000:127.0.0.1:3000 {ssh_target}",
+        f"  ssh {options}-L 3000:127.0.0.1:3000 {user}@{host}",
         GRAFANA_PASSWORD_NOTE,
     ]
 

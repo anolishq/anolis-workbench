@@ -187,6 +187,34 @@ class TestObservabilityFlag:
         assert "GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)" in out
         assert "WARNING" not in err
 
+    def test_remote_tunnel_uses_the_deploy_key(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+        from anolis_workbench.core import executor as executor_module
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        result = deploy.DeployResult(
+            project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=self._PI_LOOPBACK
+        )
+        key = tmp_path / "rig_key"
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", lambda **kwargs: result)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["anolis-provision", "remote", "--target", "pi@host", "--key", str(key), "--with-observability"],
+        )
+        assert provision_cli._run_remote(provision_cli._parse_args()) == 0
+        out, _ = capsys.readouterr()
+        assert f"\n      ssh -i {key} -L 3000:127.0.0.1:3000 pi@host\n" in out
+
     def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(
         self, tmp_path, monkeypatch, capsys
     ) -> None:
