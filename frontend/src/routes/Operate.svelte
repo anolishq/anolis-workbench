@@ -838,16 +838,16 @@
           <div class="estop-info">
             {#if estop.software_safe_state === "hooks"}
               <span class="field-note"
-                >Runs the declared safe-state hooks, then latches actuation.</span
+                >Latches actuation, then runs the declared safe-state hooks.</span
               >
             {:else if estop.software_safe_state === "setpoints"}
               <span class="field-note"
-                >Drives declared safe setpoints on actuators, then latches actuation.</span
+                >Latches actuation, then drives the declared safe setpoints.</span
               >
             {:else if estop.software_safe_state === "zero"}
               <span class="field-note"
-                >The project declares zero_is_safe: drives every actuating function to zero, then
-                latches actuation.</span
+                >The project declares zero_is_safe: latches actuation, then tries to drive every
+                actuating function to zero.</span
               >
             {:else}
               <span class="field-error">
