@@ -288,3 +288,11 @@ describe("Onboarding.svelte — an existing install's config is kept (#354)", ()
     expect(screen.queryByText(/configuration was kept/)).not.toBeInTheDocument();
   });
 });
+
+describe("Onboarding.svelte — no install options (#229)", () => {
+  it("offers no install-option toggles and no template picker", () => {
+    setup();
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(screen.queryAllByRole("combobox")).toEqual([]);
+  });
+});
