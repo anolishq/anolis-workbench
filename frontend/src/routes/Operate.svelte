@@ -826,9 +826,9 @@
               >
             {:else}
               <span class="field-error">
-                No software safe-state is declared for this machine. Pressing only latches actuation
-                (blocks new commands) — it does NOT drive outputs to a safe state. Use the hardware
-                e-stop to make the machine safe.
+                No software safe-state is declared for this machine. The e-stop drives nothing: it
+                only latches actuation (blocks new commands). Use the hardware e-stop to make the
+                machine safe.
               </span>
             {/if}
             <span class="field-note">
@@ -837,15 +837,12 @@
                 : "the runtime"}.
             </span>
             {@render safeStateFix()}
-            <!-- The runtime counts actuating functions with no matching setpoint
-                 on every rung, and picks setpoints only when that count is 0.
-                 Under hooks it is a false gap (anolishq/anolis#253) and under
-                 zero every actuator is zeroed anyway, so it only means
-                 something under none: why setpoints were not chosen. -->
-            {#if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
+            <!-- The count is the actuating functions the active rung will not
+                 drive (anolishq/anolis#253). Under none it drives nothing, which
+                 the note above already says. -->
+            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
               <span class="field-error">
-                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
-                which is why setpoints are not used.
+                {estop.uncovered_actuating_functions} actuating function(s) the e-stop will not drive.
               </span>
             {/if}
           </div>

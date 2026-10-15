@@ -49,21 +49,6 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     expect(fix).toHaveTextContent('/opt/anolis/config/runtime.yaml on an installed target');
   });
 
-  it('shows the uncovered count under none, where it is why setpoints were not chosen', async () => {
-    renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 2 }));
-
-    expect(
-      await screen.findByText(/2 actuating function\(s\) have no declared safe setpoint/),
-    ).toBeInTheDocument();
-  });
-
-  it('shows no uncovered count under zero, which zeroes every actuator', async () => {
-    renderOperate(status({ software_safe_state: 'zero', uncovered_actuating_functions: 3 }));
-
-    expect(await screen.findByText(/latches actuation, then tries to drive every actuating function to zero/)).toBeInTheDocument();
-    expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
-  });
-
   it('names the variant file of the variant that launches', async () => {
     const system = createProjectDocument('demo');
     system.variants.automation = structuredClone(system.variants.manual);
@@ -75,11 +60,33 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     );
   });
 
-  it('shows no uncovered count under hooks, where the runtime reports a false gap', async () => {
-    renderOperate(status({ software_safe_state: 'hooks', uncovered_actuating_functions: 7 }));
+  it.each([
+    ['hooks', 2],
+    ['zero', 1],
+  ])('under %s, shows the %i actuating function(s) the e-stop will not drive', async (rung, n) => {
+    renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }));
 
-    expect(await screen.findByText(/Latches actuation, then runs the declared safe-state hooks/)).toBeInTheDocument();
-    expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(`${n} actuating function(s) the e-stop will not drive.`),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
+    ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
+    ['zero', /latches actuation, then tries to drive every actuating function to zero/],
+  ])('under %s with 0 undriven, shows its note and no count line', async (rung, note) => {
+    renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: 0 }));
+
+    expect(await screen.findByText(note)).toBeInTheDocument();
+    expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
+  });
+
+  it('under none, says the e-stop drives nothing and shows no count', async () => {
+    renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }));
+
+    expect(await screen.findByText(/The e-stop drives nothing/)).toBeInTheDocument();
+    expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
   });
 
   it('says not observed when the runtime has not answered, and still names the file', async () => {
