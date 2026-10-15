@@ -21,6 +21,7 @@
   import {
     coerceParameterValue,
     deriveOperateAvailability,
+    DISPATCHABLE_COVERAGE_SINCE,
     extractAutomationStatus,
     extractAutomationTree,
     extractCapabilities,
@@ -36,6 +37,7 @@
     renderBtOutline,
     RUNTIME_MODES,
     summarizeEstopResponse,
+    versionAtLeast,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -97,6 +99,11 @@
   let deviceStates = $state<Record<string, DeviceStateValue[]>>({});
   let capabilities = $state<Record<string, DeviceCapabilities>>({});
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
+  // What `uncovered_actuating_functions` means depends on the runtime
+  // version; see DISPATCHABLE_COVERAGE_SINCE.
+  const dispatchableCoverage = $derived(
+    versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE),
+  );
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
@@ -862,12 +869,20 @@
                 : "the runtime"}.
             </span>
             {@render safeStateFix()}
-            <!-- The count is the actuating functions the active rung will not
-                 drive (anolishq/anolis#253). Under none it drives nothing, which
-                 the note above already says. -->
-            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+            {#if dispatchableCoverage}
+              <!-- The functions the active rung will not drive. Under none it
+                   drives nothing, which the note above already says. -->
+              {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+                <span class="field-error">
+                  {estop.uncovered_actuating_functions} actuating function(s) the e-stop will not drive.
+                </span>
+              {/if}
+            {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
+              <!-- An older runtime counts functions with no matching setpoint,
+                   which is only meaningful as the reason setpoints were not chosen. -->
               <span class="field-error">
-                {estop.uncovered_actuating_functions} actuating function(s) the e-stop will not drive.
+                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
+                which is why setpoints are not used.
               </span>
             {/if}
           </div>
