@@ -265,7 +265,7 @@ def get_status(handler: Any, job_id: str) -> None:
                 break
 
             time.sleep(0.2)
-    except (BrokenPipeError, ConnectionResetError):
+    except OSError:
         # The client went away (a reload, a closed tab); the job runs on.
         handler.close_connection = True
 

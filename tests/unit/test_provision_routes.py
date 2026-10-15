@@ -12,6 +12,8 @@ from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from anolis_workbench.server.routes import provision
 
 
@@ -127,6 +129,21 @@ class TestGetStatus:
         output = handler.wfile.getvalue().decode()
         assert "download" in output
         assert "done" in output
+
+    @pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+    def test_any_disconnect_error_ends_the_stream(self, error: type[OSError]) -> None:
+        class GoneClient(BytesIO):
+            def write(self, _data: Any) -> int:
+                raise error()
+
+        job = provision._create_job()
+        job.events.append({"stage": "download", "detail": "downloading runtime"})
+        handler = FakeHandler()
+        handler.wfile = GoneClient()
+        try:
+            provision.get_status(handler, job.job_id)
+        finally:
+            job.status = "done"
 
     def test_client_gone_before_next_event_ends_quietly(self) -> None:
         """A closed EventSource (reload, closed tab) must not log a traceback
