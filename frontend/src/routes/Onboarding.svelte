@@ -23,7 +23,12 @@
     detail?: string;
     status?: string;
     error?: string | null;
-    summary?: { runtime_version?: string; host_preflight?: string[]; reboot_pending?: boolean };
+    summary?: {
+      runtime_version?: string;
+      host_preflight?: string[];
+      reboot_pending?: boolean;
+      preserved?: string[];
+    };
     host_preflight?: string[];
     reboot_pending?: boolean;
   };
@@ -34,6 +39,7 @@
     error: string;
     hostPreflight: string[];
     rebootPending: boolean;
+    preserved: string[];
   };
 
   let status = $state<OnboardingStatus | null>(null);
@@ -77,6 +83,7 @@
         error: "",
         hostPreflight: data.summary?.host_preflight ?? [],
         rebootPending: data.summary?.reboot_pending ?? false,
+        preserved: data.summary?.preserved ?? [],
       });
     } else if (data.stage === "error") {
       finish({
@@ -85,6 +92,7 @@
         error: data.detail ?? "Install failed",
         hostPreflight: data.host_preflight ?? [],
         rebootPending: data.reboot_pending ?? false,
+        preserved: [],
       });
     } else if (data.stage === "status") {
       // The stream's closing frame; reached without done/error only when a job
@@ -95,6 +103,7 @@
         error: data.error ?? `Install ${data.status ?? "ended"}`,
         hostPreflight: [],
         rebootPending: false,
+        preserved: [],
       });
     } else {
       progress = [...progress, { stage: data.stage, detail: data.detail ?? "" }];
@@ -128,6 +137,7 @@
             "Lost the connection to the workbench while installing. The install may still be running on the target.",
           hostPreflight: [],
           rebootPending: false,
+          preserved: [],
         });
       };
     } catch (err) {
@@ -210,6 +220,13 @@
           {#if result.runtimeVersion}
             <p>anolis-runtime v{result.runtimeVersion} is installed.</p>
           {/if}
+          {#if result.preserved.length}
+            <p>
+              The existing install's configuration was kept; the runtime runs it, not the
+              quickstart's:
+            </p>
+            <pre class="onboarding-preflight">{result.preserved.join("\n")}</pre>
+          {/if}
           {#if result.hostPreflight.length}
             <p>The host preflight needs attention:</p>
             <pre class="onboarding-preflight">{result.hostPreflight.join("\n")}</pre>
@@ -287,6 +304,11 @@
           <p>Import a canonical machine-profile project directory (carried verbatim).</p>
         </button>
       </div>
+
+      <p class="onboarding-note">
+        On a device that already has anolis installed, install.sh keeps the existing runtime and
+        provider configs: they are not replaced with the quickstart's.
+      </p>
 
       {#if startError}
         <p class="field-error">{startError}</p>
