@@ -9,6 +9,7 @@
     EstopStatus,
     FunctionSpec,
     ParameterDefinition,
+    ProjectDoc,
     ProviderHealth,
     RuntimeApiStatus,
     RuntimeStatus,
@@ -16,9 +17,11 @@
     UnknownRecord,
     WorkbenchConfig,
   } from "../lib/contracts";
+  import { activeVariant, variantRelpath } from "../lib/canonical";
   import {
     coerceParameterValue,
     deriveOperateAvailability,
+    DISPATCHABLE_COVERAGE_SINCE,
     extractAutomationStatus,
     extractAutomationTree,
     extractCapabilities,
@@ -34,6 +37,7 @@
     renderBtOutline,
     RUNTIME_MODES,
     summarizeEstopResponse,
+    versionAtLeast,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -43,9 +47,11 @@
 
   let {
     projectName,
+    system = null,
     runtimeStatus,
   }: {
     projectName: string | null;
+    system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
   } = $props();
 
@@ -62,6 +68,10 @@
     typeof runtimeStatus?.active_project === "string" ? runtimeStatus.active_project : null,
   );
   const available = $derived(running && runningProject === projectName);
+  // Where an operator declares the safe state (#346): the dev-launch copy is
+  // the project's own variant file; an installed target keeps its own config,
+  // which a redeploy does not overwrite.
+  const safeStateFile = $derived(variantRelpath(activeVariant(system)));
 
   // ── Operate state ─────────────────────────────────────────────────────────
   let mode = $state<string>("--");
@@ -79,6 +89,9 @@
   let clearArmed = $state<boolean>(false);
   let estopFeedback = $state<string>("");
   let estopFeedbackClass = $state<string>("field-note");
+  // The running project a stop's result belongs to, so the advisory never
+  // shows one project's result under another's name (#264).
+  let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
   let devices = $state<Device[]>([]);
@@ -86,6 +99,11 @@
   let deviceStates = $state<Record<string, DeviceStateValue[]>>({});
   let capabilities = $state<Record<string, DeviceCapabilities>>({});
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
+  // What `uncovered_actuating_functions` means depends on the runtime
+  // version; see DISPATCHABLE_COVERAGE_SINCE.
+  const dispatchableCoverage = $derived(
+    versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE),
+  );
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
@@ -129,6 +147,9 @@
       stopOperate();
     }
   });
+
+  // The advisory's stop label depends on whether /v0 goes to an override.
+  void loadWorkbenchConfig();
 
   // The "confirm clear" arm is scoped to a single latched episode: any time the
   // latch is not engaged (cleared here, by another client, or before a fresh
@@ -371,6 +392,7 @@
     estopRunning = true;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
+    estopFeedbackFor = runningProject;
     try {
       const res = await fetchJson<UnknownRecord>("/v0/estop", { method: "POST" });
       const summary = summarizeEstopResponse(res);
@@ -730,6 +752,14 @@
   }
 </script>
 
+{#snippet safeStateFix()}
+  <span class="field-note" data-testid="safe-state-fix">
+    Declared under <code>safety.safe_state</code> in the project's
+    <code>{safeStateFile}</code> for dev-launch, or in
+    <code>/opt/anolis/config/runtime.yaml</code> on an installed target, which survives redeploys.
+  </span>
+{/snippet}
+
 <section id="workspace-operate" class="workspace visible">
   <div class="workspace-header">
     <h2>Operate</h2>
@@ -739,6 +769,24 @@
     <div class="workspace-advisory">
       {#if running && runningProject}
         Runtime is running for "{runningProject}", not this project.
+        <!-- The /v0 proxy targets the running project's runtime, so its stop
+             stays reachable here (#264). Clearing the latch belongs to that
+             project's own Operate view. -->
+        <div class="estop-row">
+          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+            {estopRunning
+              ? "ENGAGING…"
+              : workbenchConfig?.runtime_url_override
+                ? "Software stop: configured runtime URL"
+                : `Software stop: ${runningProject}`}
+          </button>
+        </div>
+        <div class="estop-disclaimer">
+          Not an emergency stop. For any physical hazard use the hardware emergency stop.
+        </div>
+        {#if estopFeedback && estopFeedbackFor === runningProject}
+          <div class={estopFeedbackClass}>{estopFeedback}</div>
+        {/if}
       {:else}
         Runtime is not running for this project.
       {/if}
@@ -749,7 +797,10 @@
     <div class="operate-section operate-estop-section">
       <h3>Software Stop</h3>
       {#if !estop}
-        <p class="placeholder">Safe-state status unavailable.</p>
+        <p class="placeholder">
+          Software safe-state: not observed. The runtime has not reported it.
+        </p>
+        {@render safeStateFix()}
       {:else if estop.latched}
         <div class="estop-latched-banner">
           <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
@@ -794,27 +845,44 @@
           <div class="estop-info">
             {#if estop.software_safe_state === "hooks"}
               <span class="field-note"
-                >Runs the declared safe-state hooks, then latches actuation.</span
+                >Latches actuation, then runs the declared safe-state hooks.</span
               >
             {:else if estop.software_safe_state === "setpoints"}
               <span class="field-note"
-                >Drives declared safe setpoints on actuators, then latches actuation.</span
+                >Latches actuation, then drives the declared safe setpoints.</span
               >
             {:else if estop.software_safe_state === "zero"}
               <span class="field-note"
-                >Zeroes actuators that declare zero-is-safe, then latches actuation.</span
+                >The project declares zero_is_safe: latches actuation, then tries to drive every
+                actuating function to zero.</span
               >
             {:else}
               <span class="field-error">
-                No software safe-state is declared for this machine. Pressing only latches actuation
-                (blocks new commands) — it does NOT drive outputs to a safe state. Use the hardware
-                e-stop to make the machine safe.
+                No software safe-state is declared for this machine. The e-stop drives nothing: it
+                only latches actuation (blocks new commands). Use the hardware e-stop to make the
+                machine safe.
               </span>
             {/if}
-            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+            <span class="field-note">
+              As reported by {runtimeStatusData?.version
+                ? `runtime v${runtimeStatusData.version}`
+                : "the runtime"}.
+            </span>
+            {@render safeStateFix()}
+            {#if dispatchableCoverage}
+              <!-- The functions the active rung will not drive. Under none it
+                   drives nothing, which the note above already says. -->
+              {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+                <span class="field-error">
+                  {estop.uncovered_actuating_functions} actuating function(s) the e-stop will not drive.
+                </span>
+              {/if}
+            {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
+              <!-- An older runtime counts functions with no matching setpoint,
+                   which is only meaningful as the reason setpoints were not chosen. -->
               <span class="field-error">
-                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint
-                and will not be driven.
+                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
+                which is why setpoints are not used.
               </span>
             {/if}
           </div>
