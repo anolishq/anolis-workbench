@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -39,8 +40,10 @@ class TestGetOnboardingStatus:
         # The install job creates the workspace project before install.sh
         # runs, so a project alone is no sign that a deploy succeeded (#424).
         systems = tmp_path / "systems"
-        systems.mkdir()
-        (systems / "sim-quickstart").mkdir()
+        (systems / "sim-quickstart").mkdir(parents=True)
+        (systems / "sim-quickstart" / "workbench.json").write_text(
+            json.dumps({"meta": {"name": "sim-quickstart", "created_by": "onboarding"}})
+        )
 
         handler = FakeHandler()
         with (
@@ -54,6 +57,22 @@ class TestGetOnboardingStatus:
         assert status == 200
         assert data["first_run"] is True
         assert data["has_projects"] is True
+
+    def test_not_first_run_with_a_user_authored_project(self, tmp_path: Path) -> None:
+        systems = tmp_path / "systems"
+        (systems / "my-rig").mkdir(parents=True)
+        (systems / "my-rig" / "workbench.json").write_text(json.dumps({"meta": {"name": "my-rig"}}))
+
+        handler = FakeHandler()
+        with (
+            patch.object(onboarding, "_systems_root", return_value=systems),
+            patch.object(onboarding, "_has_runtime", return_value=False),
+            patch.object(onboarding, "_fleet_registry_path", return_value=tmp_path / "fleet.yaml"),
+        ):
+            onboarding.get_onboarding_status(handler)
+
+        _, data = handler._responses[0]
+        assert data["first_run"] is False
 
     def test_not_first_run_after_a_remote_deploy_registered_its_host(self, tmp_path: Path) -> None:
         registry = tmp_path / "fleet.yaml"
