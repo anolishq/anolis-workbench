@@ -59,7 +59,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
   it('shows no uncovered count under zero, which zeroes every actuator', async () => {
     renderOperate(status({ software_safe_state: 'zero', uncovered_actuating_functions: 3 }));
 
-    expect(await screen.findByText(/Zeroes actuators that declare zero-is-safe/)).toBeInTheDocument();
+    expect(await screen.findByText(/drives every actuating function to zero/)).toBeInTheDocument();
     expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
   });
 

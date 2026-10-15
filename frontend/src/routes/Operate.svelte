@@ -821,7 +821,8 @@
               >
             {:else if estop.software_safe_state === "zero"}
               <span class="field-note"
-                >Zeroes actuators that declare zero-is-safe, then latches actuation.</span
+                >The project declares zero_is_safe: drives every actuating function to zero, then
+                latches actuation.</span
               >
             {:else}
               <span class="field-error">
