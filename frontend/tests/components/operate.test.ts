@@ -39,14 +39,28 @@ function status(estop: Record<string, unknown>, version = '0.1.44'): Response {
 
 describe("Operate.svelte — the safe-state note (#346)", () => {
   it('attributes the rung to the runtime version and names where to declare it', async () => {
-    renderOperate(status({ software_safe_state: 'setpoints', uncovered_actuating_functions: 2 }));
+    renderOperate(status({ software_safe_state: 'setpoints', uncovered_actuating_functions: 0 }));
 
     expect(await screen.findByText('As reported by runtime v0.1.44.')).toBeInTheDocument();
     const fix = screen.getByTestId('safe-state-fix');
     expect(fix).toHaveTextContent('safety.safe_state');
     expect(fix).toHaveTextContent("the project's config/anolis-runtime.manual.yaml for dev-launch");
     expect(fix).toHaveTextContent('/opt/anolis/config/runtime.yaml on an installed target');
-    expect(screen.getByText(/2 actuating function\(s\) have no declared safe setpoint/)).toBeInTheDocument();
+  });
+
+  it('shows the uncovered count under none, where it is why setpoints were not chosen', async () => {
+    renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 2 }));
+
+    expect(
+      await screen.findByText(/2 actuating function\(s\) have no declared safe setpoint/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no uncovered count under zero, which zeroes every actuator', async () => {
+    renderOperate(status({ software_safe_state: 'zero', uncovered_actuating_functions: 3 }));
+
+    expect(await screen.findByText(/Zeroes actuators that declare zero-is-safe/)).toBeInTheDocument();
+    expect(screen.queryByText(/actuating function\(s\) have no declared safe setpoint/)).not.toBeInTheDocument();
   });
 
   it('names the variant file of the variant that launches', async () => {
