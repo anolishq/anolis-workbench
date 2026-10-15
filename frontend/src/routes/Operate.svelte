@@ -755,6 +755,17 @@
     <div class="workspace-advisory">
       {#if running && runningProject}
         Runtime is running for "{runningProject}", not this project.
+        <!-- The /v0 proxy targets the running project's runtime, so its stop
+             stays reachable here (#264). Clearing the latch belongs to that
+             project's own Operate view. -->
+        <div class="estop-row">
+          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+            {estopRunning ? "ENGAGING…" : `Software stop: ${runningProject}`}
+          </button>
+        </div>
+        {#if estopFeedback}
+          <div class={estopFeedbackClass}>{estopFeedback}</div>
+        {/if}
       {:else}
         Runtime is not running for this project.
       {/if}
