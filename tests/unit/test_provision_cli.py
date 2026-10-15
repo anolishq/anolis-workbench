@@ -154,6 +154,7 @@ class TestObservabilityFlag:
         assert "re-run with --with-observability once online" in out
         assert "Grafana bind unchanged" in out
         assert "Hostname:" not in out
+        assert "GRAFANA_ADMIN_PASSWORD" not in out
         assert "WARNING" in err and "observability" in err
 
     def test_remote_surfaces_the_grafana_lines(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -180,6 +181,10 @@ class TestObservabilityFlag:
         assert "Grafana:   127.0.0.1:3000 on this machine" in out
         assert "ssh -L 3000:127.0.0.1:3000 pi@rig.local" in out
         assert "API token:" not in out
+        # The tunnel to the target the workbench reached, not the name
+        # install.sh guessed for itself (#241).
+        assert "\n      ssh -L 3000:127.0.0.1:3000 pi@host\n" in out
+        assert "GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)" in out
         assert "WARNING" not in err
 
     def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(

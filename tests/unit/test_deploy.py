@@ -869,3 +869,43 @@ def test_observability_lines_show_the_bind_unchanged_line() -> None:
         "  Grafana bind unchanged: the observability step did not finish (see the warnings above)",
         "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
     ]
+
+
+_PASSWORD_NOTE = "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
+
+
+def test_grafana_access_is_a_tunnel_when_grafana_is_on_loopback() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-loopback"), ssh_target="pi@192.168.1.10") == [
+        "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
+        "  ssh -L 3000:127.0.0.1:3000 pi@192.168.1.10",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_tunnel_names_a_non_default_ssh_port() -> None:
+    lines = deploy.grafana_access(_install_sh_output("x86-loopback"), ssh_target="me@box", ssh_port=2222)
+    assert lines[1] == "  ssh -p 2222 -L 3000:127.0.0.1:3000 me@box"
+
+
+def test_grafana_access_is_a_tunnel_after_grafana_left_the_network() -> None:
+    lines = deploy.grafana_access(_install_sh_output("pi-was-network"), ssh_target="pi@rig")
+    assert lines[1] == "  ssh -L 3000:127.0.0.1:3000 pi@rig"
+
+
+def test_grafana_access_is_the_address_only_when_install_sh_put_grafana_on_the_network() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network"), ssh_target="pi@192.168.1.10") == [
+        "Grafana: http://192.168.1.10:3000",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_on_a_local_install_is_localhost() -> None:
+    assert deploy.grafana_access(_install_sh_output("x86-loopback")) == [
+        "Grafana: http://localhost:3000",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_is_empty_when_the_observability_step_did_not_finish() -> None:
+    assert deploy.grafana_access(_install_sh_output("offline"), ssh_target="pi@rig") == []
+    assert deploy.grafana_access("✓ health: runtime responding (v0.1.45)\n", ssh_target="pi@rig") == []

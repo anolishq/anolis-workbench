@@ -428,6 +428,37 @@ def observability_lines(stdout: str) -> list[str]:
     return out
 
 
+# install.sh's summary line for Grafana on the network, and for Grafana on
+# loopback (anolishq/anolis#351). Anything else, "Grafana bind unchanged"
+# included, means the observability step did not finish.
+_GRAFANA_NETWORK_RE = re.compile(r"^\s*Grafana:\s+http://\S+:3000 ")
+_GRAFANA_LOOPBACK_RE = re.compile(r"^\s*Grafana:\s+127\.0\.0\.1:3000 on this machine")
+GRAFANA_PASSWORD_NOTE = (
+    "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
+)
+
+
+def grafana_access(stdout: str, *, ssh_target: str | None = None, ssh_port: int = 22) -> list[str]:
+    """How to reach Grafana after an observability install, from install.sh's
+    own summary, and where its admin password lives. The password itself is
+    never read. `ssh_target` is the `user@host` a remote deploy reached; None
+    for a local install. Empty when install.sh did not report Grafana up."""
+    lines = _ANSI_RE.sub("", stdout).splitlines()
+    if ssh_target is not None and any(_GRAFANA_NETWORK_RE.match(line) for line in lines):
+        host = ssh_target.split("@", 1)[-1]
+        return [f"Grafana: http://{host}:3000", GRAFANA_PASSWORD_NOTE]
+    if not any(_GRAFANA_LOOPBACK_RE.match(line) or _GRAFANA_NETWORK_RE.match(line) for line in lines):
+        return []
+    if ssh_target is None:
+        return ["Grafana: http://localhost:3000", GRAFANA_PASSWORD_NOTE]
+    port = f"-p {ssh_port} " if ssh_port != 22 else ""
+    return [
+        "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
+        f"  ssh {port}-L 3000:127.0.0.1:3000 {ssh_target}",
+        GRAFANA_PASSWORD_NOTE,
+    ]
+
+
 def _message(line: str) -> str:
     """An install.sh log line without its leading mark."""
     return line[1:].strip()
