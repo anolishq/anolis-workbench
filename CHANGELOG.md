@@ -35,6 +35,11 @@ Historical note:
 
 ### Added
 
+- Every GitHub release asset (installers, wheel and sdist, SBOMs,
+  `metrics.json`) carries a build-provenance attestation (#488, closes
+  #126). Check one with
+  `gh attestation verify <asset> -R anolishq/anolis-workbench`. The PyPI
+  publish now waits until every asset is built and attested.
 - Commission deploys the selected project to a device (#454, closes #275): a
   remote device over SSH or this machine, with a picker over the project's
   runtime variants (default `manual`). A variant that does not boot inert is
@@ -110,8 +115,8 @@ Historical note:
   `health.excluded_signals` validate, and the runtime-http contract gains
   `startup_safe_state`, `safe_state_achieved` and signal `unit` and
   `description`.
-- The sim-quickstart template pins runtime 0.1.44 instead of 0.1.39 (#477,
-  closes #470). Compose's pin fields show `MAJOR.MINOR.PATCH` as their
+- The sim-quickstart template pins runtime 0.1.45 instead of 0.1.39 (#477,
+  #474, closes #470). Compose's pin fields show `MAJOR.MINOR.PATCH` as their
   placeholder.
 - The executor allowlist no longer lists `anolis-runtime` or any
   `anolis-provider-*` binary, which no `Executor` call ran (#464, closes
