@@ -13,6 +13,17 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- The commissioning handoff runbook describes one deploy story (closes
+  #240): the machine-profile project is the source of truth, the `.anpkg`
+  is an optional provenance record, and the staged bundle is the
+  deployable. It documents the facility path (`anolis-provision bundle`,
+  then `install.sh --local` on the target) and the online path
+  (`anolis-provision install|remote`). Extracting an `.anpkg` and running
+  the runtime against it is a validation step, done in a scratch
+  directory, and no longer reads as a deploy into `/opt/anolis`.
+
 ## [0.16.0] - 2026-10-16
 
 ### Upgrade notes
