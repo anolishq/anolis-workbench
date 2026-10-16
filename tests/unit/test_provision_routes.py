@@ -82,6 +82,17 @@ class TestStartInstallSudoPassword:
 
         assert thread.call_args.kwargs["args"][2] is None
 
+    @patch("anolis_workbench.server.routes.provision.threading.Thread")
+    def test_password_is_zeroed_when_the_job_cannot_start(self, thread: MagicMock) -> None:
+        thread.return_value.start.side_effect = RuntimeError("can't start new thread")
+        handler = FakeHandler({"project": "rig", "sudo_password": "pw-7f3c"})
+
+        with pytest.raises(RuntimeError):
+            provision.start_install(handler)
+
+        password = thread.call_args.kwargs["args"][2]
+        assert password == bytearray(len(b"pw-7f3c"))
+
     @pytest.mark.parametrize(
         ("client", "value", "code"),
         [("192.168.1.20", "pw-7f3c", 403), ("127.0.0.1", 1234, 400)],

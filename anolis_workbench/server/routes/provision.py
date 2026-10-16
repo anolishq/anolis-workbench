@@ -242,7 +242,13 @@ def start_install(handler: Any) -> None:
 
     job = _create_job()
     thread = threading.Thread(target=_run_install_job, args=(job, params, password), daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        # The job never ran, so its finally never zeroes the password.
+        if password is not None:
+            zero_buffer(password)
+        raise
 
     handler._json(202, {"job_id": job.job_id})
 
