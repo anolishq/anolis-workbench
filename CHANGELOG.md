@@ -17,10 +17,10 @@ Historical note:
 
 - The README documents pip and a browser as the supported Raspberry Pi
   setup (closes #231): `pipx install anolis-workbench && anolis-workbench`,
-  then `http://<pi>:3010` from another machine, with `anolis-provision
-  install --workbench-service` to start it at boot. It no longer labels the
-  desktop app "recommended" and says the Linux desktop bundles are x86_64
-  only.
+  then `http://<pi>:3010` from another machine on a trusted network. It no
+  longer labels the desktop app "recommended", says the Linux desktop
+  bundles are x86_64 only, and gives the Python requirement as 3.10+, as
+  `pyproject.toml` does.
 
 ## [0.16.0] - 2026-10-16
 

@@ -36,7 +36,7 @@ anolis-package <project>  # build a handoff package
 anolis-validate <pkg>     # validate a handoff package
 ```
 
-Requires Python 3.11+. Open `http://127.0.0.1:3010` in a browser after starting.
+Requires Python 3.10+. Open `http://127.0.0.1:3010` in a browser after starting.
 
 **On a Raspberry Pi (pip + browser, the supported Pi setup):**
 
@@ -46,16 +46,12 @@ pipx install anolis-workbench && anolis-workbench
 
 On a Raspberry Pi the server binds to all interfaces and opens no browser,
 so browse to `http://<pi>:3010` from another machine on the network. It has
-no login: anyone who can reach that port can use the workbench.
+no login: anyone who can reach that port can use the workbench. Keep it on a
+trusted network.
 `ANOLIS_WORKBENCH_HOST=127.0.0.1` keeps it on the Pi itself.
 
-To start the workbench at boot, add `--workbench-service` to the install,
-which also installs a systemd service for the workbench. The service always
-binds to all interfaces:
-
-```sh
-anolis-provision install --workbench-service
-```
+Starting the workbench at boot is pending a fix: for now, start
+`anolis-workbench` by hand after a reboot.
 
 ### Build from source (contributors)
 
