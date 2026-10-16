@@ -330,25 +330,28 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
 
 /**
  * Format the runtime's startup safe-state report into operator-facing text.
- * It restates the runtime's own verdict (`safe_state_achieved`); `ok` is false
- * only when a rung ran and the runtime says it did not succeed.
+ * `safe_state_achieved` means the rung issued at least one call and every
+ * call was accepted by its provider, not that the outputs reached a safe
+ * state, so the text says no more than that. `ok` is false when a rung ran
+ * and the runtime's verdict is false.
  */
 export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
   text: string;
   ok: boolean;
 } {
+  const head = `Startup safe state (${s.software_safe_state})`;
   if (s.ran && s.safe_state_achieved) {
-    return { text: `Startup safe state ran (${s.software_safe_state}) and succeeded.`, ok: true };
+    return { text: `${head}: every call it issued was accepted by its provider.`, ok: true };
+  }
+  if (s.ran && s.failed_actions.length === 0) {
+    // Only the zero rung with no actuating function issues no call.
+    return { text: `${head} ran but issued no call, so nothing was driven.`, ok: false };
   }
   if (s.ran) {
-    const head = `Startup safe state ran (${s.software_safe_state}) and did not succeed.`;
-    if (s.failed_actions.length === 0) {
-      return { text: `${head} The runtime reported no failed action.`, ok: false };
-    }
     const detail = s.failed_actions
       .map((a) => `${a.device_handle}/${a.function}: ${a.error ?? "failed"}`)
       .join("; ");
-    return { text: `${head} ${s.failed_actions.length} action(s) failed: ${detail}`, ok: false };
+    return { text: `${head}: ${s.failed_actions.length} call(s) failed: ${detail}`, ok: false };
   }
   if (s.on_startup === "leave") {
     return { text: "Outputs were left as they were at startup (on_startup: leave).", ok: true };

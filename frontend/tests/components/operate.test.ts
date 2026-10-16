@@ -152,15 +152,24 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     });
   }
 
-  it('says it ran and succeeded, as a note', async () => {
-    renderOperate(withStartup({}));
+  // safe_state_achieved is the runtime's verdict that every call the rung
+  // issued was accepted by its provider (anolis run_ladder). It does not
+  // say the outputs reached a safe state, so neither may the line.
+  it.each(['hooks', 'setpoints', 'zero'])(
+    'under %s, says every call was accepted, and claims no safe outputs',
+    async (rung) => {
+      renderOperate(withStartup({ software_safe_state: rung }));
 
-    const line = await screen.findByTestId('startup-safe-state');
-    expect(line).toHaveTextContent('Startup safe state ran (hooks) and succeeded.');
-    expect(line).toHaveClass('field-note');
-  });
+      const line = await screen.findByTestId('startup-safe-state');
+      expect(line).toHaveTextContent(
+        `Startup safe state (${rung}): every call it issued was accepted by its provider.`,
+      );
+      expect(line).toHaveClass('field-note');
+      expect(line.textContent).not.toMatch(/succeeded|achieved|outputs? (are|were|is) safe/i);
+    },
+  );
 
-  it('warns when it ran and did not succeed, naming each failed action', async () => {
+  it('warns when calls failed, naming each failed call', async () => {
     renderOperate(
       withStartup({
         software_safe_state: 'setpoints',
@@ -174,26 +183,39 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
 
     const line = await screen.findByTestId('startup-safe-state');
     expect(line).toHaveClass('field-error');
-    expect(line).toHaveTextContent('Startup safe state ran (setpoints) and did not succeed.');
-    expect(line).toHaveTextContent('2 action(s) failed: p0/heater/set_power: timeout; p1/pump/stop: failed');
+    expect(line).toHaveTextContent(
+      'Startup safe state (setpoints): 2 call(s) failed: p0/heater/set_power: timeout; p1/pump/stop: failed',
+    );
+    expect(line.textContent).not.toMatch(/accepted/);
   });
 
-  it('warns when it ran and did not succeed with no failed action reported', async () => {
-    renderOperate(withStartup({ safe_state_achieved: false }));
+  // The runtime's verdict is false with no failed call only when the rung
+  // issued no call at all: zero, on a machine with no actuating function.
+  it('under zero with no call issued, says nothing was driven, not that a call failed', async () => {
+    renderOperate(withStartup({ software_safe_state: 'zero', safe_state_achieved: false }));
 
     const line = await screen.findByTestId('startup-safe-state');
     expect(line).toHaveClass('field-error');
     expect(line).toHaveTextContent(
-      'Startup safe state ran (hooks) and did not succeed. The runtime reported no failed action.',
+      'Startup safe state (zero) ran but issued no call, so nothing was driven.',
     );
+    expect(line.textContent).not.toMatch(/fail|accepted/i);
   });
 
   it('says outputs were left as they were under on_startup: leave', async () => {
-    renderOperate(withStartup({ on_startup: 'leave', ran: false, safe_state_achieved: false }));
-
-    expect(await screen.findByTestId('startup-safe-state')).toHaveTextContent(
-      'Outputs were left as they were at startup (on_startup: leave).',
+    // The runtime reports the rung as none under leave: nothing ran.
+    renderOperate(
+      withStartup({
+        on_startup: 'leave',
+        ran: false,
+        software_safe_state: 'none',
+        safe_state_achieved: false,
+      }),
     );
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveTextContent('Outputs were left as they were at startup (on_startup: leave).');
+    expect(line.textContent).not.toMatch(/No software safe state is declared/);
   });
 
   it('says nothing ran when no software safe state is declared', async () => {
