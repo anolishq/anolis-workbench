@@ -472,3 +472,51 @@ describe("Onboarding.svelte — no install options (#229)", () => {
     expect(screen.queryAllByRole("combobox")).toEqual([]);
   });
 });
+
+describe("Onboarding.svelte — sudo password for a local install (#230)", () => {
+  it("sends it in the local install request only, then clears it and keeps it out of storage", async () => {
+    const { posts } = setup();
+    const field = screen.getByLabelText(/Sudo password for this device/) as HTMLInputElement;
+    expect(field.type).toBe("password");
+    await fireEvent.input(field, { target: { value: "pw-7f3c" } });
+
+    await startLocal();
+
+    expect(posts).toEqual([{ url: "/api/provision/install", body: { sudo_password: "pw-7f3c" } }]);
+    expect(sessionStorage.getItem("anolis-workbench.provision-job")).not.toContain("pw-7f3c");
+    expect(field.value).toBe("");
+  });
+
+  it("sends no password field when none was typed", async () => {
+    const { posts } = setup();
+    await startLocal();
+    expect(posts).toEqual([{ url: "/api/provision/install", body: {} }]);
+  });
+
+  it("asks again for Install anyway on a local job, since the first was not kept", async () => {
+    const { posts } = setup(["job-1", "job-2"]);
+    await fireEvent.input(screen.getByLabelText(/Sudo password for this device/), {
+      target: { value: "pw-7f3c" },
+    });
+    const source = await startLocal();
+    source.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    const again = screen.getByLabelText(/Sudo password/) as HTMLInputElement;
+    expect(again.type).toBe("password");
+    expect(again.value).toBe("");
+    await fireEvent.input(again, { target: { value: "pw-7f3c" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Confirm: install anyway" }));
+
+    await waitFor(() => expect(posts.length).toBe(2));
+    expect(posts[1]).toEqual({
+      url: "/api/provision/install",
+      body: { allow_unmet_host: true, sudo_password: "pw-7f3c" },
+    });
+    expect(sessionStorage.getItem("anolis-workbench.provision-job")).not.toContain("pw-7f3c");
+  });
+});

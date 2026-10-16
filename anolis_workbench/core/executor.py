@@ -106,15 +106,54 @@ class Executor(ABC):
         """Check if a file exists on the target."""
 
 
+def zero_buffer(buf: bytearray) -> None:
+    """Overwrite `buf` in place with zero bytes (same length, no reallocation)."""
+    buf[:] = bytes(len(buf))
+
+
+def _sudo_needs_no_password() -> bool:
+    """True when sudo runs without asking (NOPASSWD, or cached credentials)."""
+    probe = subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+    return probe.returncode == 0
+
+
 class LocalExecutor(Executor):
-    """Executes operations on the local machine via subprocess + pathlib."""
+    """Executes operations on the local machine via subprocess + pathlib.
+
+    sudo_password: the caller's buffer, which the caller zeroes when done
+    with it. With it, sudo runs as `sudo -S` and reads the password from
+    stdin — never argv, which `ps` shows every user, nor the environment.
+    The stdin buffer built here is zeroed after each run. Python cannot
+    promise more than that: str and bytes copies made upstream (the request
+    body, the decoded JSON) are immutable and freed without being cleared.
+    """
+
+    def __init__(self, *, sudo_password: bytearray | None = None) -> None:
+        self._sudo_password = sudo_password
 
     def run(
         self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
     ) -> RunResult:
         safe_cmd = _validate_command(cmd)
-        full_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
-        result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=timeout if timeout else 30)
+        timeout = timeout if timeout else 30
+        password = self._sudo_password
+        if sudo and password and not _sudo_needs_no_password():
+            # Sized up front so the password is never left behind in a
+            # buffer that a resize freed without clearing.
+            n = len(password)
+            payload = bytearray(n + 1 + len(input or b""))
+            payload[:n] = password
+            payload[n] = 0x0A
+            payload[n + 1 :] = input or b""
+            try:
+                result = subprocess.run(
+                    ["sudo", "-S", "-p", "", "--", *safe_cmd], input=payload, capture_output=True, timeout=timeout
+                )
+            finally:
+                zero_buffer(payload)
+        else:
+            full_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
+            result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=timeout)
         return RunResult(
             returncode=result.returncode,
             stdout=result.stdout.decode(errors="replace"),

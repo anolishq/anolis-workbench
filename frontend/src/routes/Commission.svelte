@@ -120,6 +120,8 @@
   };
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
+  // Sent once in the local job's request body, then cleared; never stored.
+  let deploySudoPassword = $state<string>("");
   let deployVariantChoice = $state<string>("");
   let deployTelemetryExport = $state<boolean>(false);
   let deployObservability = $state<boolean>(false);
@@ -482,6 +484,8 @@
     if (deployTelemetryExport) body.with_telemetry_export = true;
     if (deployObservability) body.with_observability = true;
     if (deployTarget === "remote") body.target = host;
+    if (deployTarget === "local" && deploySudoPassword) body.sudo_password = deploySudoPassword;
+    deploySudoPassword = "";
     try {
       const started = await fetchJson<{ job_id: string }>(
         deployTarget === "remote" ? "/api/provision/remote" : "/api/provision/install",
@@ -880,6 +884,15 @@
         spellcheck="false"
         disabled={deployRunning}
         bind:value={deployHost}
+      />
+    {:else}
+      <label for="deploy-sudo-password">Sudo password (empty if sudo needs none)</label>
+      <input
+        id="deploy-sudo-password"
+        type="password"
+        autocomplete="off"
+        disabled={deployRunning}
+        bind:value={deploySudoPassword}
       />
     {/if}
     <label for="deploy-variant">Runtime variant</label>

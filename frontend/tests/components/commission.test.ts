@@ -569,6 +569,24 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
   });
 
+  it('sends a sudo password only with a local deploy, then clears it (#230)', async () => {
+    const { posts } = setup();
+
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    const field = screen.getByLabelText(/Sudo password/) as HTMLInputElement;
+    expect(field.type).toBe('password');
+    await fireEvent.input(field, { target: { value: 'pw-7f3c' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]).toEqual({
+      path: '/api/provision/install',
+      body: { project: 'demo', variant: 'manual', sudo_password: 'pw-7f3c' },
+    });
+    expect(field.value).toBe('');
+  });
+
   it('says before deploying that an existing runtime config is kept', () => {
     setup();
     expect(

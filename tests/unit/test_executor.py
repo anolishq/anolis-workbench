@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,6 +54,106 @@ class TestLocalExecutor:
     def test_file_exists_false(self, tmp_path: Path) -> None:
         executor = LocalExecutor()
         assert executor.file_exists(str(tmp_path / "nope.txt")) is False
+
+
+_PASSWORD = b"pw-7f3c-not-a-real-one"
+
+
+@pytest.fixture()
+def fake_sudo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A `sudo` first on PATH that records its argv, env and stdin.
+
+    `sudo -n` succeeds only when the returned directory holds a `nopasswd`
+    file, which stands in for a host where sudo needs no password.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "sudo-calls.jsonl"
+    script = bindir / "sudo"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"log, marker = {str(log)!r}, {str(tmp_path / 'nopasswd')!r}\n"
+        "if '-n' in sys.argv[1:]:\n"
+        "    sys.exit(0 if os.path.exists(marker) else 1)\n"
+        "data = sys.stdin.buffer.read()\n"
+        "with open(log, 'a') as f:\n"
+        "    f.write(json.dumps({'argv': sys.argv[1:], 'env': dict(os.environ), 'stdin': data.hex()}) + '\\n')\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return tmp_path
+
+
+def _sudo_calls(root: Path) -> list[dict[str, Any]]:
+    log = root / "sudo-calls.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+class TestLocalExecutorSudoPassword:
+    """`sudo -S` reads the password from stdin: never argv, which `ps`
+    shows every user, and never the environment (#230)."""
+
+    def test_password_arrives_on_stdin_and_nowhere_else(self, fake_sudo: Path) -> None:
+        result = LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        assert result.returncode == 0
+        [call] = _sudo_calls(fake_sudo)
+        assert call["argv"][:4] == ["-S", "-p", "", "--"]
+        assert call["argv"][4:] == ["true"]
+        assert bytes.fromhex(call["stdin"]) == _PASSWORD + b"\n"
+        secret = _PASSWORD.decode()
+        assert not [a for a in call["argv"] if secret in a]
+        assert not [k for k, v in call["env"].items() if secret in k or secret in v]
+        assert secret not in result.stdout + result.stderr
+
+    def test_command_input_follows_the_password_line(self, fake_sudo: Path) -> None:
+        LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["cat"], input=b"payload", sudo=True)
+
+        [call] = _sudo_calls(fake_sudo)
+        assert bytes.fromhex(call["stdin"]) == _PASSWORD + b"\npayload"
+
+    def test_the_stdin_buffer_is_zeroed_after_the_run(self, fake_sudo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        real_run = subprocess.run
+        seen: list[Any] = []
+
+        def _spy(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs.get("input"))
+            return real_run(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", _spy)
+        LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        buf = seen[-1]
+        assert isinstance(buf, bytearray)
+        assert len(buf) == len(_PASSWORD) + 1
+        assert buf == bytearray(len(buf))
+        assert bytes.fromhex(_sudo_calls(fake_sudo)[0]["stdin"]) == _PASSWORD + b"\n"
+
+    def test_no_password_is_sent_when_sudo_needs_none(self, fake_sudo: Path) -> None:
+        """Unread by sudo, the password line would become the command's stdin."""
+        (fake_sudo / "nopasswd").touch()
+        LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        [call] = _sudo_calls(fake_sudo)
+        assert call["argv"] == ["true"]
+        assert call["stdin"] == ""
+
+    def test_without_a_password_sudo_runs_as_before(self, fake_sudo: Path) -> None:
+        LocalExecutor().run(["true"], sudo=True)
+
+        [call] = _sudo_calls(fake_sudo)
+        assert call["argv"] == ["true"]
+        assert call["stdin"] == ""
+
+    def test_zero_buffer_clears_in_place(self) -> None:
+        from anolis_workbench.core.executor import zero_buffer
+
+        buf = bytearray(_PASSWORD)
+        zero_buffer(buf)
+        assert buf == bytearray(len(_PASSWORD))
 
 
 class TestSubprocessSSHExecutor:
