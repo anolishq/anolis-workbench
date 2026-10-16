@@ -251,3 +251,21 @@ def test_missing_provider_binary_hint_carries_no_per_kind_facts(
         hints[kind] = check["hint"].replace(kind, "<kind>")
 
     assert len(set(hints.values())) == 1, hints
+
+
+def test_missing_binary_of_a_kind_without_an_envelope_gets_a_generic_hint(
+    project, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A kind the workbench vendors no envelope for still gets a hint, and it
+    names no kind: point the project's host path at the binary (#287)."""
+    pdir, document = project("exit 0")
+    monkeypatch.chdir(tmp_path)
+    document["host_paths"]["providers"]["sim0"]["executable"] = str(tmp_path / "missing-provider")
+    document["providers"]["sim0"]["kind"] = "thirdparty-xyz"
+
+    check = _check(launcher.preflight("smoke", document, pdir), "Provider sim0 binary exists")
+
+    assert check["ok"] is False
+    assert check["hint"]
+    assert "host path" in check["hint"].lower()
+    assert "thirdparty-xyz" not in check["hint"]

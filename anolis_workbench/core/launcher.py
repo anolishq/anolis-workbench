@@ -432,6 +432,8 @@ def _build_binary_hint(exe: pathlib.Path | None, repo: str | None, docs: str | N
         parts.append(repo_note)
     if docs and repo:
         parts.append(f"Build docs: {repo}/{docs}")
+    if not parts:
+        parts.append("Set the binary's Executable path in Compose (the project's host paths).")
     return "  ".join(parts)
 
 
