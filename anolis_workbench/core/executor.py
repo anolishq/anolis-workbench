@@ -111,18 +111,24 @@ def zero_buffer(buf: bytearray) -> None:
     buf[:] = bytes(len(buf))
 
 
-def _sudo_needs_no_password() -> bool:
-    """True when sudo runs without asking (NOPASSWD, or cached credentials)."""
-    probe = subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
-    return probe.returncode == 0
+# Under sudo, the command runs with stdin from /dev/null. Where a sudoers
+# rule lets sudo skip the password, the line it did not read would
+# otherwise be the command's stdin, and the command's output reaches the
+# job's error and events. "$0" is the command, "$@" its arguments.
+_SUDO_STDIN_GUARD = ["sh", "-c", 'exec "$0" "$@" </dev/null']
 
 
 class LocalExecutor(Executor):
     """Executes operations on the local machine via subprocess + pathlib.
 
     sudo_password: the caller's buffer, which the caller zeroes when done
-    with it. With it, sudo runs as `sudo -S` and reads the password from
+    with it. With it, sudo runs as `sudo -k -S` and reads the password from
     stdin — never argv, which `ps` shows every user, nor the environment.
+    -k neither uses nor refreshes sudo's credential cache, so a later run
+    without a password cannot ride this one. The command itself runs under
+    `sh` with stdin from /dev/null, so a password line sudo did not read
+    goes nowhere; a sudoers rule that names only the target binary (say
+    /usr/bin/bash) therefore no longer matches, and the run fails closed.
     The stdin buffer built here is zeroed after each run. Python cannot
     promise more than that: str and bytes copies made upstream (the request
     body, the decoded JSON) are immutable and freed without being cleared.
@@ -137,17 +143,21 @@ class LocalExecutor(Executor):
         safe_cmd = _validate_command(cmd)
         timeout = timeout if timeout else 30
         password = self._sudo_password
-        if sudo and password and not _sudo_needs_no_password():
+        if sudo and password:
+            if input is not None:
+                raise ValueError("command input cannot be sent with a sudo password: stdin carries the password")
             # Sized up front so the password is never left behind in a
             # buffer that a resize freed without clearing.
             n = len(password)
-            payload = bytearray(n + 1 + len(input or b""))
+            payload = bytearray(n + 1)
             payload[:n] = password
             payload[n] = 0x0A
-            payload[n + 1 :] = input or b""
             try:
                 result = subprocess.run(
-                    ["sudo", "-S", "-p", "", "--", *safe_cmd], input=payload, capture_output=True, timeout=timeout
+                    ["sudo", "-k", "-S", "-p", "", "--", *_SUDO_STDIN_GUARD, *safe_cmd],
+                    input=payload,
+                    capture_output=True,
+                    timeout=timeout,
                 )
             finally:
                 zero_buffer(payload)
