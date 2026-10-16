@@ -393,6 +393,11 @@ def main(
     server.config = config
     url = f"http://{config.host}:{config.port}"
     print(f"Anolis Workbench is running at {url}")
+    # A wildcard bind is reached from this machine on loopback, the only
+    # origin that offers the sudo password field; 0.0.0.0 is not one.
+    if config.host in ("0.0.0.0", "::"):
+        url = f"http://127.0.0.1:{config.port}"
+        print(f"On this machine, open {url}")
     print("Close this window to stop.")
     if config.open_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
