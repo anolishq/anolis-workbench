@@ -26,6 +26,12 @@ Historical note:
   path needs the target to reach the GitHub release downloads. The handoff
   package v1 format doc states the same purpose; the format is unchanged.
 
+### Fixed
+
+- Commission's preflight panel lists every system-level validation error
+  (closes #405). With two or more it threw `each_key_duplicate` and showed
+  nothing, because every error is a check with the same name.
+
 ## [0.16.0] - 2026-10-16
 
 ### Upgrade notes
