@@ -13,8 +13,32 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- After a successful local install, Onboarding offers "Open `<project>` in
+  Operate" for the project the install seeded (closes #238), and the
+  project selector lists that project. A local provision job's `done`
+  summary carries `project`. A remote install still ends at "Go to
+  projects".
+
 ### Changed
 
+- The preflight hint for a missing runtime or provider binary no longer
+  names a CMake preset or carries a Windows note for particular provider
+  kinds (closes #287). It names the repo and its build docs, the same for
+  every kind; how a provider is built is the provider's to document. A
+  kind with no vendored envelope gets a hint to set the binary's Executable
+  path in Compose.
+- The commissioning handoff runbook describes one deploy story (closes
+  #240): the machine-profile project is the source of truth, the `.anpkg`
+  is an optional provenance record, and the staged bundle is the
+  deployable. It documents the facility path (`anolis-provision bundle`,
+  then `install.sh --local` on the target) and the online path
+  (`anolis-provision install|remote`). Extracting an `.anpkg` and running
+  the runtime against it is a validation step, done in a scratch
+  directory, and no longer reads as a deploy into `/opt/anolis`. The online
+  path needs the target to reach the GitHub release downloads. The handoff
+  package v1 format doc states the same purpose; the format is unchanged.
 - The README documents pip and a browser as the supported Raspberry Pi
   setup (closes #231): `pipx install anolis-workbench && anolis-workbench`,
   then `http://<pi>:3010` from another machine on a trusted network. It no
@@ -27,6 +51,13 @@ Historical note:
 - Commission's preflight panel lists every system-level validation error
   (closes #405). With two or more it threw `each_key_duplicate` and showed
   nothing, because every error is a check with the same name.
+- `anolis-provision install --workbench-service` installs the service.
+  It wrote the unit into `/etc/systemd/system` without sudo, so a
+  non-root run printed a warning, installed nothing and still reported
+  success. The unit is now copied into place with sudo, the service
+  runs as the invoking user (`SUDO_USER` under sudo, not root), and
+  `ExecStart=` is the running install's own `anolis-workbench`. A
+  failed step now fails the install with exit 1.
 
 ## [0.16.0] - 2026-10-16
 
