@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- The README documents pip and a browser as the supported Raspberry Pi
+  setup (closes #231): `pipx install anolis-workbench && anolis-workbench`,
+  then `http://<pi>:3010` from another machine, with `anolis-provision
+  install --workbench-service` to start it at boot. It no longer labels the
+  desktop app "recommended" and says the Linux desktop bundles are x86_64
+  only.
+
 ## [0.16.0] - 2026-10-16
 
 ### Upgrade notes
