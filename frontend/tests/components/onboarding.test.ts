@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "../../src/App.svelte";
 import Onboarding from "../../src/routes/Onboarding.svelte";
-import { jsonResponse, pathFromInput } from "./helpers";
+import { jsonResponse, pathFromInput, setPageUrl } from "./helpers";
 
 // install.sh v0.1.43's host-preflight block, as the deploy job carries it
 // (ANSI stripped), from a run with the service user out of the bus's group.
@@ -518,5 +518,37 @@ describe("Onboarding.svelte — sudo password for a local install (#230)", () =>
       body: { allow_unmet_host: true, sudo_password: "pw-7f3c" },
     });
     expect(sessionStorage.getItem("anolis-workbench.provision-job")).not.toContain("pw-7f3c");
+  });
+});
+
+describe("Onboarding.svelte — the sudo password field is offered only on this machine (#230)", () => {
+  afterEach(() => setPageUrl("http://localhost:3000/"));
+
+  it.each(["127.0.0.1", "localhost", "[::1]"])("offers it on %s", (host) => {
+    setPageUrl(`http://${host}:8000/`);
+    setup();
+    expect(screen.getByLabelText(/Sudo password for this device/)).toBeInTheDocument();
+  });
+
+  it("does not offer it to a browser on another host", () => {
+    setPageUrl("http://192.168.1.20:8000/");
+    setup();
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
+    expect(screen.getByText(/sudo password can be entered only/)).toBeInTheDocument();
+  });
+
+  it("does not ask for it again on Install anyway from another host", async () => {
+    setPageUrl("http://192.168.1.20:8000/");
+    setup();
+    const source = await startLocal();
+    source.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    expect(screen.getByRole("button", { name: "Confirm: install anyway" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
   });
 });

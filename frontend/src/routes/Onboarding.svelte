@@ -17,6 +17,7 @@
 
 <script lang="ts">
   import { fetchJson } from "../lib/api";
+  import { isLoopbackHost } from "../lib/guards";
 
   let {
     onNavigate,
@@ -69,6 +70,7 @@
   // Sent once in a local job's request body, then cleared. It never joins
   // the job kept in sessionStorage or the request "Install anyway" repeats.
   let localSudoPassword = $state<string>("");
+  const loopbackClient = isLoopbackHost(window.location.hostname);
   let remoteError = $state<string>("");
   let startError = $state<string>("");
   let starting = $state<boolean>(false);
@@ -338,7 +340,7 @@
                   The providers above will start with no devices until the host is fixed and the
                   service restarted.
                 </p>
-                {#if lastRequest?.url === LOCAL_INSTALL_URL}
+                {#if lastRequest?.url === LOCAL_INSTALL_URL && loopbackClient}
                   <label for="unmet-sudo-password">Sudo password (empty if sudo needs none)</label>
                   <input
                     id="unmet-sudo-password"
@@ -372,18 +374,24 @@
         </div>
       </div>
     {:else if provisionMode === null}
-      <div class="form-group">
-        <label for="local-sudo-password">
-          Sudo password for this device (empty if sudo needs none)
-        </label>
-        <input
-          id="local-sudo-password"
-          type="password"
-          autocomplete="off"
-          disabled={starting}
-          bind:value={localSudoPassword}
-        />
-      </div>
+      {#if loopbackClient}
+        <div class="form-group">
+          <label for="local-sudo-password">
+            Sudo password for this device (empty if sudo needs none)
+          </label>
+          <input
+            id="local-sudo-password"
+            type="password"
+            autocomplete="off"
+            disabled={starting}
+            bind:value={localSudoPassword}
+          />
+        </div>
+      {:else}
+        <p class="onboarding-note">
+          A sudo password can be entered only in a browser on this machine (localhost).
+        </p>
+      {/if}
 
       <div class="onboarding-options">
         <button

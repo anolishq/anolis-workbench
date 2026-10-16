@@ -16,6 +16,7 @@
     type RuntimeStatus,
   } from "../lib/contracts";
   import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "../lib/canonical";
+  import { isLoopbackHost } from "../lib/guards";
 
   let {
     projectName,
@@ -122,6 +123,7 @@
   let deployHost = $state<string>("");
   // Sent once in the local job's request body, then cleared; never stored.
   let deploySudoPassword = $state<string>("");
+  const loopbackClient = isLoopbackHost(window.location.hostname);
   let deployVariantChoice = $state<string>("");
   let deployTelemetryExport = $state<boolean>(false);
   let deployObservability = $state<boolean>(false);
@@ -885,7 +887,7 @@
         disabled={deployRunning}
         bind:value={deployHost}
       />
-    {:else}
+    {:else if loopbackClient}
       <label for="deploy-sudo-password">Sudo password (empty if sudo needs none)</label>
       <input
         id="deploy-sudo-password"
@@ -894,6 +896,10 @@
         disabled={deployRunning}
         bind:value={deploySudoPassword}
       />
+    {:else}
+      <p class="field-note">
+        A sudo password can be entered only in a browser on this machine (localhost).
+      </p>
     {/if}
     <label for="deploy-variant">Runtime variant</label>
     <select
