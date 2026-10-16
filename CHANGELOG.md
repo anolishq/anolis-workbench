@@ -22,6 +22,12 @@ Historical note:
   kind with no vendored envelope gets a hint to set the binary's Executable
   path in Compose.
 
+### Fixed
+
+- Commission's preflight panel lists every system-level validation error
+  (closes #405). With two or more it threw `each_key_duplicate` and showed
+  nothing, because every error is a check with the same name.
+
 ## [0.16.0] - 2026-10-16
 
 ### Upgrade notes
