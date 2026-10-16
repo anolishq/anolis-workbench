@@ -24,7 +24,11 @@ function renderOperate(
   render(Operate, { props: { projectName: 'demo', system, runtimeStatus: RUNNING } });
 }
 
-function status(estop: Record<string, unknown>, version = '0.1.44'): Response {
+function status(
+  estop: Record<string, unknown>,
+  version = '0.1.44',
+  extra: Record<string, unknown> = {},
+): Response {
   return jsonResponse(200, {
     status: { code: 'OK' },
     version,
@@ -34,6 +38,7 @@ function status(estop: Record<string, unknown>, version = '0.1.44'): Response {
     providers: [],
     device_count: 0,
     estop: { latched: false, latched_at_epoch_ms: null, ...estop },
+    ...extra,
   });
 }
 
@@ -128,6 +133,85 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('safe-state-fix')).toHaveTextContent('config/anolis-runtime.manual.yaml');
     expect(screen.queryByText(/As reported by/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Operate.svelte — the startup safe state (#483)", () => {
+  const ESTOP = { software_safe_state: 'hooks', uncovered_actuating_functions: 0 };
+
+  function withStartup(startup: Record<string, unknown>): Response {
+    return status(ESTOP, '0.1.45', {
+      startup_safe_state: {
+        on_startup: 'safe_state',
+        ran: true,
+        software_safe_state: 'hooks',
+        safe_state_achieved: true,
+        failed_actions: [],
+        ...startup,
+      },
+    });
+  }
+
+  it('says it ran and succeeded, as a note', async () => {
+    renderOperate(withStartup({}));
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveTextContent('Startup safe state ran (hooks) and succeeded.');
+    expect(line).toHaveClass('field-note');
+  });
+
+  it('warns when it ran and did not succeed, naming each failed action', async () => {
+    renderOperate(
+      withStartup({
+        software_safe_state: 'setpoints',
+        safe_state_achieved: false,
+        failed_actions: [
+          { device_handle: 'p0/heater', function: 'set_power', success: false, error: 'timeout' },
+          { device_handle: 'p1/pump', function: 'stop', success: false },
+        ],
+      }),
+    );
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveClass('field-error');
+    expect(line).toHaveTextContent('Startup safe state ran (setpoints) and did not succeed.');
+    expect(line).toHaveTextContent('2 action(s) failed: p0/heater/set_power: timeout; p1/pump/stop: failed');
+  });
+
+  it('warns when it ran and did not succeed with no failed action reported', async () => {
+    renderOperate(withStartup({ safe_state_achieved: false }));
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveClass('field-error');
+    expect(line).toHaveTextContent(
+      'Startup safe state ran (hooks) and did not succeed. The runtime reported no failed action.',
+    );
+  });
+
+  it('says outputs were left as they were under on_startup: leave', async () => {
+    renderOperate(withStartup({ on_startup: 'leave', ran: false, safe_state_achieved: false }));
+
+    expect(await screen.findByTestId('startup-safe-state')).toHaveTextContent(
+      'Outputs were left as they were at startup (on_startup: leave).',
+    );
+  });
+
+  it('says nothing ran when no software safe state is declared', async () => {
+    renderOperate(
+      withStartup({ ran: false, software_safe_state: 'none', safe_state_achieved: false }),
+    );
+
+    expect(await screen.findByTestId('startup-safe-state')).toHaveTextContent(
+      'No software safe state is declared, so nothing ran at startup.',
+    );
+  });
+
+  it('shows nothing when the runtime does not report it', async () => {
+    renderOperate(status(ESTOP, '0.1.44'));
+
+    await screen.findByText('As reported by runtime v0.1.44.');
+    expect(screen.queryByTestId('startup-safe-state')).not.toBeInTheDocument();
+    expect(screen.queryByText(/startup/i)).not.toBeInTheDocument();
   });
 });
 

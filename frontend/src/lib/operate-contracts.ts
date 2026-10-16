@@ -14,6 +14,7 @@ import type {
   ProviderHealth,
   RuntimeApiStatus,
   SoftwareSafeState,
+  StartupSafeStateStatus,
   UnknownRecord,
 } from "./contracts";
 
@@ -299,6 +300,60 @@ export function extractEstopStatus(payload: unknown): EstopStatus | null {
     latched_at_epoch_ms: r.latched_at_epoch_ms == null ? null : toFinite(r.latched_at_epoch_ms),
     uncovered_actuating_functions: toFinite(r.uncovered_actuating_functions) ?? 0,
   };
+}
+
+/**
+ * Extract the `startup_safe_state` block from a `GET /v0/runtime/status` body.
+ * Returns null when it is absent (a runtime older than anolis 0.1.45) or not an
+ * object, so the UI shows nothing rather than guess.
+ */
+export function extractStartupSafeState(payload: unknown): StartupSafeStateStatus | null {
+  const root = asObject(payload);
+  const raw = root.startup_safe_state;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = asObject(raw);
+  return {
+    on_startup: r.on_startup === "leave" ? "leave" : "safe_state",
+    ran: r.ran === true,
+    software_safe_state: normalizeSoftwareSafeState(r.software_safe_state),
+    safe_state_achieved: r.safe_state_achieved === true,
+    failed_actions: asArray(r.failed_actions)
+      .map(asObject)
+      .map((a) => ({
+        device_handle: String(a.device_handle ?? "?"),
+        function: String(a.function ?? "?"),
+        success: a.success === true,
+        ...(typeof a.error === "string" ? { error: a.error } : {}),
+      })),
+  };
+}
+
+/**
+ * Format the runtime's startup safe-state report into operator-facing text.
+ * It restates the runtime's own verdict (`safe_state_achieved`); `ok` is false
+ * only when a rung ran and the runtime says it did not succeed.
+ */
+export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
+  text: string;
+  ok: boolean;
+} {
+  if (s.ran && s.safe_state_achieved) {
+    return { text: `Startup safe state ran (${s.software_safe_state}) and succeeded.`, ok: true };
+  }
+  if (s.ran) {
+    const head = `Startup safe state ran (${s.software_safe_state}) and did not succeed.`;
+    if (s.failed_actions.length === 0) {
+      return { text: `${head} The runtime reported no failed action.`, ok: false };
+    }
+    const detail = s.failed_actions
+      .map((a) => `${a.device_handle}/${a.function}: ${a.error ?? "failed"}`)
+      .join("; ");
+    return { text: `${head} ${s.failed_actions.length} action(s) failed: ${detail}`, ok: false };
+  }
+  if (s.on_startup === "leave") {
+    return { text: "Outputs were left as they were at startup (on_startup: leave).", ok: true };
+  }
+  return { text: "No software safe state is declared, so nothing ran at startup.", ok: true };
 }
 
 /**
