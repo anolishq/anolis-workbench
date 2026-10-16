@@ -1,8 +1,8 @@
 # Commissioning Handoff Runbook
 
 Status: Active.
-Audience: Machine integrators commissioning in Workbench and handing off to
-headless runtime deployment.
+Audience: Machine integrators commissioning in Workbench and handing a
+machine off for deployment with the runtime's `install.sh`.
 
 ## 1) Preconditions
 
@@ -44,8 +44,8 @@ Commission's bundle export builds the same bundle. On the target, as
 sudo ./install.sh --local <bundle>.tar.gz
 ```
 
-Online convenience path: when the machine running the workbench can reach
-the release downloads, deploy straight from it, with Commission's Deploy to
+Online convenience path: when the target can reach the GitHub release
+downloads, deploy straight from the workbench, with Commission's Deploy to
 device or:
 
 ```bash
@@ -53,8 +53,11 @@ anolis-provision install --project <project-name>
 anolis-provision remote --target user@host --project <project-name>
 ```
 
-These run `install.sh --project` on the target. They are a convenience over
-the facility path, not a replacement for it.
+These run `install.sh --project` on the target, which downloads the runtime
+and provider releases from GitHub there. For `remote`, the machine running
+the workbench must reach GitHub as well (it fetches `install.sh` and copies
+it over SSH). They are a convenience over the facility path, not a
+replacement for it.
 
 On a target that already has a runtime or provider config, `install.sh`
 keeps it in place and the deploy result says so.
@@ -126,7 +129,9 @@ Deliver all of:
    ```
 
    Omit `--target` on the target itself. This runs `install.sh
-   --rollback`, which swaps the previous binaries back.
+   --rollback`, which swaps the previous binaries (and their
+   `manifest.json`) back and restarts the service. It does not revert
+   runtime or provider configs; they stay as they are on the target.
 3. Record failure cause and attach validation output before next rollout attempt.
 
 ## 8) Troubleshooting

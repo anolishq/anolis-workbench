@@ -22,7 +22,9 @@ Historical note:
   then `install.sh --local` on the target) and the online path
   (`anolis-provision install|remote`). Extracting an `.anpkg` and running
   the runtime against it is a validation step, done in a scratch
-  directory, and no longer reads as a deploy into `/opt/anolis`.
+  directory, and no longer reads as a deploy into `/opt/anolis`. The online
+  path needs the target to reach the GitHub release downloads. The handoff
+  package v1 format doc states the same purpose; the format is unchanged.
 
 ## [0.16.0] - 2026-10-16
 
