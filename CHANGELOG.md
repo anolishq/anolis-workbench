@@ -13,38 +13,240 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-17
+
+### Upgrade notes
+
+- If you reach the workbench under a name other than an IP address,
+  `localhost` or the machine's hostname (plain or `.local`), such as a DNS
+  name or a reverse proxy's, set `ANOLIS_WORKBENCH_ALLOWED_HOSTS` to that
+  name, or the server answers 403.
+
+### Security
+
+- The server refuses, with 403, a request whose `Host` does not name this
+  machine (an IP address, `localhost`, or the hostname, plain or `.local`)
+  and a browser request whose `Origin` does not match `Host`. Names listed
+  in `ANOLIS_WORKBENCH_ALLOWED_HOSTS` (comma-separated) are also accepted.
+  Requests without `Origin`, such as from curl or a script, are unaffected.
+
+## [0.17.0] - 2026-10-17
+
+### Security
+
+- Project and template names are checked at every entry that uses them
+  to name a directory. `POST /api/provision/install`, `/remote` and
+  `/bundle` answer 400 for an invalid project or template without
+  starting a job, and `POST /api/projects` checks the template.
+  `anolis-provision install`, `bundle` and `remote` reject an invalid
+  `--project` or `--template` as a usage error (exit 2), and a fleet
+  file's names are checked when it loads. An absent or empty template
+  still falls back to the default.
+- Removing a project directory refuses any path that is not a real
+  directory strictly inside the workspace root: the root itself, a
+  symlink, and a path that resolves outside it.
+
+### Added
+
+- Operate shows what the runtime's startup safe state did (closes #483):
+  every call accepted by its provider, which calls failed, no call
+  issued, outputs left as they were (`on_startup: leave`), or nothing
+  declared. Runtimes older than 0.1.45 do not report it, and Operate
+  shows nothing for them.
+- The provision summary and Commission's deploy result show
+  `install.sh`'s health lines (closes #239), including how many
+  providers are running and which are not. `install.sh` reports a
+  provider that is not running as a warning and still exits 0, so this
+  is where it shows. Needs a project pinned to anolis 0.1.45 or later.
+- After a successful local install, Onboarding offers "Open `<project>` in
+  Operate" for the project the install seeded (closes #238), and the
+  project selector lists that project. A local provision job's `done`
+  summary carries `project`. A remote install still ends at "Go to
+  projects".
+
+### Changed
+
+- The preflight hint for a missing runtime or provider binary no longer
+  names a CMake preset or carries a Windows note for particular provider
+  kinds (closes #287). It names the repo and its build docs, the same for
+  every kind; how a provider is built is the provider's to document. A
+  kind with no vendored envelope gets a hint to set the binary's Executable
+  path in Compose.
+- The commissioning handoff runbook describes one deploy story (closes
+  #240): the machine-profile project is the source of truth, the `.anpkg`
+  is an optional provenance record, and the staged bundle is the
+  deployable. It documents the facility path (`anolis-provision bundle`,
+  then `install.sh --local` on the target) and the online path
+  (`anolis-provision install|remote`). Extracting an `.anpkg` and running
+  the runtime against it is a validation step, done in a scratch
+  directory, and no longer reads as a deploy into `/opt/anolis`. The online
+  path needs the target to reach the GitHub release downloads. The handoff
+  package v1 format doc states the same purpose; the format is unchanged.
+- The README documents pip and a browser as the supported Raspberry Pi
+  setup (closes #231): `pipx install anolis-workbench && anolis-workbench`,
+  then `http://<pi>:3010` from another machine on a trusted network. It no
+  longer labels the desktop app "recommended", says the Linux desktop
+  bundles are x86_64 only, and gives the Python requirement as 3.10+, as
+  `pyproject.toml` does.
+
+### Fixed
+
+- Commission's preflight panel lists every system-level validation error
+  (closes #405). With two or more it threw `each_key_duplicate` and showed
+  nothing, because every error is a check with the same name.
+- `anolis-provision install --workbench-service` installs the service.
+  It wrote the unit into `/etc/systemd/system` without sudo, so a
+  non-root run printed a warning, installed nothing and still reported
+  success. The unit is now copied into place with sudo, the service
+  runs as the invoking user (`SUDO_USER` under sudo, not root), and
+  `ExecStart=` is the running install's own `anolis-workbench`. A
+  failed step now fails the install with exit 1.
+
+## [0.16.0] - 2026-10-16
+
+### Upgrade notes
+
+- `anolis-provision install|remote --with-observability` now installs
+  InfluxDB and Grafana on the target, and `--start-observability` is gone
+  (#462). Before a local install, stop a stack the workbench started with
+  `docker compose down` in `~/.anolis/observability`.
+- With anolis 0.1.45 or later on the target, `install.sh` binds Grafana to
+  `127.0.0.1:3000`, so by default Grafana is reached over an ssh tunnel. The
+  deploy summary prints the tunnel command (#479). Earlier runtimes put
+  Grafana on the target's network address.
+- `ANOLIS_TELEMETRY_URL` (Operate's Grafana link) now defaults to
+  `http://localhost:3000`, the end of that tunnel (#479). To keep using the
+  runtime release's Docker Compose stack, which maps Grafana to host port
+  3001, set `ANOLIS_TELEMETRY_URL=http://localhost:3001`.
+- A runtime config that sets a non-empty `telemetry.influxdb.token` no longer
+  saves, launches, deploys or bundles (#463). Authored projects drop the token
+  on load; edit an imported project's source and re-import it.
+
+### Added
+
+- Every GitHub release asset (installers, wheel and sdist, SBOMs,
+  `metrics.json`) carries a build-provenance attestation (#488, closes
+  #126). Check one with
+  `gh attestation verify <asset> -R anolishq/anolis-workbench`. The PyPI
+  publish now waits until every asset is built and attested.
+- Commission deploys the selected project to a device (#454, closes #275): a
+  remote device over SSH or this machine, with a picker over the project's
+  runtime variants (default `manual`). A variant that does not boot inert is
+  labelled "fresh install refuses this". The section says it deploys the saved
+  project, follows the job's stages, and shows the installed version, the host
+  preflight, a pending reboot or the failure.
+- Commission's Deploy to device offers "Also install telemetry-export" (#455)
+  and "Also install observability (InfluxDB + Grafana)" (#480, closes #229).
+  They reach `install.sh` as `--with-telemetry-export` and
+  `--with-observability`, from the API's `with_telemetry_export: true` and
+  `with_observability: true`. The deploy result shows `install.sh`'s
+  observability report and heads it "Observability needs attention" when
+  `install.sh` warned, since it still exits 0 then.
+- After an observability install, the provision summary and Commission's
+  deploy result say how to reach Grafana (#479, closes #241): the ssh tunnel
+  command for the target (with its port and key), or the network address when
+  `install.sh` reports Grafana on the network, and where the admin password
+  lives (`/etc/anolis/observability.env` on the target, root only).
+- Deploy says when the target already has a runtime config (#452, closes
+  #354). `install.sh` keeps it and applies neither the project's runtime
+  config nor the variant; the job emits an `existing-config` stage first, and
+  its result carries the kept configs (`preserved`) and
+  `runtime_config_kept`.
+- Compose warns when a runtime variant runs providers and declares no
+  `safety.safe_state` (#459, closes #371): the software stop would then latch
+  and drive nothing.
+- Operate's safe-state note names the runtime version that reported it and
+  where to declare a safe state, for dev-launch and for an installed target
+  (#460, closes #346 and #372). From runtime 0.1.45 it counts the actuating
+  functions the active rung will not drive.
+- When the runtime runs another project, Operate's advisory keeps a "Software
+  stop: `<project>`" button for the running project (#461, closes #264).
+  `GET /api/config` reports `runtime_url_override`.
+
 ### Changed
 
 - **BREAKING:** `anolis-provision install|remote --with-observability` now
-  means the runtime `install.sh`'s native stack (#227): the flag is forwarded
-  to `install.sh --with-observability`, which installs InfluxDB and Grafana as
-  system services on the target. It used to run the release's Docker Compose
-  stack from `~/.anolis/observability` on the machine running the workbench.
-  Stop that stack (`docker compose down` there) before a local install, or its
-  InfluxDB keeps holding `:8086`. The provision summary now repeats
-  `install.sh`'s observability and Grafana lines, since `install.sh` reports
-  an observability failure as a warning and still exits 0. For a separate
-  monitoring host, run the release's `anolis-<version>-observability.tar.gz`
-  compose stack on that host.
+  means the runtime `install.sh`'s native stack (#462, closes #227): the flag
+  is forwarded to `install.sh --with-observability`, which installs InfluxDB
+  and Grafana as system services on the target. It used to run the release's
+  Docker Compose stack from `~/.anolis/observability` on the machine running
+  the workbench. Stop that stack (`docker compose down` there) before a local
+  install, or its InfluxDB keeps holding `:8086`. The provision summary
+  repeats `install.sh`'s observability and Grafana lines, and only those
+  (#478, closes #469), since `install.sh` reports an observability failure as
+  a warning and still exits 0. For a separate monitoring host, run the
+  release's `anolis-<version>-observability.tar.gz` compose stack on that
+  host.
 - `ANOLIS_TELEMETRY_URL` (Operate's Grafana link) now defaults to
-  `http://localhost:3000` instead of `http://localhost:3001` (#241): the end
+  `http://localhost:3000` instead of `http://localhost:3001` (#479): the end
   of the ssh tunnel the deploy summary prints, or Grafana itself after a local
   install. The runtime release's Docker Compose observability stack still maps
   Grafana to host port 3001, so set `ANOLIS_TELEMETRY_URL=http://localhost:3001`
   to keep using that stack.
-
-### Added
-
-- After an observability install, the provision summary and Commission's
-  deploy result say how to reach Grafana (#241): the ssh tunnel command for
-  the target (with its port and key), or the network address when
-  `install.sh` reports Grafana on the network, and where the admin password
-  lives (`/etc/anolis/observability.env` on the target, root only).
+- **BREAKING:** a non-empty `telemetry.influxdb.token` in a runtime config
+  fails validation, naming `INFLUXDB_TOKEN` and the file (#463, closes #257).
+  Save, dev-launch, deploy and bundle refuse it, because an authored token
+  shadowed the target's own `INFLUXDB_TOKEN`. The runtime form has no token
+  field. Migration no longer copies a token; an authored project that still
+  has one drops it on load with a warning, and the next save removes it.
+  Imported projects keep it, warn on import (#478), and are refused at deploy
+  until the source is edited and re-imported.
+- Launch needs a passing preflight for the project on screen (#444, closes
+  #353), and a successful launch clears the result.
+- The preflight result counts skipped checks as skipped, not passed, and
+  carries `summary {passed, skipped, failed}` (#441).
+- The provider form takes what it shows and seeds only from each provider's
+  config schema (#466, closes #349). Add Provider needs an explicit kind.
+- The e-stop disclaimer is provider-neutral: "If in doubt, isolate power to
+  the machine." (#458, closes #450)
+- Vendored contracts synced to anolis 0.1.45 and the current provider
+  releases (#484). The runtime config's `safety.on_startup` and
+  `health.excluded_signals` validate, and the runtime-http contract gains
+  `startup_safe_state`, `safe_state_achieved` and signal `unit` and
+  `description`.
+- The sim-quickstart template pins runtime 0.1.45 instead of 0.1.39 (#477,
+  #474, closes #470). Compose's pin fields show `MAJOR.MINOR.PATCH` as their
+  placeholder.
+- The executor allowlist no longer lists `anolis-runtime` or any
+  `anolis-provider-*` binary, which no `Executor` call ran (#464, closes
+  #284). The README's Trust Boundary section says what the allowlist guards.
 
 ### Removed
 
 - **BREAKING:** `anolis-provision install|remote --start-observability`, with
-  the workbench's Docker observability step (#227).
+  the workbench's Docker observability step and `docker` in the executor
+  allowlist (#462, closes #227).
+- `POST /api/provision/cancel/<job_id>` (#457, closes #348). It reported a
+  job cancelled while `install.sh` ran on; no UI called it.
+
+### Fixed
+
+- A failed onboarding install no longer ends first run (#453, closes #424).
+  First run lasts until a deploy has succeeded or the user has a project of
+  their own; `GET /api/onboarding` gains `has_fleet_entry`.
+- Reloading during an onboarding install reattaches to the same job (#457,
+  closes #348).
+- A client that leaves the provision status stream or the `/v0/events` proxy
+  no longer logs a traceback (#476, closes #468).
+- Reloading `/fleet` serves the app instead of a JSON 404 (#406, closes
+  #347).
+- A template that fails to load is listed as unavailable with its error
+  instead of being dropped (#446, closes #356).
+- The offline bundle builds for the architecture picked in Commission
+  (arm64 or x86_64) instead of always arm64 (#442). `POST
+  /api/provision/bundle` rejects any other arch with a 400.
+- Rollback asks for confirmation before it swaps the binaries and restarts the
+  service (#443).
+
+### CI
+
+- Renovate tracks the release tag of every upstream schema lock (#465, closes
+  #369) and each template's runtime pin (#477).
+- The release workflow checks every location in `version-locations.txt`
+  against the requested version (#447, closes #295), and the smoke test waits
+  up to about 9 minutes for PyPI's index (#440).
+- A message constant is renamed so CodeQL's clear-text-logging check no longer
+  flags it; the printed text is unchanged (#481).
 
 ## [0.15.0] - 2026-10-12
 

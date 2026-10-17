@@ -7,11 +7,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import deploy, installer, releases
+from anolis_workbench.core import deploy, installer, projects, releases
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
     from anolis_workbench.core import fleet as fleet_module
+
+
+def _name_arg(value: str) -> str:
+    """--project and --template name directories under the workspace and
+    template roots, so both are held to the project-name rule."""
+    if projects.validate_name(value):
+        raise argparse.ArgumentTypeError("must be 1-64 characters: letters, digits, hyphens, underscores only")
+    return value
 
 
 def _parse_args() -> argparse.Namespace:
@@ -28,11 +36,13 @@ def _parse_args() -> argparse.Namespace:
     )
     install_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name to create (defaults to the template name).",
     )
     install_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
@@ -94,11 +104,13 @@ def _parse_args() -> argparse.Namespace:
     )
     bundle_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name for the bundle (defaults to the template name).",
     )
     bundle_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
@@ -139,11 +151,13 @@ def _parse_args() -> argparse.Namespace:
     )
     remote_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name to create on the target (defaults to the template name).",
     )
     remote_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
@@ -386,6 +400,21 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_health(result: deploy.DeployResult) -> None:
+    """install.sh's health lines. A provider that is not running is a
+    warning and install.sh still exits 0, so without this the summary hides
+    it."""
+    lines = deploy.health_lines(result.output)
+    if not lines:
+        return
+    print()
+    print("  Health (install.sh):")
+    for line in lines:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in lines):
+        print("\nWARNING: health: install.sh reported a problem — see the lines above", file=sys.stderr)
+
+
 def _print_observability(
     result: deploy.DeployResult, *, ssh_target: str | None = None, ssh_port: int = 22, ssh_key: str | None = None
 ) -> None:
@@ -415,8 +444,6 @@ def _print_observability(
 
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
-    import os
-
     if not _validate_system_template(args):
         return 1
 
@@ -460,13 +487,16 @@ def _run_install(args: argparse.Namespace) -> int:
         from anolis_workbench.core import workbench_service
 
         _print_progress("systemd", "Installing workbench systemd service")
-        wb_result = workbench_service.install_service(
-            user=os.environ.get("USER", "root"),
-        )
+        wb_result = workbench_service.install_service(user=workbench_service.invoking_user())
         if wb_result.error:
-            print(f"\nWARNING: workbench service: {wb_result.error}", file=sys.stderr)
-        else:
-            _print_progress("systemd", "Workbench service enabled and started")
+            print(
+                f"\nERROR: workbench service: {wb_result.error}\n"
+                f"The runtime is installed (anolis-runtime v{result.runtime_version}); "
+                "the workbench service is not.",
+                file=sys.stderr,
+            )
+            return 1
+        _print_progress("systemd", "Workbench service enabled and started")
 
     # Print summary
     print()
@@ -479,6 +509,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_host_followups(result)
+        _print_health(result)
         if _wants_observability(args):
             _print_observability(result)
         print()
@@ -640,6 +671,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
+    _print_health(result)
     if _wants_observability(args):
         _print_observability(
             result,

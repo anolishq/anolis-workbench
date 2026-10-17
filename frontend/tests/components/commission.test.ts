@@ -87,6 +87,41 @@ describe('Commission.svelte', () => {
     expect(screen.getByRole('button', { name: /Launch/ })).toBeEnabled();
   });
 
+  it('lists every validation error when several share a check name', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = pathFromInput(input);
+      if (path === '/api/projects/demo/preflight') {
+        return jsonResponse(200, {
+          ok: false,
+          // launcher.preflight emits one same-named check per validation error.
+          checks: [
+            { name: 'System-level validation', ok: false, error: 'first error', hint: null },
+            { name: 'System-level validation', ok: false, error: 'second error', hint: null },
+          ],
+          summary: { passed: 0, skipped: 0, failed: 2 },
+        });
+      }
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Preflight Check' }));
+
+    expect(await screen.findByText('0 passed · 0 skipped · 2 failed')).toBeInTheDocument();
+    expect(screen.getByText('first error')).toBeInTheDocument();
+    expect(screen.getByText('second error')).toBeInTheDocument();
+    expect(screen.getAllByText('System-level validation')).toHaveLength(2);
+  });
+
   it('builds the bundle for the architecture the user chose', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { job_id: 'job-1' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -552,6 +587,55 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(await screen.findByText('Deployed')).toBeInTheDocument();
     expect(screen.getByText(/grafana \(:3000\) up/)).toBeInTheDocument();
     expect(screen.queryByText(/Observability needs attention/)).not.toBeInTheDocument();
+  });
+
+  it('warns when install.sh reports a provider that is not running', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // tests/fixtures/install-sh/health-one-down.txt, through deploy.health_lines
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        health: [
+          '✓ health: runtime responding (v0.1.45)',
+          '✓ health: run registry available',
+          '⚠ health: providers: 1 of 2 running',
+          '⚠ health: provider io1: UNAVAILABLE',
+          '    sudo journalctl -u anolis-runtime --no-pager -n 50',
+        ],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/Health needs attention/)).toBeInTheDocument();
+    expect(screen.getByText('⚠ health: provider io1: UNAVAILABLE')).toHaveClass('deploy-warning');
+    expect(screen.getByText('⚠ health: providers: 1 of 2 running')).toHaveClass('deploy-warning');
+    expect(screen.getByText('✓ health: run registry available')).not.toHaveClass('deploy-warning');
+  });
+
+  it('shows install.sh health lines without a warning when every provider runs', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        health: ['✓ health: runtime responding (v0.1.45)', '✓ health: providers: 2 of 2 running'],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText("install.sh's health check:")).toBeInTheDocument();
+    expect(screen.getByText('✓ health: providers: 2 of 2 running')).toBeInTheDocument();
+    expect(screen.queryByText(/Health needs attention/)).not.toBeInTheDocument();
   });
 
   it('says where Grafana listens without promising a tunnel on every runtime', () => {

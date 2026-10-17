@@ -102,6 +102,7 @@
       reboot_pending?: boolean;
       preserved?: string[];
       runtime_config_kept?: boolean;
+      health?: string[];
       observability?: string[];
       grafana_access?: string[];
     };
@@ -116,6 +117,7 @@
     rebootPending: boolean;
     preserved: string[];
     runtimeConfigKept: boolean;
+    health: string[];
     observability: string[];
     grafanaAccess: string[];
   };
@@ -450,6 +452,7 @@
         rebootPending: data.summary?.reboot_pending ?? false,
         preserved: data.summary?.preserved ?? [],
         runtimeConfigKept: data.summary?.runtime_config_kept === true,
+        health: data.summary?.health ?? [],
         observability: data.summary?.observability ?? [],
         grafanaAccess: data.summary?.grafana_access ?? [],
       };
@@ -463,6 +466,7 @@
         rebootPending: data.reboot_pending ?? false,
         preserved: [],
         runtimeConfigKept: false,
+        health: [],
         observability: [],
         grafanaAccess: [],
       };
@@ -520,6 +524,7 @@
             rebootPending: false,
             preserved: [],
             runtimeConfigKept: false,
+            health: [],
             observability: [],
             grafanaAccess: [],
           });
@@ -613,6 +618,19 @@
       {#if outcome.hostPreflight.length}
         <p>The host preflight needs attention:</p>
         <pre class="deploy-output">{outcome.hostPreflight.join("\n")}</pre>
+      {/if}
+      {#if outcome.health.length}
+        <!-- install.sh warns and still exits 0 when a provider is not
+             running, so a "Deployed" without these lines would hide it. -->
+        {#if outcome.health.some((line) => line.startsWith("⚠"))}
+          <p class="deploy-warning">Health needs attention: install.sh reported a problem.</p>
+        {:else}
+          <p>install.sh's health check:</p>
+        {/if}
+        <pre class="deploy-output">{#each outcome.health as line, i (i)}<span
+              class="deploy-line"
+              class:deploy-warning={line.startsWith("⚠")}>{line}</span
+            >{/each}</pre>
       {/if}
       {#if outcome.observability.length}
         <!-- install.sh warns and still exits 0 when observability fails, so
@@ -709,7 +727,7 @@
 
       {#if preflightResults?.checks?.length}
         <div class="preflight-results">
-          {#each preflightResults.checks as c (c.name)}
+          {#each preflightResults.checks as c, i (i)}
             {@const cls = c.ok === true ? "check-ok" : c.ok === false ? "check-fail" : "check-skip"}
             {@const icon = c.ok === true ? "✓" : c.ok === false ? "✗" : "–"}
             <div class="check-item {cls}">

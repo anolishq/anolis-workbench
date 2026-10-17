@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import canonical, deploy, installer, machine_profile, releases
+from anolis_workbench.core import canonical, deploy, installer, machine_profile, projects, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import LocalExecutor, ParamikoSSHExecutor, zero_buffer
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -125,11 +125,14 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: b
             {
                 "stage": "done",
                 "summary": {
+                    # Onboarding opens it in Operate (#238); local installs only.
+                    "project": project,
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
                     "grafana_access": deploy.grafana_access(result.output),
                 },
@@ -194,6 +197,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
                     "grafana_access": deploy.grafana_access(
                         result.output,
@@ -219,6 +223,21 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _reject_invalid_names(handler: Any, params: dict[str, Any]) -> bool:
+    """`project` and `template` name directories under the workspace and
+    template roots, so both are held to the project-name rule."""
+    for key in ("project", "template"):
+        value = params.get(key)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str) or projects.validate_name(value):
+            handler._json(
+                400, {"error": f"'{key}' must be 1-64 characters: letters, digits, hyphens, underscores only."}
+            )
+            return True
+    return False
+
+
 def start_install(handler: Any) -> None:
     """POST /api/provision/install — start a local install job.
 
@@ -229,6 +248,8 @@ def start_install(handler: Any) -> None:
     content_length = int(handler.headers.get("Content-Length", 0))
     body = handler.rfile.read(content_length) if content_length else b"{}"
     params = json.loads(body)
+    if _reject_invalid_names(handler, params):
+        return
 
     secret = params.pop("sudo_password", None)
     if secret is not None and not isinstance(secret, str):
@@ -261,6 +282,8 @@ def start_remote(handler: Any) -> None:
 
     if "target" not in params:
         handler._json(400, {"error": "Missing 'target' field (user@host)"})
+        return
+    if _reject_invalid_names(handler, params):
         return
 
     job = _create_job()
@@ -375,6 +398,8 @@ def start_bundle(handler: Any) -> None:
     if arch is not None and arch not in releases.SUPPORTED_ARCHS:
         expected = ", ".join(releases.SUPPORTED_ARCHS)
         handler._json(400, {"error": f"Unsupported arch {arch!r}; expected one of {expected}"})
+        return
+    if _reject_invalid_names(handler, params):
         return
 
     job = _create_job()
