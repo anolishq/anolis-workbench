@@ -28,6 +28,7 @@
     schema,
     key,
     required,
+    requiredReason = null,
     parent,
     onChanged,
     i2cImport = null,
@@ -35,6 +36,8 @@
     schema: SchemaNode;
     key: string;
     required: boolean;
+    /** Why `required` holds when a schema conditional made it so. */
+    requiredReason?: string | null;
     parent: UnknownRecord;
     onChanged: () => void;
     i2cImport: (() => unknown[] | null) | null;
@@ -141,6 +144,7 @@
   {#if description}<span class="field-note">{description}</span>{/if}
   {#if required && (!value || value.length === 0)}
     <span class="field-error">Required — add at least one entry.</span>
+    {#if requiredReason}<span class="field-note">{requiredReason}</span>{/if}
   {/if}
 
   {#if objectMode && items}
@@ -155,6 +159,7 @@
                 schema={propSchema}
                 key={propKey}
                 required={rowConditionals.required.has(propKey)}
+                requiredReason={rowConditionals.reasons.get(propKey) ?? null}
                 parent={record}
                 {onChanged}
                 i2cImport={null}
