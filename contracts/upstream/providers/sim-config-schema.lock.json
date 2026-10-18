@@ -4,8 +4,8 @@
   "provider_version": "0.2.7",
   "source": {
     "repo": "anolishq/anolis-provider-sim",
-    "path": "anolis-provider-sim-0.2.7-config-schema.json",
-    "tag": "v0.2.7"
+    "path": "anolis-provider-sim-0.2.8-config-schema.json",
+    "tag": "v0.2.8"
   },
   "distribution": {
     "mode": "release-artifact",
@@ -16,7 +16,7 @@
     },
     "release": {
       "repo": "anolishq/anolis-provider-sim",
-      "tag": "v0.2.7",
+      "tag": "v0.2.8",
       "asset": "anolis-provider-sim-0.2.7-config-schema.json",
       "manifest_asset": "anolis-provider-sim-0.2.7-config-schema-manifest.json"
     },
