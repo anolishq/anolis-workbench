@@ -8,6 +8,7 @@
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
   import { fetchJson } from "./lib/api";
+  import { savedLaunch, type SavedLaunch } from "./lib/canonical";
   import type {
     ProjectSummary,
     ProviderSchemasResponse,
@@ -38,6 +39,8 @@
   // The variant open in Compose. Only Compose's selector sets it; it is never
   // written to the project, and dev-launch runs launch.variant instead (#339).
   let editingVariant = $state<string>("");
+  // The project as last read from or written to disk, for what Launch runs.
+  let saved = $state<SavedLaunch | null>(null);
   let workspace = $state<WorkspaceName | null>(null);
   let dirty = $state<boolean>(false);
   let currentPath = $state<string>("/");
@@ -175,7 +178,9 @@
 
   async function loadProject(name: string): Promise<boolean> {
     try {
-      system = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
+      const doc = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
+      saved = savedLaunch(doc);
+      system = doc;
       projectName = name;
       return true;
     } catch {
@@ -380,6 +385,7 @@
       }}
       onSaved={() => {
         dirty = false;
+        saved = savedLaunch(system);
       }}
     />
   {:else if workspace === "commission"}
@@ -392,10 +398,11 @@
         {runtimeStatus}
         {commissionRunningForCurrent}
         {editingVariant}
+        bind:saved
       />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {system} {runtimeStatus} {editingVariant} />
+    <Operate {projectName} {system} {runtimeStatus} {editingVariant} {saved} />
   {/if}
 </main>
 

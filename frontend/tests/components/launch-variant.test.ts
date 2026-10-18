@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import App from "../../src/App.svelte";
 import Commission from "../../src/routes/Commission.svelte";
 import Operate from "../../src/routes/Operate.svelte";
-import { AUTOMATION_VARIANT, variantRelpath } from "../../src/lib/canonical";
+import { activeVariant, AUTOMATION_VARIANT, variantRelpath } from "../../src/lib/canonical";
 import type { ProjectDocument } from "../../src/lib/contracts";
 import { createProjectDocument, createRuntimeStatus, jsonResponse, pathFromInput } from "./helpers";
 import { reactive } from "./helpers.svelte";
@@ -58,7 +58,16 @@ async function loadedLaunchSelect(): Promise<HTMLSelectElement> {
   return launchSelect();
 }
 
-function renderCommission(system: ProjectDocument, editingVariant = "") {
+/** What the shell knows about the project on disk: its variants and launch variant. */
+function savedOf(doc: ProjectDocument) {
+  return { variants: Object.keys(doc.variants ?? {}), launch: activeVariant(doc) };
+}
+
+function renderCommission(
+  system: ProjectDocument,
+  editingVariant = "",
+  savedDoc: ProjectDocument = system,
+) {
   return render(Commission, {
     props: {
       projectName: "demo",
@@ -66,6 +75,7 @@ function renderCommission(system: ProjectDocument, editingVariant = "") {
       runtimeStatus: createRuntimeStatus(),
       commissionRunningForCurrent: false,
       editingVariant,
+      saved: savedOf(savedDoc),
     },
   });
 }
@@ -82,7 +92,7 @@ describe("Commission: the dev-launch variant control (#339)", () => {
     // Key order would make "the first variant" automation.
     doc.variants = { automation: doc.variants.automation, manual: doc.variants.manual };
     serveSaved(doc);
-    renderCommission(structuredClone(doc));
+    renderCommission(structuredClone(doc), "", doc);
     expect((await loadedLaunchSelect()).value).toBe("manual");
   });
 
@@ -90,7 +100,7 @@ describe("Commission: the dev-launch variant control (#339)", () => {
     // automation was added in Compose and not saved yet.
     const fetchMock = serveSaved(createProjectDocument("demo"));
     const system = reactive(twoVariantDoc("manual"));
-    renderCommission(system);
+    renderCommission(system, "", createProjectDocument("demo"));
 
     const select = await loadedLaunchSelect();
     const option = select.querySelector(`option[value="${AUTOMATION_VARIANT}"]`);
@@ -112,7 +122,7 @@ describe("Commission: the dev-launch variant control (#339)", () => {
     saved.launch = { variant: named };
     const fetchMock = serveSaved(saved);
     const system = reactive(twoVariantDoc(named));
-    renderCommission(system);
+    renderCommission(system, "", saved);
 
     expect((await loadedLaunchSelect()).value).toBe("manual");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -316,5 +326,25 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
     await tab("Commission");
     await waitFor(() => expect(launchSelect()).toBeEnabled());
     expect(launchSelect().value).toBe("manual");
+  });
+
+  it("Operate's banner agrees with Commission's when the saved launch variant differs from memory", async () => {
+    // automation is saved as the launch variant, then removed in Compose
+    // without saving: Launch still runs automation.
+    stubDisk(twoVariantDoc(AUTOMATION_VARIANT));
+    history.replaceState({}, "", "/projects/demo/compose");
+    render(App);
+
+    await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
+    const expected = "Editing manual; Launch runs automation";
+
+    // The removal is unsaved, so leaving Compose asks first.
+    await tab("Commission");
+    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(await screen.findByTestId("launch-variant-mismatch")).toHaveTextContent(expected);
+    await tab("Operate");
+    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: "Operate" });
+    expect(await screen.findByTestId("launch-variant-mismatch")).toHaveTextContent(expected);
   });
 });

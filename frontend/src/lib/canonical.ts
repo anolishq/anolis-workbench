@@ -102,6 +102,21 @@ export function launchVariantMismatch(
   return editing === launch ? null : `Editing ${editing}; Launch runs ${launch}`;
 }
 
+/**
+ * What dev-launch resolves against: the SAVED project's variants and the
+ * variant Launch will run from it. The shell keeps one copy so Commission and
+ * Operate agree, refreshed on load, on every Compose save and after the
+ * Commission control writes launch.variant (#339).
+ */
+export interface SavedLaunch {
+  variants: string[];
+  launch: string;
+}
+
+export function savedLaunch(doc: ProjectDocument | null): SavedLaunch {
+  return { variants: Object.keys(doc?.variants ?? {}), launch: activeVariant(doc) };
+}
+
 export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigDoc | null {
   if (!doc) return null;
   return doc.variants?.[activeVariant(doc)] ?? null;

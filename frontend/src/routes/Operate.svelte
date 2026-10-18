@@ -18,7 +18,12 @@
     UnknownRecord,
     WorkbenchConfig,
   } from "../lib/contracts";
-  import { activeVariant, launchVariantMismatch, variantRelpath } from "../lib/canonical";
+  import {
+    activeVariant,
+    launchVariantMismatch,
+    variantRelpath,
+    type SavedLaunch,
+  } from "../lib/canonical";
   import {
     coerceParameterValue,
     deriveOperateAvailability,
@@ -53,12 +58,15 @@
     system = null,
     runtimeStatus,
     editingVariant = "",
+    saved = null,
   }: {
     projectName: string | null;
     system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     /** The variant open in Compose, for the mismatch banner. */
     editingVariant?: string;
+    /** The saved project's launch state, shared with Commission. */
+    saved?: SavedLaunch | null;
   } = $props();
 
   function inputTarget(event: Event): HTMLInputElement {
@@ -78,7 +86,10 @@
   // the project's own variant file; an installed target keeps its own config,
   // which a redeploy does not overwrite.
   const safeStateFile = $derived(variantRelpath(activeVariant(system)));
-  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant));
+  // Against the SAVED launch variant, as Commission does: Launch reads disk.
+  const variantMismatch = $derived(
+    launchVariantMismatch(system, editingVariant, saved?.launch ?? activeVariant(system)),
+  );
 
   // ── Operate state ─────────────────────────────────────────────────────────
   let mode = $state<string>("--");

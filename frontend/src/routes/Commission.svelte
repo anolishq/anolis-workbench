@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy } from "svelte";
   import {
     ApiResponseError,
     downloadBlob,
@@ -20,6 +20,8 @@
     inertnessViolation,
     launchVariantMismatch,
     MANUAL_VARIANT,
+    savedLaunch,
+    type SavedLaunch,
   } from "../lib/canonical";
 
   let {
@@ -28,6 +30,7 @@
     runtimeStatus,
     commissionRunningForCurrent,
     editingVariant = "",
+    saved = $bindable(null),
   }: {
     projectName: string | null;
     system: ProjectDoc | null;
@@ -35,6 +38,8 @@
     commissionRunningForCurrent: boolean;
     /** The variant open in Compose, for the mismatch banner. */
     editingVariant?: string;
+    /** The saved project's variants and launch variant; null until known. */
+    saved?: SavedLaunch | null;
   } = $props();
 
   // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
@@ -56,26 +61,14 @@
   // A variant that exists only in unsaved edits is listed but disabled; a
   // launch.variant naming a missing variant shows what Launch will really run
   // and is left in the file as it is.
-  let savedDoc = $state<ProjectDoc | null>(null);
-  const savedVariants = $derived(Object.keys(savedDoc?.variants ?? {}));
+  const savedVariants = $derived(saved?.variants ?? []);
   const launchVariants = $derived(
     Array.from(new Set([...savedVariants, ...Object.keys(system?.variants ?? {})])).sort(),
   );
-  const launchVariant = $derived(activeVariant(savedDoc ?? system));
+  const launchVariant = $derived(saved?.launch ?? activeVariant(system));
   const variantMismatch = $derived(launchVariantMismatch(system, editingVariant, launchVariant));
   let launchVariantSaving = $state<boolean>(false);
   let launchVariantError = $state<string>("");
-
-  onMount(() => {
-    if (!projectName || imported) return;
-    fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(projectName)}`)
-      .then((doc) => {
-        savedDoc = doc;
-      })
-      .catch((err) => {
-        launchVariantError = `Could not read the saved project: ${err instanceof Error ? err.message : String(err)}`;
-      });
-  });
 
   /**
    * Write launch.variant to the saved project. The PUT carries the saved
@@ -93,14 +86,14 @@
     launchVariantError = "";
     try {
       const path = `/api/projects/${encodeURIComponent(projectName)}`;
-      const saved = await fetchJson<ProjectDoc>(path);
-      saved.launch = { ...(saved.launch ?? {}), variant: next };
+      const onDisk = await fetchJson<ProjectDoc>(path);
+      onDisk.launch = { ...(onDisk.launch ?? {}), variant: next };
       await fetchJson(path, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(saved),
+        body: JSON.stringify(onDisk),
       });
-      savedDoc = saved;
+      saved = savedLaunch(onDisk);
       system.launch = { ...(system.launch ?? {}), variant: next };
       // Preflight checks the variant dev-launch runs, so its result no longer
       // speaks for the next launch.
@@ -753,15 +746,15 @@
         <label for="launch-variant-select">Dev-launch variant</label>
         <select
           id="launch-variant-select"
-          disabled={launchVariantSaving || savedDoc === null}
+          disabled={launchVariantSaving || saved === null}
           onchange={(e: Event) => void setLaunchVariant(e.currentTarget as HTMLSelectElement)}
         >
           <!-- Selection is set per option: the list changes once the saved
                project loads, and a select-level value set before then is lost. -->
           {#each launchVariants as name (name)}
-            {@const saved = savedVariants.includes(name)}
-            <option value={name} disabled={!saved} selected={name === launchVariant}
-              >{name}{saved ? "" : " (save in Compose to launch this variant)"}</option
+            {@const onDisk = savedVariants.includes(name)}
+            <option value={name} disabled={!onDisk} selected={name === launchVariant}
+              >{name}{onDisk ? "" : " (save in Compose to launch this variant)"}</option
             >
           {/each}
         </select>
