@@ -52,8 +52,10 @@
   // below is where a variant is chosen (#275).
   const variants = $derived(Object.keys(system?.profile?.runtime_profiles ?? {}).sort());
 
-  /** The HTTP port dev-launch serves on, from the variant it will run. */
-  const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
+  /** The HTTP port dev-launch serves on, from the saved variant it runs. */
+  const launchPort = $derived(
+    saved ? saved.port : (system?.variants?.[activeVariant(system)]?.http?.port ?? null),
+  );
 
   // The variant dev-launch runs is chosen here, never by Compose's selector
   // (#339). Launch reads the SAVED project, so the control resolves and offers

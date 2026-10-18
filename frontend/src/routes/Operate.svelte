@@ -85,7 +85,8 @@
   // Where an operator declares the safe state (#346): the dev-launch copy is
   // the project's own variant file; an installed target keeps its own config,
   // which a redeploy does not overwrite.
-  const safeStateFile = $derived(variantRelpath(activeVariant(system)));
+  // The file of the variant Launch runs, from the saved project (#339).
+  const safeStateFile = $derived(variantRelpath(saved?.launch ?? activeVariant(system)));
   // Against the SAVED launch variant, as Commission does: Launch reads disk.
   const variantMismatch = $derived(
     launchVariantMismatch(system, editingVariant, saved?.launch ?? activeVariant(system)),

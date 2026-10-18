@@ -111,10 +111,17 @@ export function launchVariantMismatch(
 export interface SavedLaunch {
   variants: string[];
   launch: string;
+  /** The HTTP port the launch variant serves on, or null. */
+  port: number | null;
 }
 
 export function savedLaunch(doc: ProjectDocument | null): SavedLaunch {
-  return { variants: Object.keys(doc?.variants ?? {}), launch: activeVariant(doc) };
+  const launch = activeVariant(doc);
+  return {
+    variants: Object.keys(doc?.variants ?? {}),
+    launch,
+    port: doc?.variants?.[launch]?.http?.port ?? null,
+  };
 }
 
 export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigDoc | null {

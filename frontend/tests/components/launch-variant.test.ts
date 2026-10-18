@@ -60,7 +60,12 @@ async function loadedLaunchSelect(): Promise<HTMLSelectElement> {
 
 /** What the shell knows about the project on disk: its variants and launch variant. */
 function savedOf(doc: ProjectDocument) {
-  return { variants: Object.keys(doc.variants ?? {}), launch: activeVariant(doc) };
+  const launch = activeVariant(doc);
+  return {
+    variants: Object.keys(doc.variants ?? {}),
+    launch,
+    port: doc.variants?.[launch]?.http?.port ?? null,
+  };
 }
 
 function renderCommission(
@@ -272,7 +277,7 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
   );
 
   /** Like stubApi, but the project on disk is what the last PUT stored. */
-  function stubDisk(initial: ProjectDocument) {
+  function stubDisk(initial: ProjectDocument, running = false) {
     let disk = structuredClone(initial);
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = pathFromInput(input);
@@ -285,10 +290,14 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
       if (path === "/api/projects")
         return Promise.resolve(jsonResponse(200, [{ name: "demo", meta: {} }]));
       if (path === "/api/status")
-        return Promise.resolve(jsonResponse(200, { running: false, active_project: null }));
+        return Promise.resolve(
+          jsonResponse(200, { running, active_project: running ? "demo" : null }),
+        );
       if (path === "/api/templates") return Promise.resolve(jsonResponse(200, []));
       if (path === "/api/provider-schemas")
         return Promise.resolve(jsonResponse(200, { providers: {} }));
+      if (path === "/v0/runtime/status")
+        return Promise.resolve(jsonResponse(500, { error: "runtime unreachable" }));
       return Promise.resolve(jsonResponse(200, {}));
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -346,5 +355,46 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
     await screen.findByRole("heading", { name: "Operate" });
     expect(await screen.findByTestId("launch-variant-mismatch")).toHaveTextContent(expected);
+  });
+
+  it("Operate's safe-state note names the file of the variant Launch runs", async () => {
+    // automation is saved as the launch variant and is running; removing it
+    // in Compose without saving does not change what runs.
+    stubDisk(twoVariantDoc(AUTOMATION_VARIANT), true);
+    history.replaceState({}, "", "/projects/demo/compose");
+    render(App);
+
+    await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
+    await tab("Operate");
+    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByTestId("safe-state-fix")).toHaveTextContent(
+      "config/anolis-runtime.automation.yaml",
+    );
+  });
+});
+
+describe("Commission: the running port (#339)", () => {
+  it("is the saved launch variant's port, not the in-memory one", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, {})),
+    );
+    // Saved: automation launches on 9090. In memory automation was removed,
+    // so the in-memory reading would fall back to manual's 8080.
+    const savedDoc = twoVariantDoc(AUTOMATION_VARIANT);
+    savedDoc.variants.automation.http = { ...savedDoc.variants.manual.http!, port: 9090 };
+    const system = createProjectDocument("demo");
+    system.launch = { variant: AUTOMATION_VARIANT };
+    render(Commission, {
+      props: {
+        projectName: "demo",
+        system,
+        runtimeStatus: createRuntimeStatus({ running: true, active_project: "demo" }),
+        commissionRunningForCurrent: true,
+        saved: savedOf(savedDoc),
+      },
+    });
+    expect(screen.getByText(/Running — demo on port/)).toHaveTextContent("port 9090");
   });
 });
