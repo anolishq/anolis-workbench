@@ -18,7 +18,7 @@
     UnknownRecord,
     WorkbenchConfig,
   } from "../lib/contracts";
-  import { activeVariant, variantRelpath } from "../lib/canonical";
+  import { activeVariant, launchVariantMismatch, variantRelpath } from "../lib/canonical";
   import {
     coerceParameterValue,
     deriveOperateAvailability,
@@ -52,10 +52,13 @@
     projectName,
     system = null,
     runtimeStatus,
+    editingVariant = "",
   }: {
     projectName: string | null;
     system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
+    /** The variant open in Compose, for the mismatch banner. */
+    editingVariant?: string;
   } = $props();
 
   function inputTarget(event: Event): HTMLInputElement {
@@ -75,6 +78,7 @@
   // the project's own variant file; an installed target keeps its own config,
   // which a redeploy does not overwrite.
   const safeStateFile = $derived(variantRelpath(activeVariant(system)));
+  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant));
 
   // ── Operate state ─────────────────────────────────────────────────────────
   let mode = $state<string>("--");
@@ -771,6 +775,10 @@
   <div class="workspace-header">
     <h2>Operate</h2>
   </div>
+
+  {#if variantMismatch}
+    <div class="workspace-advisory" data-testid="launch-variant-mismatch">{variantMismatch}</div>
+  {/if}
 
   {#if !available}
     <div class="workspace-advisory">

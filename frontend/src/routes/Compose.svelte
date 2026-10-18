@@ -24,6 +24,7 @@
     system,
     providerSchemas,
     runtimeStatus,
+    editingVariant = $bindable(""),
     onDirty,
     onSaved,
   }: {
@@ -31,6 +32,8 @@
     system: ProjectDocument | null;
     providerSchemas: ProviderSchemasResponse | null;
     runtimeStatus: RuntimeStatus | null;
+    /** The variant being edited. Choosing it never touches launch.variant (#339). */
+    editingVariant?: string;
     onDirty: () => void;
     onSaved: () => void;
   } = $props();
@@ -39,11 +42,8 @@
   const editable = $derived(system !== null && !imported ? system : null);
 
   const variants = $derived(Object.keys(system?.variants ?? {}).sort());
-  let selectedVariant = $state<string>("");
   const variant = $derived(
-    selectedVariant && system?.variants?.[selectedVariant]
-      ? selectedVariant
-      : activeVariant(system),
+    editingVariant && system?.variants?.[editingVariant] ? editingVariant : activeVariant(system),
   );
 
   const running = $derived(Boolean(runtimeStatus?.running));
@@ -101,7 +101,7 @@
       [AUTOMATION_VARIANT]: variantRelpath(AUTOMATION_VARIANT),
     };
     doc.profile.behaviors = Array.from(new Set([...(doc.profile.behaviors ?? []), rel]));
-    selectedVariant = AUTOMATION_VARIANT;
+    editingVariant = AUTOMATION_VARIANT;
     showAutomationForm = false;
     markDirty();
   }
@@ -125,7 +125,7 @@
       doc.profile.behaviors = (doc.profile.behaviors ?? []).filter((b) => b !== rel);
       if (doc.profile.behaviors.length === 0) delete doc.profile.behaviors;
     }
-    selectedVariant = MANUAL_VARIANT;
+    editingVariant = MANUAL_VARIANT;
     markDirty();
   }
 
@@ -204,7 +204,7 @@
         <select
           id="variant-select"
           value={variant}
-          onchange={(e: Event) => (selectedVariant = (e.currentTarget as HTMLSelectElement).value)}
+          onchange={(e: Event) => (editingVariant = (e.currentTarget as HTMLSelectElement).value)}
         >
           {#each variants as name (name)}
             <option value={name}>{name}</option>

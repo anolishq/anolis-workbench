@@ -35,6 +35,9 @@
   let showOnboarding = $state<boolean>(false);
   let projectName = $state<string | null>(null);
   let system = $state<ProjectDoc | null>(null);
+  // The variant open in Compose. Only Compose's selector sets it; it is never
+  // written to the project, and dev-launch runs launch.variant instead (#339).
+  let editingVariant = $state<string>("");
   let workspace = $state<WorkspaceName | null>(null);
   let dirty = $state<boolean>(false);
   let currentPath = $state<string>("/");
@@ -133,7 +136,10 @@
     }
 
     const projectChanged = route.project !== projectName;
-    if (projectChanged) dirty = false;
+    if (projectChanged) {
+      dirty = false;
+      editingVariant = "";
+    }
 
     if (projectChanged && route.project) {
       const loaded = await loadProject(route.project);
@@ -368,6 +374,7 @@
       {system}
       {providerSchemas}
       {runtimeStatus}
+      bind:editingVariant
       onDirty={() => {
         dirty = true;
       }}
@@ -379,10 +386,16 @@
     <!-- Remount per project: a preflight result, or one still in flight,
          belongs to the project it ran for and must not gate another's Launch. -->
     {#key projectName}
-      <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
+      <Commission
+        {projectName}
+        {system}
+        {runtimeStatus}
+        {commissionRunningForCurrent}
+        {editingVariant}
+      />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {system} {runtimeStatus} />
+    <Operate {projectName} {system} {runtimeStatus} {editingVariant} />
   {/if}
 </main>
 

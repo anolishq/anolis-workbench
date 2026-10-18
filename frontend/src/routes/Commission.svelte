@@ -15,18 +15,26 @@
     type RuntimeApiStatus,
     type RuntimeStatus,
   } from "../lib/contracts";
-  import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "../lib/canonical";
+  import {
+    activeVariant,
+    inertnessViolation,
+    launchVariantMismatch,
+    MANUAL_VARIANT,
+  } from "../lib/canonical";
 
   let {
     projectName,
     system,
     runtimeStatus,
     commissionRunningForCurrent,
+    editingVariant = "",
   }: {
     projectName: string | null;
     system: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     commissionRunningForCurrent: boolean;
+    /** The variant open in Compose, for the mismatch banner. */
+    editingVariant?: string;
   } = $props();
 
   // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
@@ -41,6 +49,45 @@
 
   /** The HTTP port dev-launch serves on, from the variant it will run. */
   const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
+
+  // The variant dev-launch runs is chosen here, never by Compose's selector
+  // (#339). It lists the variants the document carries, not the profile's.
+  const launchVariants = $derived(Object.keys(system?.variants ?? {}).sort());
+  const launchVariant = $derived(activeVariant(system));
+  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant));
+  let launchVariantSaving = $state<boolean>(false);
+  let launchVariantError = $state<string>("");
+
+  /**
+   * Write launch.variant to the saved project. The PUT carries the saved
+   * document with only that key changed: the in-memory one may hold unsaved
+   * Compose edits, which this must not save on the user's behalf.
+   */
+  async function setLaunchVariant(select: HTMLSelectElement): Promise<void> {
+    const next = select.value;
+    if (!projectName || !system || next === launchVariant) return;
+    launchVariantSaving = true;
+    launchVariantError = "";
+    try {
+      const path = `/api/projects/${encodeURIComponent(projectName)}`;
+      const saved = await fetchJson<ProjectDoc>(path);
+      saved.launch = { ...(saved.launch ?? {}), variant: next };
+      await fetchJson(path, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(saved),
+      });
+      system.launch = { ...(system.launch ?? {}), variant: next };
+      // Preflight checks the variant dev-launch runs, so its result no longer
+      // speaks for the next launch.
+      preflightResults = null;
+    } catch (err) {
+      select.value = launchVariant;
+      launchVariantError = `Could not set the dev-launch variant: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      launchVariantSaving = false;
+    }
+  }
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -671,8 +718,31 @@
     </div>
   {/if}
 
+  {#if variantMismatch && !imported}
+    <div class="workspace-advisory" data-testid="launch-variant-mismatch">{variantMismatch}</div>
+  {/if}
+
   <!-- Launch panel -->
   <div id="launch-panel" class="launch-panel">
+    {#if !imported && system}
+      <div class="form-group">
+        <label for="launch-variant-select">Dev-launch variant</label>
+        <select
+          id="launch-variant-select"
+          value={launchVariant}
+          disabled={launchVariantSaving}
+          onchange={(e: Event) => void setLaunchVariant(e.currentTarget as HTMLSelectElement)}
+        >
+          {#each launchVariants as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+        <span class="field-note"
+          >The variant Launch runs. Compose's variant selector only picks what you edit.</span
+        >
+        {#if launchVariantError}<span class="field-error">{launchVariantError}</span>{/if}
+      </div>
+    {/if}
     {#if imported}
       <div class="workspace-advisory">
         Imported machine profile — carried verbatim; dev-launch and preflight are not available.
