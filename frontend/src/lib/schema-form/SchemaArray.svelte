@@ -3,6 +3,7 @@
   import SchemaField from "./SchemaField.svelte";
   import {
     asObject,
+    authoredProperties,
     defaultsFor,
     descriptionFor,
     enumOptions,
@@ -153,7 +154,7 @@
       <div class="device-row schema-array-row">
         {#if record}
           {@const rowConditionals = resolveConditionals(items, record)}
-          {#each properties(items) as [propKey, propSchema] (propKey)}
+          {#each authoredProperties(items) as [propKey, propSchema] (propKey)}
             {#if !rowConditionals.forbidden.has(propKey)}
               <SchemaField
                 schema={propSchema}
