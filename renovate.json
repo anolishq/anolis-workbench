@@ -4,10 +4,10 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track the release tag each upstream schema lock pins. The PR stays red until scripts/sync-upstream-schema-from-release.py refreshes the lock's sha256s. See anolishq/anolis-workbench#369.",
+      "description": "Track the release tag each upstream schema lock pins. Renovate rewrites the version everywhere inside a match, so the match spans provider_version and the release asset names as well as the tag. The PR stays red until scripts/sync-upstream-schema-from-release.py refreshes the lock's sha256s. See anolishq/anolis-workbench#369.",
       "managerFilePatterns": ["/^contracts/upstream/.+\\.lock\\.json$/"],
       "matchStrings": [
-        "\"repo\":\\s*\"(?<depName>[^\"]+)\",\\s*\\n(?:\\s*\"path\":\\s*\"[^\"]*\",\\s*\\n)?\\s*\"tag\":\\s*\"v(?<currentValue>[^\"]+)\""
+        "(?:\"provider_version\":\\s*\"[^\"]*\",\\s*\\n\\s*\"source\":\\s*\\{\\s*\\n\\s*)?\"repo\":\\s*\"(?<depName>[^\"]+)\",\\s*\\n(?:\\s*\"path\":\\s*\"[^\"]*\",\\s*\\n)?\\s*\"tag\":\\s*\"v(?<currentValue>[^\"]+)\"(?:,\\s*\\n\\s*\"asset\":\\s*\"[^\"]*\",\\s*\\n\\s*\"manifest_asset\":\\s*\"[^\"]*\")?"
       ],
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v?(?<version>.+)$"
