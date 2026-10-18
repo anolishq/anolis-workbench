@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     ApiResponseError,
     downloadBlob,
@@ -51,12 +51,31 @@
   const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
 
   // The variant dev-launch runs is chosen here, never by Compose's selector
-  // (#339). It lists the variants the document carries, not the profile's.
-  const launchVariants = $derived(Object.keys(system?.variants ?? {}).sort());
-  const launchVariant = $derived(activeVariant(system));
-  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant));
+  // (#339). Launch reads the SAVED project, so the control resolves and offers
+  // variants from the saved copy, the set the backend's launch_variant uses.
+  // A variant that exists only in unsaved edits is listed but disabled; a
+  // launch.variant naming a missing variant shows what Launch will really run
+  // and is left in the file as it is.
+  let savedDoc = $state<ProjectDoc | null>(null);
+  const savedVariants = $derived(Object.keys(savedDoc?.variants ?? {}));
+  const launchVariants = $derived(
+    Array.from(new Set([...savedVariants, ...Object.keys(system?.variants ?? {})])).sort(),
+  );
+  const launchVariant = $derived(activeVariant(savedDoc ?? system));
+  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant, launchVariant));
   let launchVariantSaving = $state<boolean>(false);
   let launchVariantError = $state<string>("");
+
+  onMount(() => {
+    if (!projectName || imported) return;
+    fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(projectName)}`)
+      .then((doc) => {
+        savedDoc = doc;
+      })
+      .catch((err) => {
+        launchVariantError = `Could not read the saved project: ${err instanceof Error ? err.message : String(err)}`;
+      });
+  });
 
   /**
    * Write launch.variant to the saved project. The PUT carries the saved
@@ -65,6 +84,10 @@
    */
   async function setLaunchVariant(select: HTMLSelectElement): Promise<void> {
     const next = select.value;
+    if (!savedVariants.includes(next)) {
+      select.value = launchVariant;
+      return;
+    }
     if (!projectName || !system || next === launchVariant) return;
     launchVariantSaving = true;
     launchVariantError = "";
@@ -77,6 +100,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(saved),
       });
+      savedDoc = saved;
       system.launch = { ...(system.launch ?? {}), variant: next };
       // Preflight checks the variant dev-launch runs, so its result no longer
       // speaks for the next launch.
@@ -729,16 +753,21 @@
         <label for="launch-variant-select">Dev-launch variant</label>
         <select
           id="launch-variant-select"
-          value={launchVariant}
-          disabled={launchVariantSaving}
+          disabled={launchVariantSaving || savedDoc === null}
           onchange={(e: Event) => void setLaunchVariant(e.currentTarget as HTMLSelectElement)}
         >
+          <!-- Selection is set per option: the list changes once the saved
+               project loads, and a select-level value set before then is lost. -->
           {#each launchVariants as name (name)}
-            <option value={name}>{name}</option>
+            {@const saved = savedVariants.includes(name)}
+            <option value={name} disabled={!saved} selected={name === launchVariant}
+              >{name}{saved ? "" : " (save in Compose to launch this variant)"}</option
+            >
           {/each}
         </select>
         <span class="field-note"
-          >The variant Launch runs. Compose's variant selector only picks what you edit.</span
+          >The variant Launch runs, from the saved project. Compose's variant selector only picks
+          what you edit.</span
         >
         {#if launchVariantError}<span class="field-error">{launchVariantError}</span>{/if}
       </div>

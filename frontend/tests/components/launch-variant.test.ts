@@ -40,6 +40,24 @@ const PASSING_PREFLIGHT = {
   summary: { passed: 1, skipped: 0, failed: 0 },
 };
 
+/** Serve `saved` as the project on disk; record every request. */
+function serveSaved(saved: ProjectDocument) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = pathFromInput(input);
+    if (path === "/api/projects/demo" && (init?.method ?? "GET") === "GET")
+      return jsonResponse(200, structuredClone(saved));
+    return jsonResponse(200, {});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** The control is enabled once the saved project has loaded. */
+async function loadedLaunchSelect(): Promise<HTMLSelectElement> {
+  await waitFor(() => expect(launchSelect()).toBeEnabled());
+  return launchSelect();
+}
+
 function renderCommission(system: ProjectDocument, editingVariant = "") {
   return render(Commission, {
     props: {
@@ -53,36 +71,58 @@ function renderCommission(system: ProjectDocument, editingVariant = "") {
 }
 
 describe("Commission: the dev-launch variant control (#339)", () => {
-  it("shows launch.variant", () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, {})),
-    );
+  it("shows launch.variant", async () => {
+    serveSaved(twoVariantDoc(AUTOMATION_VARIANT));
     renderCommission(twoVariantDoc(AUTOMATION_VARIANT));
-    expect(launchSelect().value).toBe(AUTOMATION_VARIANT);
+    expect((await loadedLaunchSelect()).value).toBe(AUTOMATION_VARIANT);
   });
 
-  it("shows manual for a project that never wrote launch.variant", () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, {})),
-    );
+  it("shows manual for a project that never wrote launch.variant", async () => {
     const doc = twoVariantDoc();
     // Key order would make "the first variant" automation.
     doc.variants = { automation: doc.variants.automation, manual: doc.variants.manual };
-    renderCommission(doc);
+    serveSaved(doc);
+    renderCommission(structuredClone(doc));
+    expect((await loadedLaunchSelect()).value).toBe("manual");
+  });
+
+  it("does not offer a variant that exists only in unsaved edits", async () => {
+    // automation was added in Compose and not saved yet.
+    const fetchMock = serveSaved(createProjectDocument("demo"));
+    const system = reactive(twoVariantDoc("manual"));
+    renderCommission(system);
+
+    const select = await loadedLaunchSelect();
+    const option = select.querySelector(`option[value="${AUTOMATION_VARIANT}"]`);
+    expect(option === null || (option as HTMLOptionElement).disabled).toBe(true);
+    if (option) expect(option.textContent).toMatch(/save/i);
+
+    await fireEvent.change(select, { target: { value: AUTOMATION_VARIANT } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(putBodies(fetchMock)).toHaveLength(0);
+    expect(system.launch?.variant).toBe("manual");
     expect(launchSelect().value).toBe("manual");
+  });
+
+  it.each([
+    ["a variant only in unsaved edits", AUTOMATION_VARIANT],
+    ["a variant that exists nowhere", "gone"],
+  ])("shows manual when launch.variant names %s, and does not rewrite it", async (_what, named) => {
+    const saved = createProjectDocument("demo");
+    saved.launch = { variant: named };
+    const fetchMock = serveSaved(saved);
+    const system = reactive(twoVariantDoc(named));
+    renderCommission(system);
+
+    expect((await loadedLaunchSelect()).value).toBe("manual");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(putBodies(fetchMock)).toHaveLength(0);
+    expect(system.launch?.variant).toBe(named);
   });
 
   it("writes launch.variant into the saved project, and nothing else from memory", async () => {
     const saved = twoVariantDoc("manual");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = pathFromInput(input);
-      if (path === "/api/projects/demo" && (init?.method ?? "GET") === "GET")
-        return jsonResponse(200, structuredClone(saved));
-      return jsonResponse(200, {});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = serveSaved(saved);
 
     // An unsaved Compose edit is in memory; choosing the launch variant must
     // not save it behind the user's back.
@@ -90,7 +130,7 @@ describe("Commission: the dev-launch variant control (#339)", () => {
     system.variants.manual.logging = { level: "debug" };
     renderCommission(system);
 
-    await fireEvent.change(launchSelect(), { target: { value: AUTOMATION_VARIANT } });
+    await fireEvent.change(await loadedLaunchSelect(), { target: { value: AUTOMATION_VARIANT } });
 
     await waitFor(() => expect(putBodies(fetchMock)).toHaveLength(1));
     const [body] = putBodies(fetchMock);
@@ -116,12 +156,7 @@ describe("the edited/launched mismatch banner (#339)", () => {
           },
         }),
     ],
-  ])("%s shows it only on a mismatch", (_name, renderView) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, {})),
-    );
-
+  ])("%s shows it only on a mismatch", async (_name, renderView) => {
     const cases: Array<[string | undefined, string, boolean]> = [
       ["manual", AUTOMATION_VARIANT, true],
       [undefined, AUTOMATION_VARIANT, true],
@@ -130,7 +165,9 @@ describe("the edited/launched mismatch banner (#339)", () => {
       [AUTOMATION_VARIANT, AUTOMATION_VARIANT, false],
     ];
     for (const [launch, editing, shown] of cases) {
+      serveSaved(twoVariantDoc(launch));
       const { unmount } = renderView(twoVariantDoc(launch), editing);
+      if (_name === "Commission") await loadedLaunchSelect();
       const banner = screen.queryByTestId("launch-variant-mismatch");
       if (shown) expect(banner, `${launch} / ${editing}`).toHaveTextContent(BANNER);
       else expect(banner, `${launch} / ${editing}`).toBeNull();
@@ -141,6 +178,7 @@ describe("the edited/launched mismatch banner (#339)", () => {
   it("does not block Launch or ask for confirmation", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = pathFromInput(input);
+      if (path === "/api/projects/demo") return jsonResponse(200, twoVariantDoc("manual"));
       if (path === "/api/status") return jsonResponse(200, { running: false });
       if (path === "/api/projects/demo/preflight") return jsonResponse(200, PASSING_PREFLIGHT);
       return jsonResponse(200, { ok: true });

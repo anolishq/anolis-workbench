@@ -91,10 +91,14 @@ export function activeVariant(doc: ProjectDocument | null): string {
  * "Editing automation; Launch runs manual" when the variant open in Compose is
  * not the one dev-launch runs, else null. An empty or unknown `editing` means
  * nothing was picked, so Compose is showing the launch variant itself.
+ * `launch` defaults to `doc`'s own; pass the saved project's when it differs.
  */
-export function launchVariantMismatch(doc: ProjectDocument | null, editing: string): string | null {
+export function launchVariantMismatch(
+  doc: ProjectDocument | null,
+  editing: string,
+  launch: string = activeVariant(doc),
+): string | null {
   if (!editing || !doc?.variants?.[editing]) return null;
-  const launch = activeVariant(doc);
   return editing === launch ? null : `Editing ${editing}; Launch runs ${launch}`;
 }
 
