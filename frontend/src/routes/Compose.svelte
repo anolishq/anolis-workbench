@@ -112,6 +112,11 @@
     if (!doc || !doc.variants[AUTOMATION_VARIANT]) return;
     const behaviorRef = doc.variants[AUTOMATION_VARIANT]?.automation?.behavior_tree;
     delete doc.variants[AUTOMATION_VARIANT];
+    // A launch.variant naming the removed variant would come back to life when
+    // the variant is re-added, launching something nobody chose in
+    // Commission. Unset it, which reads as manual. This is removal, not the
+    // variant selector, which still never writes launch.variant (#339).
+    if (doc.launch?.variant === AUTOMATION_VARIANT) delete doc.launch.variant;
     const rest = { ...doc.profile.runtime_profiles };
     delete rest[AUTOMATION_VARIANT];
     doc.profile.runtime_profiles = rest;

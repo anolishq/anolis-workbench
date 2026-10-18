@@ -260,4 +260,61 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
       expect(screen.queryByTestId("launch-variant-mismatch")).not.toBeInTheDocument();
     },
   );
+
+  /** Like stubApi, but the project on disk is what the last PUT stored. */
+  function stubDisk(initial: ProjectDocument) {
+    let disk = structuredClone(initial);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = pathFromInput(input);
+      if (path === "/api/projects/demo" && init?.method === "PUT") {
+        disk = JSON.parse(String(init.body)) as ProjectDocument;
+        return Promise.resolve(jsonResponse(200, {}));
+      }
+      if (path === "/api/projects/demo")
+        return Promise.resolve(jsonResponse(200, structuredClone(disk)));
+      if (path === "/api/projects")
+        return Promise.resolve(jsonResponse(200, [{ name: "demo", meta: {} }]));
+      if (path === "/api/status")
+        return Promise.resolve(jsonResponse(200, { running: false, active_project: null }));
+      if (path === "/api/templates") return Promise.resolve(jsonResponse(200, []));
+      if (path === "/api/provider-schemas")
+        return Promise.resolve(jsonResponse(200, { providers: {} }));
+      return Promise.resolve(jsonResponse(200, {}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return { fetchMock, disk: () => disk };
+  }
+
+  async function tab(name: string): Promise<void> {
+    await fireEvent.click(screen.getByRole("button", { name }));
+  }
+
+  it("removing the launch variant in Compose unsets it, so re-adding it does not relaunch it", async () => {
+    const api = stubDisk(twoVariantDoc("manual"));
+    history.replaceState({}, "", "/projects/demo/commission");
+    render(App);
+
+    // Commission points dev-launch at automation.
+    await waitFor(() => expect(launchSelect()).toBeEnabled());
+    await fireEvent.change(launchSelect(), { target: { value: AUTOMATION_VARIANT } });
+    await waitFor(() => expect(api.disk().launch?.variant).toBe(AUTOMATION_VARIANT));
+
+    // Compose removes automation and saves: Launch runs manual.
+    await tab("Compose");
+    await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.disk().variants.automation).toBeUndefined());
+    expect(api.disk().launch?.variant).toBeUndefined();
+
+    // Compose re-adds automation and saves: nobody chose it in Commission.
+    await fireEvent.click(screen.getByRole("button", { name: "+ Automation variant" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.disk().variants.automation).toBeDefined());
+    expect(api.disk().launch?.variant).toBeUndefined();
+
+    await tab("Commission");
+    await waitFor(() => expect(launchSelect()).toBeEnabled());
+    expect(launchSelect().value).toBe("manual");
+  });
 });
