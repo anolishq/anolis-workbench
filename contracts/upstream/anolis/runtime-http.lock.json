@@ -3,15 +3,15 @@
   "source": {
     "repo": "anolishq/anolis",
     "path": "schemas/http/runtime-http.openapi.v0.yaml",
-    "tag": "v0.1.47"
+    "tag": "v0.1.48"
   },
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "tar-member",
     "release": {
       "repo": "anolishq/anolis",
-      "tag": "v0.1.47",
-      "asset": "anolis-0.1.47-runtime-http-schema.tar.gz",
+      "tag": "v0.1.48",
+      "asset": "anolis-0.1.48-runtime-http-schema.tar.gz",
       "manifest_asset": "runtime-http-schema-manifest.json"
     },
     "schema_sha256": "d38577caa8b4833d21c89bb27a8f59b1747a5874606f988f5ca1aca9bc9da241",
