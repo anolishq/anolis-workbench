@@ -43,6 +43,8 @@ Historical note:
 - Vendored anolis contracts synced to anolis 0.1.49, and the sim-quickstart
   template pins runtime 0.1.49 (#524). The schemas are unchanged; the locks
   record 0.1.49's release asset digests.
+- Vendored bread config-schema envelope synced to anolis-provider-bread
+  0.8.0 (#475); the schema is unchanged, only `provider_version` moves.
 - The desktop wrapper builds against tauri 2.12.5 and tauri-build 2.7.4
   (#529).
 
