@@ -13,6 +13,34 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-21
+
+### Upgrade notes
+
+- **An existing install keeps the certifi it was installed with.** Run
+  `pip install --upgrade pip certifi` in the environment the workbench is
+  installed in. That's `~/.local/share/anolis-workbench/venv/bin/pip` for an
+  install made by anolis-projects' `install-workbench-pi.sh`. A fresh
+  `pip install anolis-workbench` already resolves certifi 2026.10.19 or later.
+  Desktop installers need this release.
+
+### Security
+
+- certifi 2026.10.19 in `uv.lock` (#531), so the frozen server sidecar and
+  the desktop bundles carry it. certifi before 2026.10.19 bundles emSign
+  root CAs whose intermediate CA keys are compromised (the eMudhra
+  incident). requests uses that bundle for every HTTPS call the workbench
+  makes, release downloads included. pip before 26.2.2 also vendors it,
+  hence the pip upgrade above.
+
+### Changed
+
+- Vendored anolis contracts synced to anolis 0.1.49, and the sim-quickstart
+  template pins runtime 0.1.49 (#524). The schemas are unchanged; the locks
+  record 0.1.49's release asset digests.
+- The desktop wrapper builds against tauri 2.12.5 and tauri-build 2.7.4
+  (#529).
+
 ## [0.18.1] - 2026-10-19
 
 ### Fixed
