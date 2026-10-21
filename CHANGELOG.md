@@ -20,9 +20,14 @@ Historical note:
 - **An existing install keeps the certifi it was installed with.** Run
   `pip install --upgrade pip certifi` in the environment the workbench is
   installed in. That's `~/.local/share/anolis-workbench/venv/bin/pip` for an
-  install made by anolis-projects' `install-workbench-pi.sh`. A fresh
-  `pip install anolis-workbench` already resolves certifi 2026.10.19 or later.
-  Desktop installers need this release.
+  install made by anolis-projects' `install-workbench-pi.sh`. For a pipx
+  install: `pipx runpip anolis-workbench install --upgrade pip certifi`. A
+  fresh `pip install anolis-workbench` already resolves certifi 2026.10.19 or
+  later. Desktop installers need this release.
+- **Debian's own trust store needs its update too.** System Python and
+  Debian's `python3-certifi` read `/etc/ssl/certs`, which `ca-certificates`
+  20250419+deb13u1 (DSA-6572-1) fixes on Debian 13:
+  `sudo apt update && sudo apt install --only-upgrade ca-certificates`.
 
 ### Security
 
