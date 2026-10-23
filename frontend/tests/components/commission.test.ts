@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Commission from '../../src/routes/Commission.svelte';
@@ -479,6 +479,21 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(screen.getByText(/checksum mismatch/)).toBeInTheDocument();
   });
 
+  it('warns after a deploy whose install.sh could not be checked against SHA256SUMS', async () => {
+    setup();
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    const warning = 'WARNING: install.sh not verified: anolis v0.1.49 predates install.sh in SHA256SUMS';
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: { runtime_version: '0.1.49', install_sh_warning: warning },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(warning)).toHaveClass('deploy-warning');
+  });
+
   it('does not call a freshly written runtime config kept after a variant switch', async () => {
     setup();
     await fireEvent.click(screen.getByLabelText('This machine'));
@@ -647,9 +662,10 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
 
   it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
     setup();
-    expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();
+    const deployVariant = screen.getByRole('combobox', { name: 'Runtime variant' });
+    expect(within(deployVariant).getByRole('option', { name: 'manual' })).toBeInTheDocument();
     expect(
-      screen.getByRole('option', { name: 'automation (fresh install refuses this)' }),
+      within(deployVariant).getByRole('option', { name: 'automation (fresh install refuses this)' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
   });

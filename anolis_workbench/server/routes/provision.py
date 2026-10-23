@@ -132,6 +132,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: b
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "install_sh_warning": result.install_sh_warning,
                     "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
                     "grafana_access": deploy.grafana_access(result.output),
@@ -197,6 +198,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "install_sh_warning": result.install_sh_warning,
                     "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
                     "grafana_access": deploy.grafana_access(
@@ -346,7 +348,11 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
     import platform
     import tempfile
 
+    warnings: list[str] = []
+
     def _progress(step: str, detail: str = "") -> None:
+        if step == "unverified":
+            warnings.append(detail)
         job.events.append({"stage": step, "detail": detail})
 
     try:
@@ -375,7 +381,7 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.events.append(
             {
                 "stage": "done",
-                "detail": f"Bundle ready: {tarball_path.name}",
+                "detail": ". ".join([f"Bundle ready: {tarball_path.name}", *warnings]),
                 "filename": tarball_path.name,
             }
         )

@@ -3,6 +3,7 @@
   import SchemaField from "./SchemaField.svelte";
   import {
     asObject,
+    authoredProperties,
     defaultsFor,
     descriptionFor,
     enumOptions,
@@ -28,6 +29,7 @@
     schema,
     key,
     required,
+    requiredReason = null,
     parent,
     onChanged,
     i2cImport = null,
@@ -35,6 +37,8 @@
     schema: SchemaNode;
     key: string;
     required: boolean;
+    /** Why `required` holds when a schema conditional made it so. */
+    requiredReason?: string | null;
     parent: UnknownRecord;
     onChanged: () => void;
     i2cImport: (() => unknown[] | null) | null;
@@ -141,6 +145,7 @@
   {#if description}<span class="field-note">{description}</span>{/if}
   {#if required && (!value || value.length === 0)}
     <span class="field-error">Required — add at least one entry.</span>
+    {#if requiredReason}<span class="field-note">{requiredReason}</span>{/if}
   {/if}
 
   {#if objectMode && items}
@@ -149,12 +154,13 @@
       <div class="device-row schema-array-row">
         {#if record}
           {@const rowConditionals = resolveConditionals(items, record)}
-          {#each properties(items) as [propKey, propSchema] (propKey)}
+          {#each authoredProperties(items) as [propKey, propSchema] (propKey)}
             {#if !rowConditionals.forbidden.has(propKey)}
               <SchemaField
                 schema={propSchema}
                 key={propKey}
                 required={rowConditionals.required.has(propKey)}
+                requiredReason={rowConditionals.reasons.get(propKey) ?? null}
                 parent={record}
                 {onChanged}
                 i2cImport={null}

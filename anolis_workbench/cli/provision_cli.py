@@ -13,6 +13,11 @@ from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 if TYPE_CHECKING:
     from anolis_workbench.core import fleet as fleet_module
 
+# Prints the runtime's API token as an Authorization header, for curl to read
+# on stdin (-H @-) so the token never reaches a command line. The same form
+# the runtime's own docs give; the summaries only ever print this command.
+_TOKEN_HEADER_CMD = "sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env"
+
 
 def _name_arg(value: str) -> str:
     """--project and --template name directories under the workspace and
@@ -313,6 +318,7 @@ def _print_progress(step: str, detail: str = "") -> None:
         "skip_all": "✓ ",
         "install": "📥",
         "verify": "🔎",
+        "unverified": "⚠️ ",
         "project": "📁",
         "systemd": "⚙️ ",
         "health": "💓",
@@ -400,6 +406,31 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_install_sh_warning(warning: str | None) -> None:
+    """Repeat, below the summary, that install.sh ran without a SHA256SUMS
+    line to check it against (#530); the progress line has scrolled by."""
+    if warning:
+        print(f"\n{warning}", file=sys.stderr)
+
+
+def _print_preserved(result: deploy.DeployResult) -> None:
+    """install.sh's lines for configs it found on the target and left in
+    place. A kept runtime.yaml is not replaced by this project's, and can still
+    start the providers on another project's configs (anolishq/anolis#439), so
+    without this the summary hides what the runtime will actually run."""
+    if not result.preserved:
+        return
+    print()
+    print("  Kept on the target (install.sh):")
+    for line in result.preserved:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in result.preserved):
+        print(
+            "\nWARNING: config: install.sh kept a config this project does not replace — see the lines above",
+            file=sys.stderr,
+        )
+
+
 def _print_health(result: deploy.DeployResult) -> None:
     """install.sh's health lines. A provider that is not running is a
     warning and install.sh still exits 0, so without this the summary hides
@@ -483,6 +514,7 @@ def _run_install(args: argparse.Namespace) -> int:
         return 1
 
     # Workbench systemd service (appliance mode, if requested and not dry-run)
+    workbench_installed = False
     if getattr(args, "workbench_service", False) and not args.dry_run:
         from anolis_workbench.core import workbench_service
 
@@ -497,6 +529,7 @@ def _run_install(args: argparse.Namespace) -> int:
             )
             return 1
         _print_progress("systemd", "Workbench service enabled and started")
+        workbench_installed = True
 
     # Print summary
     print()
@@ -508,14 +541,23 @@ def _run_install(args: argparse.Namespace) -> int:
         print()
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
+        _print_install_sh_warning(result.install_sh_warning)
         _print_host_followups(result)
+        _print_preserved(result)
         _print_health(result)
         if _wants_observability(args):
             _print_observability(result)
         print()
         print("Next steps:")
         print("  systemctl status anolis-runtime")
-        print("  curl http://127.0.0.1:8080/v0/status   # runtime API")
+        print("  # runtime API; the token goes to curl on stdin, never in argv:")
+        print(f"  {_TOKEN_HEADER_CMD} \\")
+        print("    | curl -s -H @- http://127.0.0.1:8080/v0/runtime/status")
+        if workbench_installed:
+            from anolis_workbench.core.appliance import tunnel_hint
+
+            print()
+            print(tunnel_hint())
     print("─" * 60)
     return 0
 
@@ -670,7 +712,9 @@ def _run_remote(args: argparse.Namespace) -> int:
     print()
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
+    _print_install_sh_warning(result.install_sh_warning)
     _print_host_followups(result)
+    _print_preserved(result)
     _print_health(result)
     if _wants_observability(args):
         _print_observability(
@@ -682,7 +726,9 @@ def _run_remote(args: argparse.Namespace) -> int:
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")
-    print(f"  curl http://{host}:8080/v0/status   # runtime API")
+    print("  # runtime API; the token goes to curl on stdin, never in argv:")
+    print(f'  ssh {user}@{host} "{_TOKEN_HEADER_CMD}" \\')
+    print(f"    | curl -s -H @- http://{host}:8080/v0/runtime/status")
     print("─" * 60)
     return 0
 
@@ -821,6 +867,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
     for line in result.output.strip().splitlines()[-6:]:
         print(f"  {line}")
     print("─" * 60)
+    _print_install_sh_warning(result.warning)
     return 0
 
 
@@ -880,9 +927,11 @@ def _run_update(args: argparse.Namespace) -> int:
             print(f"\n  {result.error}")
         else:
             print(f"\n  ✅ Updated to v{result.version}")
+        _print_install_sh_warning(result.warning)
         return 0
     else:
         print(f"\n  ❌ Update failed: {result.error}", file=sys.stderr)
+        _print_install_sh_warning(result.warning)
         return 1
 
 

@@ -4,6 +4,7 @@
   import SchemaFieldSelf from "./SchemaField.svelte";
   import {
     asObject,
+    authoredProperties,
     descriptionFor,
     fieldControl,
     isArraySchema,
@@ -11,7 +12,6 @@
     labelFor,
     parseI2c,
     placeholderFor,
-    properties,
     resolveConditionals,
     validateField,
     type SchemaNode,
@@ -26,16 +26,22 @@
     schema,
     key,
     required,
+    requiredReason = null,
     parent,
     onChanged,
     i2cImport = null,
+    derivedFields = {},
   }: {
     schema: SchemaNode;
     key: string;
     required: boolean;
+    /** Why `required` holds when a schema conditional made it so. */
+    requiredReason?: string | null;
     parent: UnknownRecord;
     onChanged: () => void;
     i2cImport: (() => unknown[] | null) | null;
+    /** Dotted paths, relative to `parent`, rendered read-only with their note. */
+    derivedFields?: Record<string, string>;
   } = $props();
 
   const label = $derived(labelFor(key, schema));
@@ -44,7 +50,17 @@
   const isArray = $derived(isArraySchema(schema));
   const control = $derived(fieldControl(schema));
   const value = $derived(parent[key]);
+  const derivedNote = $derived(derivedFields[key] ?? null);
+  const childDerived = $derived(
+    Object.fromEntries(
+      Object.entries(derivedFields)
+        .filter(([path]) => path.startsWith(`${key}.`))
+        .map(([path, note]) => [path.slice(key.length + 1), note]),
+    ),
+  );
+  const childProperties = $derived(isObject ? authoredProperties(schema) : []);
   const error = $derived(!isObject && !isArray ? validateField(schema, value, required) : null);
+  const reason = $derived(error === "Required" ? requiredReason : null);
 
   // Nested object sections whose container doesn't exist yet render into a
   // local draft; the draft is committed to the document on the first child
@@ -105,31 +121,39 @@
 </script>
 
 {#if isArray}
-  <SchemaArray {schema} {key} {required} {parent} {onChanged} {i2cImport} />
-{:else if isObject}
+  <SchemaArray {schema} {key} {required} {requiredReason} {parent} {onChanged} {i2cImport} />
+{:else if isObject && childProperties.length > 0}
   <fieldset class="schema-object">
     <legend>{label}</legend>
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if childRecord && childConditionals}
-      {#each properties(schema) as [childKey, childSchema] (childKey)}
+      {#each childProperties as [childKey, childSchema] (childKey)}
         {#if !childConditionals.forbidden.has(childKey)}
           <SchemaFieldSelf
             schema={childSchema}
             key={childKey}
             required={childConditionals.required.has(childKey)}
+            requiredReason={childConditionals.reasons.get(childKey) ?? null}
             parent={childRecord}
             onChanged={childChanged}
             {i2cImport}
+            derivedFields={childDerived}
           />
         {/if}
       {/each}
     {/if}
   </fieldset>
-{:else if control.control === "readonly"}
+{:else if isObject}
+  <!-- Nothing to author: every declared property is const. -->
+{:else if derivedNote !== null}
   <div class="form-group">
     <label>{label}</label>
-    <input type="text" value={String(control.value)} disabled />
-    {#if description}<span class="field-note">{description}</span>{/if}
+    <input
+      type="text"
+      value={value === undefined || value === null ? "" : String(value)}
+      readonly
+    />
+    <span class="field-note">{derivedNote}</span>
   </div>
 {:else if control.control === "select"}
   <div class="form-group">
@@ -149,6 +173,7 @@
     </select>
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "checkbox"}
   <div class="form-group form-group-inline">
@@ -178,6 +203,7 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "i2c"}
   <div class="form-group">
@@ -195,6 +221,7 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else}
   <div class="form-group">
@@ -210,5 +237,6 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {/if}

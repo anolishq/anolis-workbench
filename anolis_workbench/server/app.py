@@ -16,7 +16,7 @@ from typing import cast
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core import provider_schemas
-from anolis_workbench.core.appliance import default_host, default_open_browser
+from anolis_workbench.core.appliance import DEFAULT_PORT, default_host, default_open_browser, tunnel_hint
 from anolis_workbench.server import request_origin
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
@@ -68,7 +68,7 @@ def resolve_config(
     """
     return ServerConfig(
         host=host if host is not None else (os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()),
-        port=port if port is not None else _env_int("ANOLIS_WORKBENCH_PORT", 3010),
+        port=port if port is not None else _env_int("ANOLIS_WORKBENCH_PORT", DEFAULT_PORT),
         open_browser=(
             open_browser
             if open_browser is not None
@@ -360,6 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "success": result.success,
                 "version": result.version,
                 "error": result.error,
+                "warning": result.warning,
             },
         )
 
@@ -374,6 +375,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "success": result.success,
                 "output": result.output,
                 "error": result.error,
+                "warning": result.warning,
             },
         )
 
@@ -397,6 +399,18 @@ class _WorkbenchServer(ThreadingHTTPServer):
     config: ServerConfig
 
 
+def startup_messages(config: ServerConfig) -> list[str]:
+    """What the server prints on start. A headless loopback server (the
+    systemd service, appliance mode) also says how to tunnel to it."""
+    lines = [f"Anolis Workbench is running at http://{config.host}:{config.port}"]
+    if config.host in ("0.0.0.0", "::"):
+        lines.append(f"On this machine, open http://127.0.0.1:{config.port}")
+    lines.append("Close this window to stop.")
+    if config.host in ("127.0.0.1", "localhost", "::1") and not config.open_browser:
+        lines.append(tunnel_hint(config.port))
+    return lines
+
+
 def main(
     host: str | None = None,
     port: int | None = None,
@@ -408,13 +422,14 @@ def main(
     server = _WorkbenchServer((config.host, config.port), _Handler)
     server.config = config
     url = f"http://{config.host}:{config.port}"
-    print(f"Anolis Workbench is running at {url}")
     # A wildcard bind is reached from this machine on loopback, the only
     # origin that offers the sudo password field; 0.0.0.0 is not one.
     if config.host in ("0.0.0.0", "::"):
         url = f"http://127.0.0.1:{config.port}"
-        print(f"On this machine, open {url}")
-    print("Close this window to stop.")
+    # flush: under systemd stdout is a pipe to journald, block-buffered, and
+    # a stop by SIGTERM would discard the buffer and these lines with it.
+    for line in startup_messages(config):
+        print(line, flush=True)
     if config.open_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
     try:

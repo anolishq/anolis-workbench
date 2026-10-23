@@ -13,6 +13,164 @@ Historical note:
 
 ## [Unreleased]
 
+### Security
+
+- `anolis-provision` and the workbench check a downloaded `install.sh`
+  against the `SHA256SUMS` of its release before running it, for install,
+  remote, bundle, rollback and self-update (#530). A mismatch stops the run,
+  and so does a `SHA256SUMS` that cannot be fetched for any reason but a
+  404. A release that has no `SHA256SUMS`, or no line for `install.sh`,
+  still runs, with `WARNING: install.sh not verified: anolis v<x> predates
+  install.sh in SHA256SUMS` in the CLI and in the UI. That covers every
+  anolis release through v0.1.49; #533 turns the warning into a refusal.
+
+## [0.18.2] - 2026-10-21
+
+### Upgrade notes
+
+- **An existing install keeps the certifi it was installed with.** Run
+  `pip install --upgrade pip certifi` in the environment the workbench is
+  installed in. That's `~/.local/share/anolis-workbench/venv/bin/pip` for an
+  install made by anolis-projects' `install-workbench-pi.sh`. For a pipx
+  install: `pipx runpip anolis-workbench install --upgrade pip certifi`. A
+  fresh `pip install anolis-workbench` already resolves certifi 2026.10.19 or
+  later. Desktop installers need this release.
+- **Debian's own trust store needs its update too.** System Python and
+  Debian's `python3-certifi` read `/etc/ssl/certs`, which `ca-certificates`
+  20250419+deb13u1 (DSA-6572-1) fixes on Debian 13:
+  `sudo apt update && sudo apt install --only-upgrade ca-certificates`.
+
+### Security
+
+- certifi 2026.10.19 in `uv.lock` (#531), so the frozen server sidecar and
+  the desktop bundles carry it. certifi before 2026.10.19 bundles emSign
+  root CAs whose intermediate CA keys are compromised (the eMudhra
+  incident). requests uses that bundle for every HTTPS call the workbench
+  makes, release downloads included. pip before 26.2.2 also vendors it,
+  hence the pip upgrade above.
+
+### Changed
+
+- Vendored anolis contracts synced to anolis 0.1.49, and the sim-quickstart
+  template pins runtime 0.1.49 (#524). The schemas are unchanged; the locks
+  record 0.1.49's release asset digests.
+- Vendored bread config-schema envelope synced to anolis-provider-bread
+  0.8.0 (#475); the schema is unchanged, only `provider_version` moves.
+- The desktop wrapper builds against tauri 2.12.5 and tauri-build 2.7.4
+  (#529).
+
+## [0.18.1] - 2026-10-19
+
+### Fixed
+
+- `anolis-provision install` and `anolis-provision remote` list the
+  configs `install.sh` found on the target and kept, under "Kept on the
+  target (install.sh):", in the summary (#521, closes
+  anolishq/anolis#439). When one of those lines is a warning, such as
+  anolis 0.1.49's warning that a kept `runtime.yaml` points a provider at
+  another project's config, a `WARNING:` line on stderr points at them.
+
+### Changed
+
+- Vendored contracts synced to anolis 0.1.48 (#518). The runtime-http
+  description now says loopback clients need the API token unless
+  `http.auth_exempt_loopback` is true. The sim-quickstart template pins
+  runtime 0.1.48.
+
+## [0.18.0] - 2026-10-18
+
+### Upgrade notes
+
+- The workbench now listens on `127.0.0.1` in Raspberry Pi appliance mode
+  and under the `--workbench-service` systemd unit, as it already did
+  elsewhere. Reach it from another machine with
+  `ssh -L 3010:127.0.0.1:3010 <user>@<host>`, which the server and the
+  install now print. An explicit `ANOLIS_WORKBENCH_HOST` still sets the
+  bind address.
+- Re-run `anolis-provision install --workbench-service` to rewrite an
+  installed unit and to give the service its copy of the runtime's API
+  token.
+- Install this release, and re-run `install --workbench-service`, before
+  upgrading the runtime to anolis 0.1.48. That runtime requires its API
+  token on loopback, and an older workbench sends none, so Operate would
+  get 401.
+
+### Security
+
+- No default serves the workbench beyond loopback. Appliance mode on a
+  Raspberry Pi and the `--workbench-service` unit previously bound
+  `0.0.0.0`, which let anyone who could reach the port use every page,
+  Operate included, with no login.
+- `--workbench-service` gives the service the installed runtime's API
+  token, and nothing else from the runtime's environment file. The install
+  copies it into `/etc/anolis/workbench-runtime-token`, a `0600` file owned
+  by the service's user, written atomically; it never appears in the unit,
+  a command line or the output, and uninstalling the service removes it.
+  Operate sends it only to a runtime on this machine (loopback,
+  `localhost`, or `0.0.0.0`/`::`), never to an
+  `ANOLIS_WORKBENCH_RUNTIME_URL` override or another host a project's
+  `http.bind` names, and an explicit `ANOLIS_WORKBENCH_RUNTIME_TOKEN` still
+  wins. Without a runtime token there is no copy and Operate sends none.
+- Operate refuses a project whose runtime `http.bind` is not a bare IP
+  address or hostname, such as one carrying userinfo, a path or a port.
+- Processes the workbench starts (a dev-launched runtime, preflight checks,
+  `install.sh`, ssh) no longer get `ANOLIS_WORKBENCH_RUNTIME_TOKEN` in their
+  environment. This is defence in depth only: a program the workbench
+  launches runs as the service's user and can read the token copy.
+- Reaching the workbench means being able to run programs as the service's
+  user, since a project's host paths name the executables Launch starts.
+  Treat access to the workbench as access to that account.
+
+### Added
+
+- Commission has a "Dev-launch variant" control that shows and sets which
+  runtime variant Launch runs (#513, closes #339). Compose's variant
+  selector now only picks what is being edited and is never saved. When
+  the two differ, Commission and Operate show a banner such as "Editing
+  automation; Launch runs manual"; Launch is not blocked. A variant that
+  exists only in unsaved Compose edits is listed but cannot be chosen
+  until it is saved, and removing a variant in Compose unsets a launch
+  variant that named it.
+
+### Changed
+
+- Vendored contracts synced to anolis 0.1.47 and anolis-provider-sim
+  0.2.8 (#511, #512). The runtime-http `/v0/events` description lists
+  `device_removed` and no longer lists `provider_health_change`; the sim
+  envelope changes only its `provider_version`.
+- The sim-quickstart template pins runtime 0.1.47 and sim 0.2.8, both
+  under `components` and in its `compatibility` entry (#511, #512), so a
+  new quickstart project carries no version-skew warning.
+- The install summaries' runtime API hint reads the token from
+  `/etc/anolis/runtime.env` and passes it to `curl -H @-` on stdin, so it
+  never reaches a command line, and points at `/v0/runtime/status`.
+
+### Fixed
+
+- Compose shows `provider.name` read-only, following the provider ID, and
+  no longer renders `const` properties as disabled inputs (#507, part of
+  #339). The const values are still written and still validate.
+- A field that a schema conditional makes required shows why beside the
+  required error, from the schema's own titles, for example "Required
+  because Discovery mode is 'Manual address list'" (#508, closes #485).
+- The "declared in the machine-profile but run by no runtime variant"
+  warning is derived when a project is read instead of stored in the
+  sidecar, so it clears once fixed (#505, closes #290). A stale copy in an
+  existing sidecar is no longer served and is dropped on the next save.
+- Discovery of a runtime the workbench did not start counts a `401` from
+  its token-less probe as a runtime answering, so a runtime that requires
+  its token on loopback is still found.
+- Under the systemd unit, the server's startup lines, the tunnel hint
+  among them, reach the journal (`PYTHONUNBUFFERED=1` and an explicit
+  flush).
+
+### CI
+
+- Renovate's lock manager now moves each lock's release asset names and a
+  provider lock's `provider_version` along with its tag, and the template
+  manager tracks the sim-quickstart template's sim pins as well as its
+  runtime pin (#515).
+
 ## [0.17.1] - 2026-10-17
 
 ### Upgrade notes
