@@ -379,6 +379,36 @@ export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
 }
 
 /**
+ * The Runtime Status badge, from machine state (wb#557). `status.code` is the
+ * response envelope: it says the status request succeeded, so it decides only
+ * between loaded and UNAVAILABLE, never whether the machine is OK.
+ */
+export function summarizeRuntimeHealth(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  startup: StartupSafeStateStatus | null,
+): {
+  label: "OK" | "ATTENTION" | "UNAVAILABLE";
+  cls: "ok" | "fault" | "unavailable";
+  reasons: string[];
+} {
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return { label: "UNAVAILABLE", cls: "unavailable", reasons: [] };
+  }
+  const reasons: string[] = [];
+  if (estop?.latched) reasons.push("software stop latched");
+  if (startup && !summarizeStartupSafeState(startup).ok) {
+    reasons.push("startup safe state not achieved");
+  }
+  for (const p of status.providers) {
+    if (p.state !== "AVAILABLE") reasons.push(`provider ${p.provider_id} ${p.state}`);
+  }
+  return reasons.length > 0
+    ? { label: "ATTENTION", cls: "fault", reasons }
+    : { label: "OK", cls: "ok", reasons };
+}
+
+/**
  * Format a `POST /v0/estop` response (EstopResponse) into operator-facing text.
  * `ok` is false whenever the operator should not trust that the machine is safe
  * (an action failed, the latch did not engage, or a FAULT transition failed).

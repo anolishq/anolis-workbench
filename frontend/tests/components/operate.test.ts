@@ -361,3 +361,44 @@ describe("Operate.svelte — another project's runtime is running (#264)", () =>
     expect(screen.queryByRole('button', { name: 'Software stop: demo' })).not.toBeInTheDocument();
   });
 });
+
+describe('Operate.svelte — the Runtime Status badge (#557)', () => {
+  const ESTOP = { software_safe_state: 'hooks', uncovered_actuating_functions: 0 };
+
+  it('reads OK when the request succeeded and nothing needs attention', async () => {
+    renderOperate(status(ESTOP));
+
+    expect(await screen.findByTestId('runtime-health')).toHaveTextContent('OK');
+  });
+
+  it('does not read OK while the software stop is latched', async () => {
+    renderOperate(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }));
+
+    await waitFor(() => expect(screen.getByTestId('runtime-health')).toHaveTextContent('ATTENTION'));
+    expect(screen.getByText('software stop latched.')).toBeInTheDocument();
+  });
+
+  it('does not read OK when the startup safe state failed', async () => {
+    renderOperate(
+      status(ESTOP, '0.1.51', {
+        startup_safe_state: {
+          on_startup: 'safe_state',
+          ran: true,
+          software_safe_state: 'hooks',
+          safe_state_achieved: false,
+          failed_actions: [
+            {
+              device_handle: 'bread0/dcmt0',
+              function: 'set_mode',
+              success: false,
+              error: 'SET command refused: WATCHDOG_TRIP',
+            },
+          ],
+        },
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByTestId('runtime-health')).toHaveTextContent('ATTENTION'));
+    expect(screen.getByText('startup safe state not achieved.')).toBeInTheDocument();
+  });
+});
