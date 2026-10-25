@@ -258,6 +258,9 @@
       modeBadgeClass = "unknown";
       return;
     }
+    // Operate stopped (or unmounted) while this poll was in flight: opening the
+    // event stream now would leave one that nothing closes (wb#551).
+    if (pollTimer === null) return;
     const avail = deriveOperateAvailability(status, projectName);
     if (!avail.available) {
       mode = "--";
@@ -348,22 +351,25 @@
     if (!selectedKey || !devices.length) return;
     const dev = getSelectedDevice();
     if (!dev) return;
+    // File each reply under the device it was requested for: the selection can
+    // change while these requests are in flight (wb#552).
+    const key = selectedKey;
     try {
       const vp = await fetchJson<UnknownRecord>(
         `/v0/state/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}`,
       );
-      deviceStates = { ...deviceStates, [selectedKey]: extractDeviceStateValues(vp) };
+      deviceStates = { ...deviceStates, [key]: extractDeviceStateValues(vp) };
     } catch {
-      deviceStates = { ...deviceStates, [selectedKey]: [] };
+      deviceStates = { ...deviceStates, [key]: [] };
     }
-    if (!capabilities[selectedKey]) {
+    if (!capabilities[key]) {
       try {
         const cp = await fetchJson<UnknownRecord>(
           `/v0/devices/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}/capabilities`,
         );
-        capabilities = { ...capabilities, [selectedKey]: extractCapabilities(cp) };
+        capabilities = { ...capabilities, [key]: extractCapabilities(cp) };
       } catch {
-        capabilities = { ...capabilities, [selectedKey]: { functions: [], signals: [] } };
+        capabilities = { ...capabilities, [key]: { functions: [], signals: [] } };
       }
     }
   }
