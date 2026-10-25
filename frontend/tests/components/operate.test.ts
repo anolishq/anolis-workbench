@@ -362,7 +362,6 @@ describe("Operate.svelte — another project's runtime is running (#264)", () =>
   });
 });
 
-
 describe('Operate.svelte — switching devices with a request in flight (#552)', () => {
   const DEVICES = {
     devices: [
@@ -419,4 +418,63 @@ describe('Operate.svelte — switching devices with a request in flight (#552)',
       expect(screen.queryByText('set_brake')).not.toBeInTheDocument();
     },
   );
+});
+
+describe('Operate.svelte — the /v0/events stream across mounts (#551)', () => {
+  class CountingEventSource {
+    static instances: CountingEventSource[] = [];
+    url: string;
+    closed = false;
+    onopen: ((event: Event) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    constructor(url: string) {
+      this.url = url;
+      CountingEventSource.instances.push(this);
+    }
+    addEventListener(): void {}
+    close(): void {
+      this.closed = true;
+    }
+  }
+
+  const open = () => CountingEventSource.instances.filter((s) => !s.closed).length;
+
+  it('leaves no stream open when it unmounts during a status poll', async () => {
+    CountingEventSource.instances = [];
+    vi.stubGlobal('EventSource', CountingEventSource as unknown as typeof EventSource);
+    const polls: ReturnType<typeof deferred<Response>>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (pathFromInput(input) === '/api/status') {
+          const poll = deferred<Response>();
+          polls.push(poll);
+          return poll.promise;
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+
+    for (let mount = 0; mount < 3; mount += 1) {
+      const view = render(Operate, {
+        props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING },
+      });
+      await waitFor(() => expect(polls.length).toBe(mount + 1));
+      view.unmount();
+      polls[mount].resolve(jsonResponse(200, RUNNING));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(CountingEventSource.instances.length).toBeGreaterThan(0);
+    expect(open()).toBe(0);
+
+    render(Operate, {
+      props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING },
+    });
+    await waitFor(() => expect(polls.length).toBe(4));
+    polls[3].resolve(jsonResponse(200, RUNNING));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(open()).toBe(1);
+  });
 });
