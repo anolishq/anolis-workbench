@@ -174,6 +174,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
     polling_interval_ms: toFinite(r.polling_interval_ms) ?? 0,
     device_count: toFinite(r.device_count) ?? 0,
     providers: asArray(r.providers) as RuntimeApiStatus["providers"],
+    device_loss_latched: asArray(r.device_loss_latched).map(String),
   };
 }
 
@@ -403,6 +404,7 @@ export function summarizeRuntimeHealth(
   for (const p of status.providers) {
     if (p.state !== "AVAILABLE") reasons.push(`provider ${p.provider_id} ${p.state}`);
   }
+  for (const handle of status.device_loss_latched) reasons.push(`device ${handle} lost (latched)`);
   return reasons.length > 0
     ? { label: "ATTENTION", cls: "fault", reasons }
     : { label: "OK", cls: "ok", reasons };

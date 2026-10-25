@@ -168,6 +168,7 @@ describe("operate-contracts extractors", () => {
       polling_interval_ms: 0,
       device_count: 0,
       providers: [],
+      device_loss_latched: [],
     });
 
     expect(
@@ -684,6 +685,20 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
     const h = summarizeRuntimeHealth(loaded(), estop(false), startup(false));
     expect(h.label).toBe("ATTENTION");
     expect(h.reasons).toEqual(["startup safe state not achieved"]);
+  });
+
+  it("names each device latched after going unreachable", () => {
+    const status = extractRuntimeStatus({
+      status: { code: "OK" },
+      providers: [],
+      device_loss_latched: ["bread0/dcmt0", "bread0/rlht0"],
+    });
+    const h = summarizeRuntimeHealth(status, estop(false), null);
+    expect(h.label).toBe("ATTENTION");
+    expect(h.reasons).toEqual([
+      "device bread0/dcmt0 lost (latched)",
+      "device bread0/rlht0 lost (latched)",
+    ]);
   });
 
   it("names each provider that is not AVAILABLE", () => {
