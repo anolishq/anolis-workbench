@@ -44,6 +44,7 @@
     renderBtOutline,
     RUNTIME_MODES,
     summarizeEstopResponse,
+    summarizeRuntimeHealth,
     summarizeStartupSafeState,
     versionAtLeast,
   } from "../lib/operate-contracts";
@@ -383,22 +384,25 @@
     if (!selectedKey || !devices.length) return;
     const dev = getSelectedDevice();
     if (!dev) return;
+    // File each reply under the device it was requested for: the selection can
+    // change while these requests are in flight (wb#552).
+    const key = selectedKey;
     try {
       const vp = await fetchJson<UnknownRecord>(
         `/v0/state/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}`,
       );
-      deviceStates = { ...deviceStates, [selectedKey]: extractDeviceStateValues(vp) };
+      deviceStates = { ...deviceStates, [key]: extractDeviceStateValues(vp) };
     } catch {
-      deviceStates = { ...deviceStates, [selectedKey]: [] };
+      deviceStates = { ...deviceStates, [key]: [] };
     }
-    if (!capabilities[selectedKey]) {
+    if (!capabilities[key]) {
       try {
         const cp = await fetchJson<UnknownRecord>(
           `/v0/devices/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}/capabilities`,
         );
-        capabilities = { ...capabilities, [selectedKey]: extractCapabilities(cp) };
+        capabilities = { ...capabilities, [key]: extractCapabilities(cp) };
       } catch {
-        capabilities = { ...capabilities, [selectedKey]: { functions: [], signals: [] } };
+        capabilities = { ...capabilities, [key]: { functions: [], signals: [] } };
       }
     }
   }
@@ -1050,15 +1054,11 @@
     <div class="operate-section">
       <h3>Runtime Status</h3>
       {#if runtimeStatusData}
-        <span
-          class="badge {String(runtimeStatusData.status?.code || '').toUpperCase() === 'OK'
-            ? 'ok'
-            : 'unavailable'}"
-        >
-          {String(runtimeStatusData.status?.code || "").toUpperCase() === "OK"
-            ? "OK"
-            : "UNAVAILABLE"}
-        </span>
+        {@const health = summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState)}
+        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
+        {#if health.reasons.length > 0}
+          <span class="operate-meta">{health.reasons.join("; ")}.</span>
+        {/if}
         <span class="operate-meta">
           Mode {runtimeStatusData.mode} | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
           | Uptime {runtimeStatusData.uptime_seconds}s
