@@ -1498,6 +1498,12 @@ body {
 .estop-row .estop-disclaimer {
   margin: 0 0 0 auto;
 }
+/* Its detail opens leftward: the disclaimer ends the row, so a panel
+   anchored on its left would run off the right edge. */
+.estop-row .estop-disclaimer .info-panel {
+  left: auto;
+  right: 0;
+}
 .btn-estop {
   padding: 12px 28px;
   border: 2px solid #7f1d1d;
