@@ -298,13 +298,15 @@
 
   // ── UI event handlers ─────────────────────────────────────────────────────
   function onProjectSelect(event: Event): void {
-    const selected = String((event.currentTarget as HTMLSelectElement).value ?? "");
-    if (!selected) {
-      void navigateTo("/");
-      return;
-    }
+    const select = event.currentTarget as HTMLSelectElement;
+    const selected = String(select.value ?? "");
     const ws = workspace || "compose";
-    void navigateTo(`/projects/${encodeURIComponent(selected)}/${ws}`);
+    const path = selected ? `/projects/${encodeURIComponent(selected)}/${ws}` : "/";
+    // A refused switch ("Stay Here") keeps the current project, so put the
+    // selector back on it rather than leave it naming the other (#562).
+    void navigateTo(path).then((ok) => {
+      if (!ok) select.value = projectName ?? "";
+    });
   }
 
   function onTabClick(ws: WorkspaceName): void {
@@ -344,6 +346,9 @@
         class="tab-btn"
         class:active={workspace === ws && Boolean(projectName)}
         disabled={!projectName}
+        title={projectName
+          ? undefined
+          : `Open a project to use ${ws.charAt(0).toUpperCase() + ws.slice(1)}.`}
         onclick={() => onTabClick(ws)}>{ws.charAt(0).toUpperCase() + ws.slice(1)}</button
       >
     {/each}
