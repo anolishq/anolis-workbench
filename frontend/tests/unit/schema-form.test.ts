@@ -344,3 +344,22 @@ describe("pruneForbidden", () => {
     expect(pruneForbidden(bread, "text")).toBe(false);
   });
 });
+
+describe("duplicate messages use the notation entered (#563)", () => {
+  it("names a duplicate address as typed, not in decimal", () => {
+    const config = { discovery: { mode: "manual", addresses: ["0x13", "0x13"] } };
+    const messages = uniqueViolations(bread, config).map((v) => v.message);
+    expect(messages).toEqual(['Duplicate value "0x13" — values must be unique']);
+  });
+
+  it("names a duplicate device address as typed", () => {
+    const config = {
+      devices: [
+        { id: "a", type: "rlht", address: "0x0A" },
+        { id: "b", type: "dcmt", address: 10 },
+      ],
+    };
+    const messages = uniqueViolations(bread, config).map((v) => v.message);
+    expect(messages).toContain('Duplicate address "0x0A" — address must be unique');
+  });
+});
