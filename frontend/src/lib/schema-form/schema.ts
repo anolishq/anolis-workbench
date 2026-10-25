@@ -438,23 +438,26 @@ export function pruneForbidden(
 
   let changed = false;
   const { forbidden } = resolveConditionals(schema, record);
-  const aside = stash?.get(record);
+  // One stash object per record, so a switch that forbids several keys keeps
+  // them all. Only keys set aside by an earlier call are restored below.
+  let aside = stash?.get(record);
+  if (stash && !aside) {
+    aside = {};
+    stash.set(record, aside);
+  }
+  const setAsideEarlier = aside ? Object.keys(aside) : [];
   for (const key of forbidden) {
     if (record[key] !== undefined) {
-      if (stash) {
-        const kept = aside ?? {};
-        kept[key] = record[key];
-        stash.set(record, kept);
-      }
+      if (aside) aside[key] = record[key];
       delete record[key];
       changed = true;
     }
   }
   if (aside) {
-    for (const [key, kept] of Object.entries(aside)) {
+    for (const key of setAsideEarlier) {
       if (forbidden.has(key)) continue;
       if (record[key] === undefined) {
-        record[key] = kept;
+        record[key] = aside[key];
         changed = true;
       }
       delete aside[key];
