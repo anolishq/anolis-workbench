@@ -289,13 +289,15 @@
 
   // ── UI event handlers ─────────────────────────────────────────────────────
   function onProjectSelect(event: Event): void {
-    const selected = String((event.currentTarget as HTMLSelectElement).value ?? "");
-    if (!selected) {
-      void navigateTo("/");
-      return;
-    }
+    const select = event.currentTarget as HTMLSelectElement;
+    const selected = String(select.value ?? "");
     const ws = workspace || "compose";
-    void navigateTo(`/projects/${encodeURIComponent(selected)}/${ws}`);
+    const path = selected ? `/projects/${encodeURIComponent(selected)}/${ws}` : "/";
+    // A refused switch ("Stay Here") keeps the current project, so put the
+    // selector back on it rather than leave it naming the other (#562).
+    void navigateTo(path).then((ok) => {
+      if (!ok) select.value = projectName ?? "";
+    });
   }
 
   function onTabClick(ws: WorkspaceName): void {
@@ -375,20 +377,24 @@
       {onProjectsRefreshed}
     />
   {:else if workspace === "compose"}
-    <Compose
-      {projectName}
-      {system}
-      {providerSchemas}
-      {runtimeStatus}
-      bind:editingVariant
-      onDirty={() => {
-        dirty = true;
-      }}
-      onSaved={() => {
-        dirty = false;
-        saved = savedLaunch(system);
-      }}
-    />
+    <!-- Remount per project: a failed save's errors belong to the project
+         they were reported for (wb#561). -->
+    {#key projectName}
+      <Compose
+        {projectName}
+        {system}
+        {providerSchemas}
+        {runtimeStatus}
+        bind:editingVariant
+        onDirty={() => {
+          dirty = true;
+        }}
+        onSaved={() => {
+          dirty = false;
+          saved = savedLaunch(system);
+        }}
+      />
+    {/key}
   {:else if workspace === "commission"}
     <!-- Remount per project: a preflight result, or one still in flight,
          belongs to the project it ran for and must not gate another's Launch. -->
