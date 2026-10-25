@@ -576,12 +576,30 @@ def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pat
 # ---------------------------------------------------------------------------
 
 
+class LaunchValidationError(RuntimeError):
+    """The project fails the blocking validation preflight runs (#414)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("Project failed validation; nothing was started.")
+        self.errors = errors
+
+
 def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     """Start the anolis-runtime subprocess."""
 
     current = _current_runtime_snapshot(clean_stale=True)
     if current["running"]:
         raise RuntimeError("A system is already running.")
+
+    # The same blocking validation as preflight's "System-level validation":
+    # requiring a passing preflight is enforced only in the Commission UI, so
+    # a direct launch request must not start a project preflight would refuse
+    # (#414). Preflight's binary checks stay in preflight.
+    from anolis_workbench.core import canonical_validator  # local import, as in preflight
+
+    errors = canonical_validator.validate_project(system)
+    if errors:
+        raise LaunchValidationError(errors)
 
     # Project the canonical variant into a runnable host config.
     launch_config = str(materialize_launch_config(project_dir, system))
