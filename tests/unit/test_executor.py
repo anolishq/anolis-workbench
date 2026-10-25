@@ -344,6 +344,11 @@ class TestRuntimeVersionPath:
         with pytest.raises(ValueError, match="not in the executor allowlist"):
             LocalExecutor().run(["/opt/anolis/bin/anolis-runtime", "--version"])
 
-    def test_a_relative_prefix_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="must be absolute"):
-            LocalExecutor().allow_runtime_version("opt/anolis")
+    @pytest.mark.parametrize(
+        "prefix", ["opt/anolis", "/opt/../tmp", "/opt/anolis/.."], ids=["relative", "dotdot", "trailing-dotdot"]
+    )
+    def test_a_relative_or_dotdot_prefix_is_refused(self, prefix: str) -> None:
+        executor = LocalExecutor()
+        with pytest.raises(ValueError, match="must be absolute, with no '..'"):
+            executor.allow_runtime_version(prefix)
+        assert executor._allowed_paths == frozenset()

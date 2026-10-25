@@ -99,9 +99,10 @@ class Executor(ABC):
         executor; that path with any other arguments is still refused. Deploy
         measures the installed runtime this way before install.sh runs
         (#567). Returns the path."""
-        path = (PurePosixPath(prefix) / "bin" / "anolis-runtime").as_posix()
-        if not path.startswith("/"):
-            raise ValueError(f"install prefix must be absolute: {prefix}")
+        posix_prefix = PurePosixPath(prefix)
+        if not posix_prefix.is_absolute() or ".." in posix_prefix.parts:
+            raise ValueError(f"install prefix must be absolute, with no '..': {prefix}")
+        path = (posix_prefix / "bin" / "anolis-runtime").as_posix()
         self._allowed_paths = self._allowed_paths | {path}
         return path
 
