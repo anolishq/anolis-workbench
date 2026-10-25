@@ -51,6 +51,9 @@ Historical note:
 
 - The vendored bread config schema is 0.9.0's, which adds
   `devices[].encoders` (anolishq/anolis-provider-bread#179, #609).
+- The vendored anolis contract locks are 0.1.52's, and the
+  sim-quickstart template pins runtime 0.1.52 (#610). The runtime
+  config, machine-profile and HTTP schemas are unchanged from 0.1.51.
 - The deploy result's startup safe-state line follows install.sh's
   format from anolis 0.1.52 on: the achieved line names the rung, as in
   `(hooks)`, and a run that did not happen is a `→` skip line
