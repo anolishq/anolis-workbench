@@ -501,3 +501,53 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
     expect(onNavigate).toHaveBeenCalledWith('/projects/demo/operate');
   });
 });
+
+describe('Operate.svelte — the software stop never disappears (#553)', () => {
+  it('offers the stop before status answers, and shows the latch from its reply', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (init?.method === 'POST' && path === '/v0/estop')
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        if (path === '/v0/runtime/status') return new Promise<Response>(() => {});
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+
+    expect(screen.getByText("Software safe-state: loading the runtime's status…")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+    expect(await screen.findByText('SAFE-STATE ENGAGED — actuation latched')).toBeInTheDocument();
+  });
+
+  it("drops another project's latch once its runtime reports it cleared, keeping the stop throughout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const runtime = { latched: true };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (pathFromInput(input) === '/v0/runtime/status')
+          return status({
+            software_safe_state: 'zero',
+            uncovered_actuating_functions: 0,
+            latched: runtime.latched,
+            latched_at_epoch_ms: runtime.latched ? 1 : null,
+          });
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'other', system: createProjectDocument('other'), runtimeStatus: RUNNING } });
+
+    expect(await screen.findByTestId('other-project-latch')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Software stop: demo' })).toBeInTheDocument();
+
+    runtime.latched = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await waitFor(() => expect(screen.queryByTestId('other-project-latch')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Software stop: demo' })).toBeInTheDocument();
+  });
+});
