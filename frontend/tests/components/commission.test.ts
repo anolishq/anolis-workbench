@@ -864,7 +864,7 @@ describe('Commission.svelte — the target check (#567)', () => {
     ]);
   });
 
-    it('reports a target it could not read', async () => {
+  it('reports a target it could not read', async () => {
     setup({ status: 422, body: { error: '/opt/anolis/bin/anolis-runtime on the target reports no version' } });
     await check();
     expect(
