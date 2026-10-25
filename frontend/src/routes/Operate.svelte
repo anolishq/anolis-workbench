@@ -59,12 +59,15 @@
     runtimeStatus,
     editingVariant = "",
     saved = null,
+    onNavigate = undefined,
   }: {
     projectName: string | null;
     system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     /** The variant open in Compose, for the mismatch banner. */
     editingVariant?: string;
+    /** Opens a workbench route, e.g. the running project's Operate view. */
+    onNavigate?: (path: string) => void;
     /** The saved project's launch state, shared with Commission. */
     saved?: SavedLaunch | null;
   } = $props();
@@ -170,6 +173,19 @@
 
   // The advisory's stop label depends on whether /v0 goes to an override.
   void loadWorkbenchConfig();
+
+  // On another project's page Operate does not poll, so read that runtime's
+  // latch once per running project to show it there (wb#553).
+  $effect(() => {
+    if (available || !running || !runningProject) return;
+    const target = runningProject;
+    estop = null;
+    void fetchJson<UnknownRecord>("/v0/runtime/status")
+      .then((p) => {
+        if (!available && runningProject === target) estop = extractEstopStatus(p);
+      })
+      .catch(() => {});
+  });
 
   // The "confirm clear" arm is scoped to a single latched episode: any time the
   // latch is not engaged (cleared here, by another client, or before a fresh
@@ -424,7 +440,11 @@
       const summary = summarizeEstopResponse(res);
       estopFeedback = summary.text;
       estopFeedbackClass = summary.ok ? "field-note" : "field-error";
-      await refreshEstopOnly();
+      // Show the latch the reply reports now; the status read after it only
+      // fills in the latch time (wb#553).
+      if (res.latched === true && estop) estop = { ...estop, latched: true };
+      estopRunning = false;
+      void refreshEstopOnly();
     } catch (err) {
       estopFeedback = `Failed to engage software stop: ${err instanceof Error ? err.message : String(err)}. If the machine is not safe, use the hardware e-stop now.`;
       estopFeedbackClass = "field-error";
@@ -451,8 +471,11 @@
       } else {
         estopFeedback = "Latch cleared. Actuation re-enabled.";
         estopFeedbackClass = "field-note";
+        if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
       }
-      await refreshEstopOnly();
+      clearRunning = false;
+      clearArmed = false;
+      void refreshEstopOnly();
     } catch (err) {
       estopFeedback = `Failed to clear latch: ${err instanceof Error ? err.message : String(err)}`;
       estopFeedbackClass = "field-error";
@@ -802,15 +825,33 @@
         <!-- The /v0 proxy targets the running project's runtime, so its stop
              stays reachable here (#264). Clearing the latch belongs to that
              project's own Operate view. -->
-        <div class="estop-row">
-          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
-            {estopRunning
-              ? "ENGAGING…"
-              : workbenchConfig?.runtime_url_override
-                ? "Software stop: configured runtime URL"
-                : `Software stop: ${runningProject}`}
-          </button>
-        </div>
+        {#if estop?.latched}
+          <div class="estop-latched-banner" data-testid="other-project-latch">
+            <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+            <span class="estop-latched-meta">
+              Latched at {formatEpochMs(estop.latched_at_epoch_ms)} on the runtime running "{runningProject}".
+              Clear it from
+              <a
+                href={`/projects/${encodeURIComponent(runningProject)}/operate`}
+                onclick={(e: MouseEvent) => {
+                  if (!onNavigate) return;
+                  e.preventDefault();
+                  onNavigate(`/projects/${encodeURIComponent(runningProject)}/operate`);
+                }}>{runningProject}'s Operate view</a
+              >.
+            </span>
+          </div>
+        {:else}
+          <div class="estop-row">
+            <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+              {estopRunning
+                ? "ENGAGING…"
+                : workbenchConfig?.runtime_url_override
+                  ? "Software stop: configured runtime URL"
+                  : `Software stop: ${runningProject}`}
+            </button>
+          </div>
+        {/if}
         <div class="estop-disclaimer">
           Not an emergency stop. For any physical hazard use the hardware emergency stop.
         </div>
