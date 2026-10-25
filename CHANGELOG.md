@@ -41,6 +41,10 @@ Historical note:
   replies arrive, instead of showing "Stopped", "No projects yet", "No
   devices found" or "No callable functions declared" (#568, #598).
 
+### Changed
+
+- Dependencies: CI's setup-python action digest 6d4fd22 (#602).
+
 ## [0.19.1] - 2026-10-24
 
 ### Fixed
