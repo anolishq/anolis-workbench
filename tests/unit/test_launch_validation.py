@@ -74,3 +74,54 @@ def test_launch_endpoint_answers_422_with_the_errors(
     assert handler.body is not None
     assert any("not inert" in e for e in handler.body["errors"]), handler.body
     assert no_spawn == []
+
+
+@pytest.fixture()
+def running_rig(monkeypatch: pytest.MonkeyPatch, canonical_document) -> dict[str, Any]:
+    """`rig` is running, launched while valid; its saved project is now invalid."""
+    state: dict[str, Any] = {"stopped": 0, "spawned": []}
+    monkeypatch.setattr(
+        launcher, "_current_runtime_snapshot", lambda clean_stale=False: {"running": True, "project": "rig"}
+    )
+
+    def _stop() -> None:
+        state["stopped"] += 1
+
+    def _popen(*args: Any, **kwargs: Any) -> None:
+        state["spawned"].append(args)
+        pytest.fail("restart started the runtime")
+
+    monkeypatch.setattr(launcher, "stop", _stop)
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
+    monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
+    document = _non_inert(canonical_document())
+    from anolis_workbench.core import projects as projects_module
+
+    monkeypatch.setattr(projects_module, "get_project", lambda name: document)
+    return state
+
+
+def test_restart_refuses_an_invalid_saved_project_and_leaves_the_runtime_running(
+    running_rig: dict[str, Any], tmp_path: pathlib.Path
+) -> None:
+    with pytest.raises(launcher.LaunchValidationError) as raised:
+        launcher.restart("rig", tmp_path)
+
+    assert any("not inert" in e for e in raised.value.errors), raised.value.errors
+    assert running_rig["stopped"] == 0
+    assert running_rig["spawned"] == []
+
+
+def test_restart_endpoint_answers_422_with_the_errors(
+    running_rig: dict[str, Any], tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commission.projects_module, "is_authored", lambda name: True)
+    monkeypatch.setattr(commission.projects_module, "project_dir", lambda name: tmp_path)
+    handler = _Handler()
+
+    commission.restart_project(handler, "rig")
+
+    assert handler.status == 422
+    assert handler.body is not None
+    assert any("not inert" in e for e in handler.body["errors"]), handler.body
+    assert running_rig["stopped"] == 0

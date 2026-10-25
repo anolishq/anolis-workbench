@@ -120,6 +120,8 @@ def restart_project(handler, name: str) -> None:
     try:
         launcher_module.restart(name, project_dir)
         handler._json(200, {"ok": True})
+    except launcher_module.LaunchValidationError as exc:
+        handler._json(422, {"error": str(exc), "errors": exc.errors})
     except RuntimeError as exc:
         handler._json(409, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001 - HTTP boundary
