@@ -43,6 +43,16 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    # Playwright's image carries the browsers and the system packages they
+    # need, so the smoke test no longer waits on `playwright install
+    # --with-deps`, whose apt downloads from the Ubuntu archive ran past this
+    # job's timeout (#544). Its version must be @playwright/test's in
+    # frontend/package-lock.json: tests/unit/test_ci_playwright_image.py
+    # checks it, and Renovate moves both in one PR. --user 1001 is the
+    # runner's uid, which Firefox needs to own HOME.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-resolute@sha256:d89d0e4a7058330a8334306a5aef1e00807863d31af27cf11348eed696d6e0ba
+      options: --user 1001
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -79,10 +89,6 @@ jobs:
 
       - name: Report bundle size
         run: npm run bundle:size
-        working-directory: frontend
-
-      - name: Install Playwright browser
-        run: npm run smoke:install
         working-directory: frontend
 
       - name: Browser smoke test
