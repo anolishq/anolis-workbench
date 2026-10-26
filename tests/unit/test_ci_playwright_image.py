@@ -20,7 +20,8 @@ IMAGE = re.compile(r"^mcr\.microsoft\.com/playwright:v(?P<version>[0-9.]+)-[a-z]
 
 def _frontend_job() -> dict:
     workflow = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    return workflow["jobs"]["frontend"]
+    job: dict = workflow["jobs"]["frontend"]
+    return job
 
 
 def test_frontend_job_runs_in_a_digest_pinned_playwright_image() -> None:
