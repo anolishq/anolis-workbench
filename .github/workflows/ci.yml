@@ -320,9 +320,25 @@ jobs:
         with:
           workspaces: desktop/src-tauri
 
+      # These packages come from the same Ubuntu archive whose downloads ran
+      # past the job's timeout (#544). Keep the .debs apt fetched between
+      # runs: apt reuses each one whose version still matches and downloads
+      # only the rest. Saved right after the install, so a later failing step
+      # does not lose it; an older cache still seeds a changed workflow.
+      - name: Restore Tauri .deb cache
+        id: tauri-debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/tauri-debs
+          key: tauri-debs-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: tauri-debs-${{ runner.os }}-
+
       - name: Install Linux Tauri dependencies
         run: |
           set -euo pipefail
+          mkdir -p ~/tauri-debs
+          echo "cached .debs: $(find ~/tauri-debs -name '*.deb' | wc -l)"
+          find ~/tauri-debs -name '*.deb' -exec sudo cp -t /var/cache/apt/archives/ {} +
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
@@ -330,6 +346,14 @@ jobs:
             librsvg2-dev \
             libayatana-appindicator3-dev \
             patchelf
+          find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp -t ~/tauri-debs/ {} +
+
+      - name: Save Tauri .deb cache
+        if: steps.tauri-debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/tauri-debs
+          key: tauri-debs-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
 
       # tauri-build's build script validates that every `externalBin`
       # (the frozen Python sidecar) exists for the host target triple, even
