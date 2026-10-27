@@ -157,6 +157,34 @@ class TestObservabilityFlag:
         assert "GRAFANA_ADMIN_PASSWORD" not in out
         assert "WARNING" in err and "observability" in err
 
+    def test_install_shows_a_refusal_s_recovery_lines_the_verify_line_and_the_log(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        """#649: anolis 0.1.55's refusal is one ✗ line and log_info lines; all
+        of it reaches the summary, with the checksum result and the full log."""
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+
+        output = (self._FIXTURES / "credentials-gone.txt").read_text(encoding="utf-8")
+        result = deploy.DeployResult(
+            project_name="p",
+            runtime_version="0.1.55",
+            prefix="/opt/anolis",
+            output=output,
+            log_path="/home/op/.anolis/logs/install-p-20261027T020000Z.log",
+        )
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install", "--with-observability"])
+        assert provision_cli._run_install(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "    ✓ verify: all checksums pass" in out
+        assert "credentials are gone" in out
+        assert "      sudo -H influx auth create --org anolis --write-bucket" in out
+        assert "re-run this install." in out
+        assert "install.sh output: /home/op/.anolis/logs/install-p-20261027T020000Z.log" in out
+        assert "WARNING" in err and "observability" in err
+
     def test_remote_surfaces_the_grafana_lines(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         from anolis_workbench.cli import provision_cli
         from anolis_workbench.core import deploy
@@ -421,6 +449,29 @@ def test_missing_template_error_points_at_import(tmp_path, monkeypatch) -> None:
     systems_root.mkdir()
     with pytest.raises(FileNotFoundError, match="import the machine's own"):
         installer.provision_project("bioreactor-manual", "p", tmp_path / "prefix", systems_root=systems_root)
+
+
+def test_install_from_system_twice_needs_no_force_and_says_so(tmp_path, monkeypatch, capsys) -> None:
+    """#650: the second `install --system` for a provisioned project updates it
+    in place and says so, rather than stopping for --force."""
+    import shutil
+
+    from anolis_workbench.cli import provision_cli
+
+    systems_root = tmp_path / "systems"
+    systems_root.mkdir()
+    monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems_root)
+    monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems_root)
+    source = tmp_path / "clone"
+    shutil.copytree(pathlib.Path(__file__).parent.parent / "fixtures" / "mixed-bus-mock", source)
+    argv = ["anolis-provision", "install", "--system", str(source), "--project", "rig"]
+
+    monkeypatch.setattr(sys, "argv", argv)
+    first = provision_cli._provision_workspace(provision_cli._parse_args())
+    monkeypatch.setattr(sys, "argv", argv)
+    assert provision_cli._provision_workspace(provision_cli._parse_args()) == first
+
+    assert f"Workspace project rig is up to date with {source}" in capsys.readouterr().out
 
 
 _UNVERIFIED = "WARNING: install.sh not verified: anolis v0.1.48 predates install.sh in SHA256SUMS"

@@ -66,7 +66,8 @@ def _parse_args() -> argparse.Namespace:
     install_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing workspace project.",
+        help="Overwrite an existing workspace project, local edits included. Without it, --system updates "
+        "a project that has no local edits.",
     )
     install_parser.add_argument(
         "--variant",
@@ -200,7 +201,8 @@ def _parse_args() -> argparse.Namespace:
     remote_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing local workspace project.",
+        help="Overwrite an existing local workspace project, local edits included. Without it, --system "
+        "updates a project that has no local edits.",
     )
     remote_parser.add_argument(
         "--allow-unmet-host",
@@ -401,6 +403,7 @@ def _provision_workspace(args: argparse.Namespace) -> Path:
         args.install_prefix,
         force=force,
         system_path=system_path,
+        report=lambda line: _print_progress("project", line),
     )
 
 
@@ -445,6 +448,15 @@ def _print_preserved(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_verify_and_log(result: deploy.DeployResult) -> None:
+    """install.sh's checksum result for the bundle, and where its whole output
+    was kept: the summary shows only parts of it (#649)."""
+    for line in deploy.verify_lines(result.output):
+        print(f"    {line}")
+    if result.log_path:
+        print(f"  install.sh output: {result.log_path}")
+
+
 def _print_health(result: deploy.DeployResult) -> None:
     """install.sh's health lines. A provider that is not running is a
     warning and install.sh still exits 0, so without this the summary hides
@@ -483,7 +495,7 @@ def _print_observability(
         print("  Reaching Grafana:")
         for line in access:
             print(f"    {line}")
-    if any(line.startswith("⚠") for line in lines):
+    if any(line.startswith(("⚠", "✗")) for line in lines):
         print("\nWARNING: observability: install.sh reported a problem — see the lines above", file=sys.stderr)
 
 
@@ -558,6 +570,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_install_sh_warning(result.install_sh_warning)
+        _print_verify_and_log(result)
         _print_host_followups(result)
         _print_preserved(result)
         _print_health(result)
@@ -731,6 +744,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_install_sh_warning(result.install_sh_warning)
+    _print_verify_and_log(result)
     _print_host_followups(result)
     _print_preserved(result)
     _print_health(result)
