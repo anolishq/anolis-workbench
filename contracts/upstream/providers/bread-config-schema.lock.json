@@ -20,8 +20,8 @@
       "asset": "anolis-provider-bread-0.9.3-config-schema.json",
       "manifest_asset": "anolis-provider-bread-0.9.3-config-schema-manifest.json"
     },
-    "schema_sha256": "10dffdfafb23a824ff667df9197b11c0a0224fce10e161d7917d55e22a7878cf",
-    "asset_sha256": "10dffdfafb23a824ff667df9197b11c0a0224fce10e161d7917d55e22a7878cf"
+    "schema_sha256": "0da6b99d2987303ba044264ba87776160d59366078c4169a2333a55e4da72a67",
+    "asset_sha256": "0da6b99d2987303ba044264ba87776160d59366078c4169a2333a55e4da72a67"
   },
-  "synced_at_utc": "2026-10-26T22:37:00Z"
+  "synced_at_utc": "2026-10-27T16:37:24Z"
 }
