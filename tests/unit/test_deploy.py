@@ -1491,3 +1491,82 @@ def test_a_rejected_sudo_password_is_not_reported_as_an_install_failure(
     assert message.startswith("sudo rejected the password")
     assert "install.sh failed" not in message
     assert "pw-7f3c" not in message
+
+
+# ---------------------------------------------------------------------------
+# #649: the whole observability block, the verify line, and the full log
+# ---------------------------------------------------------------------------
+# credentials-gone.txt is real install.sh output, put together from three
+# captures: anolis v0.1.55's phase_verify over a bundle, its _obs_setup_influx
+# on an instance set up with no recorded tokens (with /etc/anolis in place of
+# the temp tree it ran in), and offline.txt's health line and summary.
+
+_CREDENTIALS_GONE_BLOCK = [
+    "→ observability: influxdb already set up — bucket/tokens left alone",
+    "✗ observability: influxdb is already set up, but its credentials are gone "
+    "(no tokens in /etc/anolis/observability.env) — Grafana not provisioned",
+    "  An uninstall by an earlier install.sh deleted them and kept the instance. To recover,",
+    "  mint two tokens as root, with the admin token that 'influx setup' left in root's influx CLI config:",
+    "    id=$(sudo -H influx bucket list --name anolis --hide-headers | cut -f1)",
+    '    sudo -H influx auth create --org anolis --write-bucket "${id}" '
+    "--description 'anolis-runtime telemetry write'",
+    "    sudo -H influx auth create --org anolis --read-bucket \"${id}\" --description 'anolis grafana/export read'",
+    "  then write them to /etc/anolis/observability.env (0600 root) as INFLUXDB_WRITE_TOKEN=... and",
+    "  INFLUXDB_READ_TOKEN=..., and re-run this install.",
+]
+
+
+def test_observability_lines_carry_a_refusal_s_whole_block() -> None:
+    """A warning or error keeps every indented line after it: the refusal's
+    log_info lines are indented two spaces, like a summary line (#649)."""
+    assert deploy.observability_lines(_install_sh_output("credentials-gone")) == [
+        *_CREDENTIALS_GONE_BLOCK,
+        "  Grafana bind unchanged: the observability step did not finish (see the warnings above)",
+        "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
+    ]
+
+
+def test_verify_lines_show_the_checksum_result() -> None:
+    assert deploy.verify_lines(_install_sh_output("credentials-gone")) == ["✓ verify: all checksums pass"]
+    assert deploy.verify_lines(_install_sh_output("pi-loopback")) == []
+
+
+class _OutputExecutor(RecordingExecutor):
+    """RecordingExecutor whose install.sh prints `stdout`."""
+
+    def __init__(self, stdout: str, returncode: int = 0) -> None:
+        super().__init__(returncode=returncode)
+        self.stdout = stdout
+
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
+        super().run(cmd, input=input, sudo=sudo, timeout=timeout)
+        return RunResult(returncode=self.returncode, stdout=self.stdout, stderr="")
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+def test_deploy_keeps_install_sh_s_whole_output_in_a_log(
+    remote: bool, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, _install_log_dir: pathlib.Path
+) -> None:
+    _stub_fetch(monkeypatch)
+    output = _install_sh_output("credentials-gone")
+    deploy_fn = deploy.deploy_remote if remote else deploy.deploy_local
+    result = deploy_fn(project_dir=project_dir, project_name="deploy-fixture", executor=_OutputExecutor(output))
+    assert result.log_path is not None
+    log = pathlib.Path(result.log_path)
+    assert log.parent == _install_log_dir
+    assert "deploy-fixture" in log.name
+    assert log.read_text(encoding="utf-8") == output
+
+
+def test_a_failed_install_names_its_log(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, _install_log_dir: pathlib.Path
+) -> None:
+    _stub_fetch(monkeypatch)
+    output = _install_sh_output("credentials-gone")
+    with pytest.raises(deploy.DeployError) as raised:
+        deploy.deploy_local(
+            project_dir=project_dir, project_name="deploy-fixture", executor=_OutputExecutor(output, returncode=1)
+        )
+    (log,) = list(_install_log_dir.iterdir())
+    assert f"Full install.sh output: {log}" in str(raised.value)
+    assert log.read_text(encoding="utf-8") == output
