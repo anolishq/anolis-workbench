@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import pathlib
 import shutil
+import subprocess
+import sys
+from typing import Any
 
 import pytest
 import yaml
@@ -115,3 +118,42 @@ def test_a_reprovision_keeps_the_latch_and_the_run_journal(rig: dict) -> None:
     assert latch.read_text(encoding="utf-8") == '{"latched":true}\n'
     assert journal.read_text(encoding="utf-8") == '{"run_id":"mixed-rig-1"}\n'
     assert pathlib.Path(_launch_runtime_section(project_dir)["data_dir"]) == data_dir
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="stands in a /bin/sh stub for the runtime")
+def test_a_restart_rewrites_a_launch_file_from_before_the_pin(rig: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A workbench upgraded to this release restarts a runtime the old one
+    # launched: the launch file on disk has no data_dir.
+    project_dir = _provision(rig)
+    target = launcher.materialize_launch_config(project_dir, canonical.read_project(project_dir))
+    old = yaml.safe_load(target.read_text(encoding="utf-8"))
+    del old["runtime"]["data_dir"]
+    target.write_text(yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
+
+    runtime_bin = rig["prefix"] / "bin" / "anolis-runtime"
+    runtime_bin.parent.mkdir(parents=True, exist_ok=True)
+    runtime_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    runtime_bin.chmod(0o755)
+    spawned: list[Any] = []
+
+    def _popen(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+        spawned.append(cmd)
+        proc = subprocess.CompletedProcess(cmd, 0, b"", b"")
+        proc.pid = 4242  # type: ignore[attr-defined]
+        return proc
+
+    monkeypatch.setattr(
+        launcher, "_current_runtime_snapshot", lambda clean_stale=False: {"running": True, "project": "mixed-rig"}
+    )
+    monkeypatch.setattr(launcher, "stop", lambda: None)
+    monkeypatch.setattr(launcher.time, "sleep", lambda s: None)
+    monkeypatch.setattr(launcher.threading, "Thread", lambda *a, **k: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(launcher, "_state", dict(launcher._state, log_lines_by_project={}))
+    monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
+
+    launcher.restart("mixed-rig", project_dir)
+
+    assert spawned and spawned[0][-1] == str(target)
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["runtime"]["data_dir"] == str(
+        rig["data_root"] / "anolis-data"
+    )
