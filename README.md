@@ -127,8 +127,9 @@ with `install.sh --local`, or deploy online with `anolis-provision
 install|remote`. The roles and both paths are in
 `docs/commissioning-handoff-runbook.md`.
 
-`anolis-provision install --variant <key>` installs that runtime variant, a
-key of the project's `runtime_profiles`, as Deploy does; without it,
+`anolis-provision install --variant <key>` (and `remote --variant <key>`)
+installs that runtime variant, a key of the project's `runtime_profiles`, as
+Deploy does; without it,
 `install.sh` installs `manual`. An unknown key fails before anything is
 installed. A target that already has a runtime config keeps it, and
 `install.sh` says the variant was not applied. A bundle carries every variant:

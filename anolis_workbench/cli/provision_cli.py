@@ -225,6 +225,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Install and configure the telemetry export service.",
     )
+    remote_parser.add_argument(
+        "--variant",
+        default=None,
+        metavar="KEY",
+        help="Runtime variant to install, a key of the project's runtime_profiles (install.sh --variant). "
+        "Default: install.sh's, manual. An unknown key fails before anything is pushed or installed.",
+    )
 
     # --- fleet subcommand (pass 9) ---
     fleet_parser = subparsers.add_parser(
@@ -665,6 +672,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  Project:  {_resolve_names(args)[0]}")
     print(f"  Template: {_resolve_names(args)[1]}")
     print(f"  Prefix:   {args.install_prefix}")
+    print(f"  Variant:  {args.variant or 'manual (install.sh default)'}")
     print(f"  Session:  {session_id}")
     print()
 
@@ -707,6 +715,7 @@ def _run_remote(args: argparse.Namespace) -> int:
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),
             with_observability=_wants_observability(args),
+            variant=args.variant,
             allow_unmet_host=args.allow_unmet_host,
             progress_callback=_print_progress,
         )
