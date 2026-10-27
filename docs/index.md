@@ -47,7 +47,7 @@ Deployment always goes through the runtime's `install.sh`; see
 ## Command line
 
 | Command | Use |
-|---|---|
+| --- | --- |
 | `anolis-workbench` | Start the workbench server |
 | `anolis-provision` | Install on this machine (`install`), over SSH (`remote`), to several hosts (`fleet`), or build an offline bundle (`bundle`); also `rollback`, `update` and `check-update` |
 | `anolis-package` | Build a handoff package from a project |
