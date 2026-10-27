@@ -943,6 +943,21 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
             if match is not None:
                 automation["behavior_tree"] = str((project_dir / match.group(2) / match.group(3)).resolve())
 
+    # The runtime resolves a default or relative runtime.data_dir against the
+    # config file's directory (anolishq/anolis#562), which is inside the
+    # project, and a re-provision replaces the project directory. Name the
+    # directory a launch has always used, since the runtime starts in
+    # DATA_ROOT, so the e-stop latch and the run journal stay where they are.
+    runtime_section = projected.get("runtime")
+    if not isinstance(runtime_section, dict):
+        runtime_section = {}
+        projected = {"runtime": runtime_section, **{k: v for k, v in projected.items() if k != "runtime"}}
+    data_dir = runtime_section.get("data_dir")
+    if not data_dir:
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / "anolis-data")
+    elif not pathlib.Path(str(data_dir)).is_absolute():
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / str(data_dir))
+
     out = project_dir / canonical.LAUNCH_DIR / "launch"
     out.mkdir(parents=True, exist_ok=True)
     target = out / canonical.variant_filename(launch_variant(document))

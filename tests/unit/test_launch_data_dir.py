@@ -22,7 +22,8 @@ from anolis_workbench.core import canonical, installer, launcher
 
 def _launch_runtime_section(project_dir: pathlib.Path) -> dict:
     target = launcher.materialize_launch_config(project_dir, canonical.read_project(project_dir))
-    return yaml.safe_load(target.read_text(encoding="utf-8"))["runtime"]
+    runtime: dict = yaml.safe_load(target.read_text(encoding="utf-8"))["runtime"]
+    return runtime
 
 
 @pytest.fixture
@@ -77,6 +78,16 @@ def test_an_absolute_data_dir_is_kept(rig: dict, tmp_path: pathlib.Path) -> None
     _set_data_dir(project_dir, str(tmp_path / "elsewhere"))
 
     assert _launch_runtime_section(project_dir)["data_dir"] == str(tmp_path / "elsewhere")
+
+
+def test_an_empty_runtime_block_gets_the_data_dir(rig: dict) -> None:
+    project_dir = _provision(rig)
+    variant = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    doc = yaml.safe_load(variant.read_text(encoding="utf-8"))
+    doc["runtime"] = None
+    variant.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+
+    assert _launch_runtime_section(project_dir) == {"data_dir": str(rig["data_root"] / "anolis-data")}
 
 
 def test_the_canonical_variant_is_not_given_the_data_dir(rig: dict) -> None:
