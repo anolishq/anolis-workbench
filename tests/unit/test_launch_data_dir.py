@@ -157,3 +157,21 @@ def test_a_restart_rewrites_a_launch_file_from_before_the_pin(rig: dict, monkeyp
     assert yaml.safe_load(target.read_text(encoding="utf-8"))["runtime"]["data_dir"] == str(
         rig["data_root"] / "anolis-data"
     )
+
+
+def test_a_restart_that_cannot_render_leaves_the_runtime_running(rig: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_dir = _provision(rig)
+    stopped: list[bool] = []
+
+    def _boom(project_dir: pathlib.Path, document: dict) -> pathlib.Path:
+        raise RuntimeError("No host executable configured for provider 'bread0'")
+
+    monkeypatch.setattr(
+        launcher, "_current_runtime_snapshot", lambda clean_stale=False: {"running": True, "project": "mixed-rig"}
+    )
+    monkeypatch.setattr(launcher, "materialize_launch_config", _boom)
+    monkeypatch.setattr(launcher, "stop", lambda: stopped.append(True))
+
+    with pytest.raises(RuntimeError, match="No host executable"):
+        launcher.restart("mixed-rig", project_dir)
+    assert stopped == []

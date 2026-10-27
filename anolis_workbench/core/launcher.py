@@ -689,10 +689,9 @@ def stop() -> None:
 def restart(name: str, project_dir: pathlib.Path) -> None:
     """Kill and relaunch the running project.
 
-    Re-reads the saved project: it picks the launch variant's rendered YAML,
-    and renders it again if that file is missing. So the saved project is
-    validated first, as launch() does, before the running runtime is stopped
-    (#414).
+    Re-reads the saved project and renders the launch variant's YAML again,
+    as launch() does. So the saved project is validated first, as launch()
+    does, before the running runtime is stopped (#414).
     """
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
@@ -715,6 +714,10 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     errors = canonical_validator.validate_project(system)
     if errors:
         raise LaunchValidationError(errors)
+    # Rendered again, as launch() does, so a file an older workbench wrote is
+    # never handed to the runtime (it may lack runtime.data_dir, #562). Before
+    # stop(), so a project that cannot render leaves the runtime running.
+    launch_config = str(materialize_launch_config(project_dir, system))
 
     stop()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
@@ -727,11 +730,6 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
         raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
-    launch_config = str(
-        project_dir / canonical.LAUNCH_DIR / "launch" / canonical.variant_filename(launch_variant(system))
-    )
-    if not pathlib.Path(launch_config).is_file():
-        launch_config = str(materialize_launch_config(project_dir, system))
     cmd = [str(runtime_exe), "--config", launch_config]
 
     proc = subprocess.Popen(
