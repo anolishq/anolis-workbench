@@ -1589,7 +1589,7 @@ def test_a_failed_install_names_its_log(
 def test_grafana_access_says_the_password_is_unknown_after_a_failed_reset(bind: str, ssh_target: str | None) -> None:
     access = deploy.grafana_access(_install_sh_output(f"pi-{bind}-password-unknown"), ssh_target=ssh_target)
     assert access, "Grafana is up, so how to reach it is still shown"
-    assert access[-1] == deploy.GRAFANA_ADMIN_PASSWORD_UNKNOWN_NOTE
+    assert access[-1] == deploy.GRAFANA_ADMIN_LOGIN_UNKNOWN_NOTE
     assert deploy.GRAFANA_ADMIN_LOGIN_NOTE not in access
 
 

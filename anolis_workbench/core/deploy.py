@@ -498,8 +498,8 @@ GRAFANA_ADMIN_LOGIN_NOTE = (
 )
 # install.sh's summary when it made a new admin password for a kept
 # grafana.db and could not set it there (anolishq/anolis#514).
-_GRAFANA_PASSWORD_UNKNOWN = "admin password: unknown"
-GRAFANA_ADMIN_PASSWORD_UNKNOWN_NOTE = (
+_GRAFANA_LOGIN_UNKNOWN = "admin password: unknown"
+GRAFANA_ADMIN_LOGIN_UNKNOWN_NOTE = (
     "admin password: unknown. install.sh could not reset Grafana's admin password, so "
     "GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env may not log in (see its warning above)"
 )
@@ -520,8 +520,8 @@ def grafana_access(
         return []
     grafana_lines = [line for line in lines if _GRAFANA_NETWORK_RE.match(line) or _GRAFANA_LOOPBACK_RE.match(line)]
     login_note = (
-        GRAFANA_ADMIN_PASSWORD_UNKNOWN_NOTE
-        if any(_GRAFANA_PASSWORD_UNKNOWN in line for line in grafana_lines)
+        GRAFANA_ADMIN_LOGIN_UNKNOWN_NOTE
+        if any(_GRAFANA_LOGIN_UNKNOWN in line for line in grafana_lines)
         else GRAFANA_ADMIN_LOGIN_NOTE
     )
     if ssh_target is None:
