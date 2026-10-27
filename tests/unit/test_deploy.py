@@ -1373,7 +1373,9 @@ def test_health_lines_are_install_sh_health_report(name: str, expected: list[str
     ],
 )
 def test_health_lines_lead_with_the_start_line(start: str) -> None:
-    output = f"\x1b[0;32m{start}\x1b[0m\n\x1b[0;32m✓ health: runtime responding (v0.1.51)\x1b[0m\n  Hostname:  pi-g1\n"
+    output = (
+        f"\x1b[0;32m{start}\x1b[0m\n\x1b[0;32m✓ health: runtime responding (v0.1.51)\x1b[0m\n\n  Hostname:  pi-g1\n"
+    )
     assert deploy.health_lines(output) == [start, "✓ health: runtime responding (v0.1.51)"]
 
 
@@ -1381,11 +1383,12 @@ def test_health_lines_lead_with_the_start_line(start: str) -> None:
 # achieved line names the rung, and a run that did not happen is a skip line.
 def test_health_lines_carry_the_startup_safe_state() -> None:
     achieved = "\x1b[0;32m✓ health: startup safe state achieved (hooks)\x1b[0m\n"
-    not_run = "\x1b[0;33m→ health: startup safe state not run (on_startup: leave)\x1b[0m\n  Hostname:  pi-g1\n"
+    not_run = "\x1b[0;33m→ health: startup safe state not run (on_startup: leave)\x1b[0m\n\n  Hostname:  pi-g1\n"
     not_achieved = (
         "\x1b[1;33m⚠ health: startup safe state NOT achieved\x1b[0m\n"
         "    bread0/dcmt0 set_mode: SET command refused: WATCHDOG_TRIP\n"
         "    bread0/rlht0 set_mode: skipped, device absent at startup\n"
+        "\n"
         "  Hostname:  pi-g1\n"
     )
     assert deploy.health_lines(achieved) == ["✓ health: startup safe state achieved (hooks)"]
