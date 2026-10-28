@@ -164,6 +164,10 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     expect(
       within(select).getByRole("option", { name: "Leave outputs as they are" }),
     ).toBeInTheDocument();
+    // Absent, it reads as bread's default (#688).
+    expect(
+      within(select).getByRole("option", { name: "— default: Drive outputs safe —" }),
+    ).toBeInTheDocument();
     expect("outputs_on_startup" in (config.provider as UnknownRecord)).toBe(false);
     expect(onChanged).not.toHaveBeenCalled();
 
