@@ -13,6 +13,25 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-10-28
+
+### Fixed
+
+- **A launch keeps a variant's relative `runtime.data_dir` where an install
+  does** (#695, part of anolishq/anolis#643). A launch resolves it as if
+  `~/.anolis` were the install prefix, against `~/.anolis/config`, so a
+  variant naming `../anolis-data`, as bioreactor-v1's will, launches with
+  `~/.anolis/anolis-data`, where launches have always kept the e-stop latch
+  and the run journal. It used to map a relative value to `~/.anolis/<it>`,
+  which gave `~/anolis-data`. A value whose latch file or run journal is only
+  at `~/.anolis/<it>` stays there. An absent key is still
+  `~/.anolis/anolis-data`, and an absolute one is kept.
+
+### Changed
+
+- CI: a failing docs check blocks the merge (#685), and the shared workflows'
+  digest moves (#694).
+
 ## [0.24.0] - 2026-10-27
 
 Upgrade notes:
