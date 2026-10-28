@@ -911,6 +911,27 @@ def active_runtime_config(document: dict) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
+def _holds_runtime_data(data_dir: pathlib.Path) -> bool:
+    """A latch file or a non-empty run index; the runtime creates runs/ at every start."""
+    index = data_dir / "runs" / "index.jsonl"
+    return any((data_dir / "estop").glob("*.json")) or (index.is_file() and index.stat().st_size > 0)
+
+
+def _relative_data_dir(value: str) -> pathlib.Path:
+    """Where a launch keeps a variant's relative runtime.data_dir.
+
+    A variant is written for an install, whose config is
+    <prefix>/config/runtime.yaml (anolishq/anolis#643), so it is resolved as if
+    DATA_ROOT were the prefix: ../anolis-data is DATA_ROOT/anolis-data. One whose
+    data is only at DATA_ROOT/<it>, where a launch put it before, stays there.
+    """
+    beside = pathlib.Path(os.path.normpath(paths_module.DATA_ROOT / "config" / value))
+    before = pathlib.Path(os.path.normpath(paths_module.DATA_ROOT / value))
+    if not _holds_runtime_data(beside) and _holds_runtime_data(before):
+        return before
+    return beside
+
+
 def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> pathlib.Path:
     """Project the canonical variant into a runnable host config.
 
@@ -962,7 +983,7 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
     if not data_dir:
         runtime_section["data_dir"] = str(paths_module.DATA_ROOT / "anolis-data")
     elif not pathlib.Path(str(data_dir)).is_absolute():
-        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / str(data_dir))
+        runtime_section["data_dir"] = str(_relative_data_dir(str(data_dir)))
 
     out = project_dir / canonical.LAUNCH_DIR / "launch"
     out.mkdir(parents=True, exist_ok=True)
