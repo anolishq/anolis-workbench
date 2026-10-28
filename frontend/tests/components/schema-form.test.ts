@@ -265,7 +265,9 @@ describe("SchemaForm — form details (#578)", () => {
   const busInput = () => screen.getByPlaceholderText("/dev/i2c-1 or mock://name");
 
   it("shows no Required line or invalid state on an untouched empty required field", () => {
-    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+    render(SchemaForm, {
+      props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() },
+    });
 
     expect(busInput()).toHaveAttribute("aria-required", "true");
     expect(busInput()).not.toHaveAttribute("aria-invalid");
@@ -273,7 +275,9 @@ describe("SchemaForm — form details (#578)", () => {
   });
 
   it("shows the Required line and invalid state once the empty field is left", async () => {
-    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+    render(SchemaForm, {
+      props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() },
+    });
 
     await fireEvent.focus(busInput());
     await fireEvent.blur(busInput());
@@ -383,5 +387,49 @@ describe("SchemaForm — the manual address list (#563)", () => {
 
     await fireEvent.change(modeSelect(), { target: { value: "manual" } });
     expect((config.discovery as UnknownRecord).addresses).toEqual(["0x0A", "0x30"]);
+  });
+});
+
+describe("SchemaForm — an optional enum's default", () => {
+  // An absent key reads as the schema's default to the provider, so the empty
+  // option names it rather than asking for a choice.
+  const schema: UnknownRecord = {
+    type: "object",
+    properties: {
+      policy: {
+        type: "string",
+        title: "Policy",
+        oneOf: [
+          { const: "on", title: "Switch it on" },
+          { const: "off", title: "Leave it off" },
+        ],
+        default: "off",
+      },
+      colour: {
+        type: "string",
+        title: "Colour",
+        oneOf: [
+          { const: "red", title: "Red" },
+          { const: "blue", title: "Blue" },
+        ],
+      },
+    },
+  };
+
+  it("names the default in the empty option, and writes nothing until chosen", async () => {
+    const config = reactive({}) as UnknownRecord;
+    const onChanged = vi.fn();
+    render(SchemaForm, { props: { schema, value: config, onChanged } });
+
+    expect(screen.getByRole("option", { name: "— default: Leave it off —" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "— select —" })).toBeInTheDocument(); // colour has no default
+    expect("policy" in config).toBe(false);
+    expect(onChanged).not.toHaveBeenCalled();
+
+    const policy = screen
+      .getAllByRole("combobox")
+      .find((el) => el.querySelectorAll("option[value=on]").length === 1) as HTMLSelectElement;
+    await fireEvent.change(policy, { target: { value: "on" } });
+    expect(config.policy).toBe("on");
   });
 });
