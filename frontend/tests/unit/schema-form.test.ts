@@ -10,6 +10,7 @@ import type { UnknownRecord } from "../../src/lib/contracts";
 import {
   asObject,
   defaultsFor,
+  enumDefaultTitle,
   enumOptions,
   fieldControl,
   isArraySchema,
@@ -167,7 +168,8 @@ describe("resolveConditionals reasons", () => {
 describe("defaultsFor", () => {
   it("bread: fills hardware defaults, provider name default, no invented bus_path", () => {
     const seeded = defaultsFor(bread);
-    expect(seeded.provider).toEqual({ name: "anolis-provider-bread" });
+    // outputs_on_startup has a schema default from bread 0.10.0 (bread#195).
+    expect(seeded.provider).toEqual({ name: "anolis-provider-bread", outputs_on_startup: "safe" });
     expect(seeded.hardware).toEqual({ query_delay_us: 10000, timeout_ms: 100, retry_count: 2 });
     expect(seeded.discovery).toEqual({ mode: "manual" });
     expect(seeded.devices).toEqual([]);
@@ -399,5 +401,25 @@ describe("pruneForbidden with a stash (#563)", () => {
     const config: UnknownRecord = { mode: "off", rate: 10 };
     pruneForbidden(twoKeys, config, stash);
     expect(config).toEqual({ mode: "off" });
+  });
+});
+
+describe("enumDefaultTitle", () => {
+  const titled = {
+    oneOf: [
+      { const: "on", title: "Switch it on" },
+      { const: "off", title: "Leave it off" },
+    ],
+  };
+
+  it("is the title of the option the default names", () => {
+    expect(enumDefaultTitle({ ...titled, default: "off" })).toBe("Leave it off");
+  });
+
+  it("is null with no default, a default no option names, or a non-string default", () => {
+    expect(enumDefaultTitle(titled)).toBeNull();
+    expect(enumDefaultTitle({ ...titled, default: "maybe" })).toBeNull();
+    expect(enumDefaultTitle({ ...titled, default: 1 })).toBeNull();
+    expect(enumDefaultTitle({ type: "string", default: "off" })).toBeNull();
   });
 });
