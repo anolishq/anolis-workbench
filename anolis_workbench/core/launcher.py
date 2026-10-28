@@ -30,6 +30,12 @@ _state: dict = {
     "log_lines_by_project": {},  # dict[str, list[str]] ring buffers (last 200 lines)
 }
 _state_lock = threading.Lock()
+# Held by launch(), restart() and stop() from their running check until the
+# runtime they start is published, or they fail: the server runs each request
+# on its own thread, and two overlapping launches used to both spawn a runtime
+# (#671). Reentrant, since restart() calls stop(). Separate from _state_lock,
+# which the log reader takes for every line.
+_lifecycle_lock = threading.RLock()
 
 _sse_subscribers: dict[str, list] = {}  # dict[project_name, list[queue.Queue]]
 _sse_lock = threading.Lock()
@@ -589,7 +595,11 @@ class LaunchValidationError(RuntimeError):
 
 def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     """Start the anolis-runtime subprocess."""
+    with _lifecycle_lock:
+        _launch_locked(name, system, project_dir)
 
+
+def _launch_locked(name: str, system: dict, project_dir: pathlib.Path) -> None:
     current = _current_runtime_snapshot(clean_stale=True)
     if current["running"]:
         raise RuntimeError("A system is already running.")
@@ -607,47 +617,72 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     # Project the canonical variant into a runnable host config.
     launch_config = str(materialize_launch_config(project_dir, system))
 
-    # Prepare log file (overwrite)
-    log_path = project_dir / "logs" / "latest.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
+    _spawn(name, system, project_dir, launch_config)
 
-    # Build command
+
+def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: str) -> None:
+    """Start the runtime on `launch_config` and publish it as the tracked process.
+
+    A failure after the runtime has started stops it again, so nothing runs
+    that the workbench does not track (#671).
+    """
     host = canonical.host_paths({"host_paths": system.get("host_paths")})
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
         raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
     cmd = [str(runtime_exe), "--config", launch_config]
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(paths_module.DATA_ROOT),
-        bufsize=1,
-        text=True,
-        env=child_env(),
-    )
+    # Prepare log file (overwrite)
+    log_path = project_dir / "logs" / "latest.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
 
-    # Write running.json
-    running_data = {
-        "pid": proc.pid,
-        "project": name,
-        "started": datetime.now(timezone.utc).isoformat(),
-    }
-    (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
-
-    with _state_lock:
-        log_lines_by_project: dict = _state["log_lines_by_project"]
-        log_lines_by_project[name] = []
-        _state.update(
-            {
-                "project": name,
-                "process": proc,
-                "log_file": log_file,
-            }
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=str(paths_module.DATA_ROOT),
+            bufsize=1,
+            text=True,
+            env=child_env(),
         )
-    threading.Thread(target=_read_logs, args=(proc, log_file, name), daemon=True).start()
+    except BaseException:
+        log_file.close()
+        raise
+
+    try:
+        # Write running.json
+        running_data = {
+            "pid": proc.pid,
+            "project": name,
+            "started": datetime.now(timezone.utc).isoformat(),
+        }
+        (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
+
+        with _state_lock:
+            log_lines_by_project: dict = _state["log_lines_by_project"]
+            log_lines_by_project[name] = []
+            _state.update(
+                {
+                    "project": name,
+                    "process": proc,
+                    "log_file": log_file,
+                }
+            )
+        threading.Thread(target=_read_logs, args=(proc, log_file, name), daemon=True).start()
+    except BaseException:
+        with _state_lock:
+            if _state["process"] is proc:
+                _state.update({"project": None, "process": None, "log_file": None})
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        log_file.close()
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +692,11 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
 
 def stop() -> None:
     """Gracefully terminate the running process."""
+    with _lifecycle_lock:
+        _stop_locked()
+
+
+def _stop_locked() -> None:
     with _state_lock:
         proc = _state["process"]
     if proc is not None and proc.poll() is None:
@@ -689,11 +729,15 @@ def stop() -> None:
 def restart(name: str, project_dir: pathlib.Path) -> None:
     """Kill and relaunch the running project.
 
-    Re-reads the saved project: it picks the launch variant's rendered YAML,
-    and renders it again if that file is missing. So the saved project is
-    validated first, as launch() does, before the running runtime is stopped
-    (#414).
+    Re-reads the saved project and renders the launch variant's YAML again,
+    as launch() does. So the saved project is validated first, as launch()
+    does, before the running runtime is stopped (#414).
     """
+    with _lifecycle_lock:
+        _restart_locked(name, project_dir)
+
+
+def _restart_locked(name: str, project_dir: pathlib.Path) -> None:
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
         raise RuntimeError(f"Cannot restart '{name}' because no project is running.")
@@ -715,53 +759,15 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     errors = canonical_validator.validate_project(system)
     if errors:
         raise LaunchValidationError(errors)
+    # Rendered again, as launch() does, so a file an older workbench wrote is
+    # never handed to the runtime (it may lack runtime.data_dir, #562). Before
+    # stop(), so a project that cannot render leaves the runtime running.
+    launch_config = str(materialize_launch_config(project_dir, system))
 
-    stop()
+    _stop_locked()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
 
-    log_path = project_dir / "logs" / "latest.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
-
-    host = canonical.host_paths({"host_paths": system.get("host_paths")})
-    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
-    if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
-    launch_config = str(
-        project_dir / canonical.LAUNCH_DIR / "launch" / canonical.variant_filename(launch_variant(system))
-    )
-    if not pathlib.Path(launch_config).is_file():
-        launch_config = str(materialize_launch_config(project_dir, system))
-    cmd = [str(runtime_exe), "--config", launch_config]
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(paths_module.DATA_ROOT),
-        bufsize=1,
-        text=True,
-        env=child_env(),
-    )
-
-    running_data = {
-        "pid": proc.pid,
-        "project": name,
-        "started": datetime.now(timezone.utc).isoformat(),
-    }
-    (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
-
-    with _state_lock:
-        log_lines_by_project: dict = _state["log_lines_by_project"]
-        log_lines_by_project[name] = []
-        _state.update(
-            {
-                "project": name,
-                "process": proc,
-                "log_file": log_file,
-            }
-        )
-    threading.Thread(target=_read_logs, args=(proc, log_file, name), daemon=True).start()
+    _spawn(name, system, project_dir, launch_config)
 
 
 # ---------------------------------------------------------------------------
@@ -942,6 +948,21 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
             match = canonical.PROJECT_PATH_RE.fullmatch(behavior)
             if match is not None:
                 automation["behavior_tree"] = str((project_dir / match.group(2) / match.group(3)).resolve())
+
+    # The runtime resolves a default or relative runtime.data_dir against the
+    # config file's directory (anolishq/anolis#562), which is inside the
+    # project, and a re-provision replaces the project directory. Name the
+    # directory a launch has always used, since the runtime starts in
+    # DATA_ROOT, so the e-stop latch and the run journal stay where they are.
+    runtime_section = projected.get("runtime")
+    if not isinstance(runtime_section, dict):
+        runtime_section = {}
+        projected = {"runtime": runtime_section, **{k: v for k, v in projected.items() if k != "runtime"}}
+    data_dir = runtime_section.get("data_dir")
+    if not data_dir:
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / "anolis-data")
+    elif not pathlib.Path(str(data_dir)).is_absolute():
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / str(data_dir))
 
     out = project_dir / canonical.LAUNCH_DIR / "launch"
     out.mkdir(parents=True, exist_ok=True)
