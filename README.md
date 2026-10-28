@@ -92,10 +92,11 @@ service's user: a project's host paths name the executables Launch starts.
 That is more than the workbench's runtime access, so treat access to the
 workbench as access to that account.
 
-Re-run the install after rotating the token:
+After rotating the token, refresh the service's copy. This touches neither
+the runtime install nor the workspace:
 
 ```sh
-anolis-provision install --workbench-service
+anolis-provision workbench-service
 ```
 
 ### Build from source (contributors)

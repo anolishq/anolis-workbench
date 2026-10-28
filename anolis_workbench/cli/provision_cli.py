@@ -43,7 +43,8 @@ def _parse_args() -> argparse.Namespace:
         "--project",
         type=_name_arg,
         default=None,
-        help="Project name to create (defaults to the template name).",
+        help="Workspace project to install. One that is not in the workspace needs --template or --system. "
+        "Without it: sim-quickstart, when the workspace holds no other project.",
     )
     install_parser.add_argument(
         "--template",
@@ -119,7 +120,8 @@ def _parse_args() -> argparse.Namespace:
         "--project",
         type=_name_arg,
         default=None,
-        help="Project name for the bundle (defaults to the template name).",
+        help="Workspace project to bundle. One that is not in the workspace needs --template or --system. "
+        "Without it: sim-quickstart, when the workspace holds no other project.",
     )
     bundle_parser.add_argument(
         "--template",
@@ -166,7 +168,8 @@ def _parse_args() -> argparse.Namespace:
         "--project",
         type=_name_arg,
         default=None,
-        help="Project name to create on the target (defaults to the template name).",
+        help="Workspace project to install on the target. One that is not in the workspace needs --template "
+        "or --system. Without it: sim-quickstart, when the workspace holds no other project.",
     )
     remote_parser.add_argument(
         "--template",
@@ -292,6 +295,13 @@ def _parse_args() -> argparse.Namespace:
         help="SSH port (default: 22).",
     )
 
+    # --- workbench-service subcommand (#668) ---
+    subparsers.add_parser(
+        "workbench-service",
+        help="Install or refresh the workbench systemd service and its copy of the runtime token, "
+        "without touching the runtime install. Run it after rotating the runtime token.",
+    )
+
     # --- check-update subcommand ---
     subparsers.add_parser(
         "check-update",
@@ -380,6 +390,36 @@ def _resolve_names(args: argparse.Namespace) -> tuple[str, str]:
     template = getattr(args, "template", None) or DEFAULT_TEMPLATE
     project = getattr(args, "project", None) or template
     return project, template
+
+
+def _project_choice_error(args: argparse.Namespace) -> str | None:
+    """Why the project these arguments name must not be provisioned, or None.
+
+    A project is seeded from a template only when asked to (--template), or on
+    a workspace with no project but the default one: a mistyped --project, or a
+    command run without one next to a real project, used to seed sim-quickstart
+    and deploy it (#668). --system imports a project, so it needs no check.
+    """
+    from anolis_workbench.core import projects as projects_module
+
+    if getattr(args, "system", None) is not None or getattr(args, "template", None) is not None:
+        return None
+    existing = [p["name"] for p in projects_module.list_projects()]
+    listed = ", ".join(existing) if existing else "none"
+    project = getattr(args, "project", None)
+    if project is not None:
+        if project in existing:
+            return None
+        return (
+            f"project '{project}' is not in the workspace (projects: {listed}). "
+            f"To create it from a template, add --template {DEFAULT_TEMPLATE}."
+        )
+    if set(existing) <= {DEFAULT_TEMPLATE}:
+        return None
+    return (
+        f"no --project given, and the workspace holds other projects ({listed}). "
+        f"Pass --project <name>, or --template {DEFAULT_TEMPLATE} to use the simulator template."
+    )
 
 
 def _provision_workspace(args: argparse.Namespace) -> Path:
@@ -503,6 +543,9 @@ def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
     if not _validate_system_template(args):
         return 1
+    if error := _project_choice_error(args):
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
 
     print("Anolis Provision — Install")
     print(f"  Project:  {_resolve_names(args)[0]}")
@@ -610,6 +653,9 @@ def _run_bundle(args: argparse.Namespace) -> int:
     """Execute the bundle subcommand: build a canonical offline bundle via install.sh --stage."""
     if not _validate_system_template(args):
         return 1
+    if error := _project_choice_error(args):
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
 
     arch = "arm64" if args.arch in ("arm64", "aarch64") else "x86_64"
 
@@ -670,6 +716,9 @@ def _run_remote(args: argparse.Namespace) -> int:
     from anolis_workbench.core.executor import SubprocessSSHExecutor
 
     if not _validate_system_template(args):
+        return 1
+    if error := _project_choice_error(args):
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
     try:
@@ -903,6 +952,23 @@ def _run_rollback(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_workbench_service() -> int:
+    """Install or refresh the workbench service and its token copy, and nothing else (#668)."""
+    from anolis_workbench.core import workbench_service
+    from anolis_workbench.core.appliance import tunnel_hint
+
+    print("Anolis Provision — Workbench service")
+    _print_progress("systemd", "Installing workbench systemd service")
+    result = workbench_service.install_service(user=workbench_service.invoking_user())
+    if result.error:
+        print(f"\nERROR: workbench service: {result.error}", file=sys.stderr)
+        return 1
+    _print_progress("systemd", "Workbench service enabled and started")
+    print()
+    print(tunnel_hint())
+    return 0
+
+
 def _run_check_update() -> int:
     """Check for available updates."""
     from anolis_workbench.core.updater import check_for_update
@@ -979,6 +1045,7 @@ def main() -> int:
         print("  remote        Provision a remote machine via SSH", file=sys.stderr)
         print("  fleet         Provision multiple targets from a fleet.yaml", file=sys.stderr)
         print("  rollback      Roll back binaries to previous version", file=sys.stderr)
+        print("  workbench-service  Install or refresh the workbench service and token copy", file=sys.stderr)
         print("  check-update  Check if a newer version is available", file=sys.stderr)
         print("  update        Download and install the latest version", file=sys.stderr)
         return 2
@@ -997,6 +1064,9 @@ def main() -> int:
 
     if args.command == "rollback":
         return _run_rollback(args)
+
+    if args.command == "workbench-service":
+        return _run_workbench_service()
 
     if args.command == "check-update":
         return _run_check_update()

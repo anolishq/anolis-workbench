@@ -154,3 +154,17 @@ def test_an_empty_workspace_still_gets_sim_quickstart(ws: dict[str, Any], monkey
 
     assert _workspace(ws) == ["sim-quickstart"]
     assert [c["project_name"] for c in ws["calls"]["deploy_local"]] == ["sim-quickstart"]
+
+
+def test_a_rerun_on_a_simulator_only_workspace_reuses_sim_quickstart(
+    ws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The quickstart's install run again: its own project is not "another" one.
+    import shutil
+
+    shutil.rmtree(ws["systems"] / "bioreactor")
+    installer.provision_project("sim-quickstart", "sim-quickstart", ws["tmp"] / "prefix", systems_root=ws["systems"])
+    assert _run(monkeypatch, "install") == 0
+
+    assert _workspace(ws) == ["sim-quickstart"]
+    assert [c["project_name"] for c in ws["calls"]["deploy_local"]] == ["sim-quickstart"]

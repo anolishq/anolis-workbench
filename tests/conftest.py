@@ -26,6 +26,16 @@ def _install_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.T
     return logs
 
 
+@pytest.fixture(autouse=True)
+def _empty_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """An empty workspace, not the developer's ~/.anolis/systems: a provision
+    command run without --project checks it for other projects (#668). A test
+    that needs a workspace points SYSTEMS_ROOT at its own."""
+    systems = tmp_path_factory.mktemp("workspace") / "systems"
+    monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems)
+    monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems)
+
+
 # Pins the fixtures author. They are AUTHORED data (#255 decision 1) — nothing
 # in the deploy path resolves them from the network any more.
 FIXTURE_RUNTIME_VERSION = "0.1.27"
