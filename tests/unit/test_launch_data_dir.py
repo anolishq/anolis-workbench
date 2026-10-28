@@ -7,6 +7,11 @@ against the config file's directory, which for a launch is
 directory. The launch config therefore names the directory a launch has always
 used, DATA_ROOT/anolis-data (the runtime starts in DATA_ROOT), so the latch
 and the journal stay where they are and survive a re-provision.
+
+A relative data_dir in a variant is written for an install, where the config
+is <prefix>/config/runtime.yaml (anolishq/anolis#643): a launch resolves it as
+if DATA_ROOT were the prefix, so ../anolis-data is DATA_ROOT/anolis-data. One
+whose data is at DATA_ROOT/<it>, where a launch put it before, stays there.
 """
 
 from __future__ import annotations
@@ -60,6 +65,11 @@ def _set_data_dir(project_dir: pathlib.Path, value: str) -> None:
     variant.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
+def _write_latch(data_dir: pathlib.Path) -> None:
+    (data_dir / "estop").mkdir(parents=True, exist_ok=True)
+    (data_dir / "estop" / "0123456789abcdef.json").write_text('{"latched":true}\n', encoding="utf-8")
+
+
 def test_a_launch_names_the_data_dir_a_launch_has_always_used(rig: dict) -> None:
     project_dir = _provision(rig)
 
@@ -72,6 +82,55 @@ def test_a_launch_names_the_data_dir_a_launch_has_always_used(rig: dict) -> None
 def test_a_relative_data_dir_is_pinned_to_where_the_launch_resolved_it(rig: dict) -> None:
     project_dir = _provision(rig)
     _set_data_dir(project_dir, "state/data")
+    _write_latch(rig["data_root"] / "state" / "data")
+
+    assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "state" / "data")
+
+
+def test_a_variant_naming_the_install_data_dir_launches_in_the_launch_data_dir(rig: dict) -> None:
+    # bioreactor-v1's variants name ../anolis-data, <prefix>/anolis-data when
+    # installed; a launch keeps its latch where it always has (anolis#643).
+    project_dir = _provision(rig)
+    _set_data_dir(project_dir, "../anolis-data")
+
+    assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "anolis-data")
+
+
+def test_a_relative_data_dir_with_no_data_yet_resolves_as_installed(rig: dict) -> None:
+    project_dir = _provision(rig)
+    _set_data_dir(project_dir, "state/data")
+
+    assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "config" / "state" / "data")
+
+
+def test_a_relative_data_dir_with_data_in_both_places_resolves_as_installed(rig: dict) -> None:
+    project_dir = _provision(rig)
+    _set_data_dir(project_dir, "state/data")
+    for base in (rig["data_root"], rig["data_root"] / "config"):
+        _write_latch(base / "state" / "data")
+
+    assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "config" / "state" / "data")
+
+
+def test_directories_a_runtime_only_started_in_are_not_data(rig: dict) -> None:
+    # The runtime creates runs/ at every start, empty until a run is opened.
+    project_dir = _provision(rig)
+    _set_data_dir(project_dir, "state/data")
+    beside = rig["data_root"] / "config" / "state" / "data"
+    (beside / "estop").mkdir(parents=True)
+    (beside / "runs").mkdir()
+    (beside / "runs" / "index.jsonl").write_text("", encoding="utf-8")
+    _write_latch(rig["data_root"] / "state" / "data")
+
+    assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "state" / "data")
+
+
+def test_a_run_journal_alone_is_data(rig: dict) -> None:
+    project_dir = _provision(rig)
+    _set_data_dir(project_dir, "state/data")
+    runs = rig["data_root"] / "state" / "data" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "index.jsonl").write_text('{"run_id":"r1"}\n', encoding="utf-8")
 
     assert _launch_runtime_section(project_dir)["data_dir"] == str(rig["data_root"] / "state" / "data")
 
