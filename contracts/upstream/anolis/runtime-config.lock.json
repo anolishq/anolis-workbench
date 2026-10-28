@@ -3,15 +3,15 @@
   "source": {
     "repo": "anolishq/anolis",
     "path": "schemas/runtime/runtime-config.schema.json",
-    "tag": "v0.2.0"
+    "tag": "v0.3.0"
   },
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "tar-member",
     "release": {
       "repo": "anolishq/anolis",
-      "tag": "v0.2.0",
-      "asset": "anolis-0.2.0-runtime-config-schema.tar.gz",
+      "tag": "v0.3.0",
+      "asset": "anolis-0.3.0-runtime-config-schema.tar.gz",
       "manifest_asset": "runtime-config-schema-manifest.json"
     },
     "schema_sha256": "7c9fa18c06e85394a6040cc31daf8a23350bb5f1c7609f14d7b702d97e20cc40",
