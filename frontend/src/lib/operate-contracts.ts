@@ -30,6 +30,36 @@ export const RUNTIME_MODES = ["MANUAL", "AUTO", "IDLE", "FAULT"] as const;
 
 export type RuntimeMode = (typeof RUNTIME_MODES)[number];
 
+/**
+ * The modes `POST /v0/mode` accepts from `current`, `current` first: the
+ * runtime's ModeManager::is_valid_transition (anolis
+ * core/automation/mode_manager.cpp). Any mode may go to FAULT; FAULT goes only
+ * to MANUAL; AUTO and IDLE go only to MANUAL. An unknown mode offers all (wb#692).
+ */
+export function modeTargets(current: string): RuntimeMode[] {
+  const allowed: Record<RuntimeMode, RuntimeMode[]> = {
+    MANUAL: ["MANUAL", "AUTO", "IDLE", "FAULT"],
+    AUTO: ["AUTO", "MANUAL", "FAULT"],
+    IDLE: ["IDLE", "MANUAL", "FAULT"],
+    FAULT: ["MANUAL", "FAULT"],
+  };
+  return (RUNTIME_MODES as readonly string[]).includes(current)
+    ? allowed[current as RuntimeMode]
+    : [...RUNTIME_MODES];
+}
+
+/**
+ * The text for a failed call. A call the e-stop latch refused names the runtime
+ * endpoint that releases it; Operate has a control for that (wb#692).
+ */
+export function callErrorText(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.startsWith("Actuation latched by e-stop")) {
+    return "Refused: the software stop latch holds actuation. Clear it with Clear latch… above.";
+  }
+  return `Error: ${message}`;
+}
+
 const EXECUTION_STATUSES: ReadonlySet<ExecutionStatus> = new Set<ExecutionStatus>([
   "idle",
   "running",

@@ -2,7 +2,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Commission from "../../src/routes/Commission.svelte";
-import { createProjectDocument, createRuntimeStatus, jsonResponse, pathFromInput } from "./helpers";
+import {
+  createImportedDocument,
+  createProjectDocument,
+  createRuntimeStatus,
+  jsonResponse,
+  pathFromInput,
+} from "./helpers";
 
 // wb#581: stop and restart an installed anolis-runtime service, on a remote
 // device over SSH or on this machine, each behind a confirm naming the
@@ -14,6 +20,7 @@ function setup(
   opts: {
     runtimeStatus?: ReturnType<typeof createRuntimeStatus>;
     running?: boolean;
+    system?: ReturnType<typeof createProjectDocument>;
     onService?: (body: Record<string, unknown>) => Response;
   } = {},
 ) {
@@ -37,7 +44,7 @@ function setup(
   render(Commission, {
     props: {
       projectName: "demo",
-      system: createProjectDocument("demo"),
+      system: opts.system ?? createProjectDocument("demo"),
       runtimeStatus: opts.runtimeStatus ?? createRuntimeStatus(),
       commissionRunningForCurrent: opts.running ?? false,
     },
@@ -141,5 +148,38 @@ describe("Commission.svelte — the installed runtime service (wb#581)", () => {
     );
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Restart" })).not.toBeInTheDocument();
+  });
+
+  it("says where an installed runtime's log is, and opens no empty log stream (wb#693)", async () => {
+    const opened: string[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        onmessage = null;
+        onerror = null;
+        constructor(url: string) {
+          opened.push(url);
+        }
+        close(): void {}
+      },
+    );
+    setup({
+      running: true,
+      runtimeStatus: createRuntimeStatus({ running: true, active_project: "demo", external: true }),
+    });
+
+    expect(await screen.findByTestId("service-log-note")).toHaveTextContent(
+      "journalctl -u anolis-runtime",
+    );
+    expect(opened.filter((url) => url.endsWith("/logs"))).toEqual([]);
+    expect(screen.queryByText("Runtime Log")).not.toBeInTheDocument();
+  });
+
+  it("an imported project's subtitle offers what Commission does for it (wb#693)", async () => {
+    setup({ system: createImportedDocument("demo") });
+    const header = await screen.findByRole("heading", { name: "Commission" });
+    const subtitle = header.parentElement?.querySelector("p");
+    expect(subtitle).toHaveTextContent("Deploy to a device, and watch the runtime's health.");
+    expect(subtitle).not.toHaveTextContent("Preflight");
   });
 });

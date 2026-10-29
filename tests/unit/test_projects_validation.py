@@ -577,7 +577,7 @@ def _safe_state_hits(document: dict) -> list[str]:
 def test_providers_with_an_empty_safe_state_warn_on_read(_systems_root: pathlib.Path) -> None:
     document = _load_template("sim-quickstart")
     assert _manual(document)["providers"]
-    assert "safety" not in _manual(document)
+    _manual(document).pop("safety", None)
     projects.save_project("rig", document)
 
     hits = _safe_state_hits(projects.get_project("rig"))
@@ -586,7 +586,9 @@ def test_providers_with_an_empty_safe_state_warn_on_read(_systems_root: pathlib.
 
 
 def test_the_warning_is_derived_so_declaring_a_safe_state_clears_it(_systems_root: pathlib.Path) -> None:
-    projects.save_project("rig", _load_template("sim-quickstart"))
+    document = _load_template("sim-quickstart")
+    _manual(document).pop("safety", None)
+    projects.save_project("rig", document)
     document = projects.get_project("rig")
     assert _safe_state_hits(document)
 

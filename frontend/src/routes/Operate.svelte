@@ -29,6 +29,7 @@
   } from "../lib/canonical";
   import {
     argAllowedValues,
+    callErrorText,
     checkAllowedValue,
     coerceParameterValue,
     deriveOperateAvailability,
@@ -45,10 +46,10 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    modeTargets,
     normalizeParameterType,
     normalizeProviderHealthQuality,
     renderBtOutline,
-    RUNTIME_MODES,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
@@ -59,6 +60,7 @@
     appendEventTrace,
     buildTraceEvent,
     createOperateEventStreamManager,
+    formatValue,
     removeDevice,
   } from "../lib/operate-events";
 
@@ -190,8 +192,6 @@
   let streamManager: ReturnType<typeof createOperateEventStreamManager> | null = null;
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let telemetryLoaded = $state<boolean>(false);
-  let telemetryFrame = $state<HTMLIFrameElement | null>(null);
   let workbenchConfig = $state<WorkbenchConfig | null>(null);
 
   const telemetryUrl = $derived(() => {
@@ -257,7 +257,6 @@
   function startOperate(): void {
     if (pollTimer !== null) return; // already running
     void loadWorkbenchConfig();
-    ensureTelemetryLoaded();
     void refreshOperate();
     pollTimer = setInterval(() => void refreshOperate(), 5000);
     ensureEventStream();
@@ -297,14 +296,6 @@
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
-    telemetryLoaded = false;
-  }
-
-  function ensureTelemetryLoaded(): void {
-    const url = telemetryUrl();
-    if (!telemetryFrame || telemetryLoaded || !url) return;
-    telemetryFrame.src = url;
-    telemetryLoaded = true;
   }
 
   async function loadWorkbenchConfig(): Promise<void> {
@@ -316,8 +307,6 @@
         next.telemetryUrl = config.telemetry_url.trim().replace(/\/$/, "");
       }
       window.__ANOLIS_COMPOSER__ = next;
-      telemetryLoaded = false;
-      ensureTelemetryLoaded();
     } catch {
       // non-fatal; leave telemetry panel in unavailable state when not configured
     }
@@ -346,7 +335,6 @@
     }
 
     ensureEventStream();
-    ensureTelemetryLoaded();
 
     const epoch = estopEpoch;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
@@ -568,7 +556,10 @@
         estopFeedback = "Clear requested, but the runtime still reports the latch engaged.";
         estopFeedbackClass = "field-error";
       } else {
-        estopFeedback = "Latch cleared. Actuation re-enabled.";
+        estopFeedback =
+          mode === "FAULT"
+            ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
+            : "Latch cleared. Actuation re-enabled.";
         estopFeedbackClass = "field-note";
         estopEpoch += 1;
         if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
@@ -665,7 +656,7 @@
     } catch (err) {
       tripError = {
         step: stepNumber,
-        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        text: callErrorText(err),
       };
       return false;
     } finally {
@@ -723,7 +714,7 @@
       functionFeedback = {
         ...functionFeedback,
         [fbKey]: {
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          text: callErrorText(err),
           cls: "error",
         },
       };
@@ -821,7 +812,7 @@
       paramFeedback = {
         ...paramFeedback,
         [param.name]: {
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          text: callErrorText(err),
           cls: "error",
         },
       };
@@ -971,23 +962,6 @@
   function formatEpochMs(ms: number | null): string {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) return "--";
     return new Date(ms).toLocaleTimeString();
-  }
-
-  function formatValue(v: unknown): string {
-    if (v === null || v === undefined) return "--";
-    if (typeof v === "object") {
-      const value = v as UnknownRecord;
-      if (typeof value.type === "string") {
-        if (value.type === "double" && value.double !== undefined) return String(value.double);
-        if (value.type === "int64" && value.int64 !== undefined) return String(value.int64);
-        if (value.type === "uint64" && value.uint64 !== undefined) return String(value.uint64);
-        if (value.type === "bool" && value.bool !== undefined) return value.bool ? "true" : "false";
-        if (value.type === "string" && value.string !== undefined) return String(value.string);
-        if (value.type === "bytes" && value.base64 !== undefined) return String(value.base64);
-      }
-      return JSON.stringify(v);
-    }
-    return String(v);
   }
 
   function formatBtOutline(tree: string): string {
@@ -1508,7 +1482,7 @@
               modeSelectorDirty = true;
             }}
           >
-            {#each RUNTIME_MODES as runtimeMode (runtimeMode)}
+            {#each modeTargets(mode) as runtimeMode (runtimeMode)}
               <option value={runtimeMode}>{runtimeMode}</option>
             {/each}
           </select>
@@ -1525,6 +1499,11 @@
           {/if}
         {/if}
       </div>
+      {#if mode === "FAULT"}
+        <p class="field-note" data-testid="mode-fault-note">
+          FAULT refuses every device call. Set the mode to MANUAL to recover.
+        </p>
+      {/if}
     </div>
 
     <!-- Runtime status -->
@@ -1681,7 +1660,10 @@
         {#if !selectedKey || !getSelectedDevice()}
           <p class="placeholder">Select a device to inspect signals and execute functions.</p>
         {:else}
-          {@const signals = deviceStates[selectedKey] ?? []}
+          <!-- By name, numbers in order: period1_ms before period2_ms (wb#692). -->
+          {@const signals = [...(deviceStates[selectedKey] ?? [])].sort((a, b) =>
+            (a.signal_id ?? "").localeCompare(b.signal_id ?? "", undefined, { numeric: true }),
+          )}
           <!-- The first state read, or a failed one, files an entry (wb#623). -->
           {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
           {@const capsLoaded = capabilities[selectedKey] !== undefined}
@@ -1735,7 +1717,7 @@
                       <label for="fn-{fbKey}-{ai}">
                         {arg.name}{arg.required !== false ? " *" : ""}
                         {#if arg.min !== undefined && arg.max !== undefined}
-                          <span class="constraint-hint">[{arg.min} - {arg.max}]</span>
+                          <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
                         {/if}
                       </label>
                       {#if arg.type === "bool"}
@@ -1934,7 +1916,9 @@
       {/if}
     </div>
 
-    <!-- Telemetry iframe -->
+    <!-- Telemetry: a link, not a frame. install.sh's Grafana refuses framing
+         (X-Frame-Options: deny), and drawing it inside Operate is heavy on a
+         Pi (anolis#646). -->
     <div class="operate-section">
       <h3>Telemetry</h3>
       {#if telemetryUrl()}
@@ -1943,13 +1927,6 @@
             >Open Grafana in new tab →</a
           >
         </div>
-        <iframe
-          bind:this={telemetryFrame}
-          title="Telemetry"
-          class="telemetry-frame"
-          frameborder="0"
-          allowfullscreen
-        ></iframe>
       {:else}
         <p class="placeholder">Telemetry URL is not configured.</p>
       {/if}
