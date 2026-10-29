@@ -13,6 +13,58 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-29
+
+Upgrade notes:
+
+- **The token-rotation command is now `anolis-provision workbench-service`**
+  (#700, Fixes #668). It installs or refreshes the workbench service and its
+  copy of the runtime token, and touches neither the runtime install nor the
+  workspace. `install --workbench-service`, the command earlier releases
+  documented for this, still installs the service, but it runs a full deploy
+  first. Run it only to install.
+- **`install`, `remote` and `bundle` no longer seed a project you didn't ask
+  for** (#700).
+  - A `--project` that isn't in the workspace exits 1, naming the workspace's
+    projects, where it used to be seeded from `sim-quickstart` and deployed. To
+    create one from a template, add `--template sim-quickstart`.
+  - With no `--project`, they use `sim-quickstart` only when the workspace
+    holds no other project. Otherwise they exit 1 and say to pass `--project`,
+    or `--template sim-quickstart`.
+  - `--system` imports a project as before.
+- **Remote deploy and rollback stage in a fresh private directory per run**
+  (#701, Fixes #652 and #655). They used a fixed `/tmp/anolis-deploy`, taken
+  as found. Each run now makes `/tmp/anolis-deploy.XXXXXXXXXX` with `mktemp -d`
+  (mode 0700, owned by the SSH user) and removes it afterwards, whether the run
+  succeeds or fails. When it can't be made, nothing runs under sudo. A file
+  removed from a project is no longer installed from a previous deploy's copy.
+  The target needs `mktemp`, which coreutils provides.
+- **Contracts pin anolis 0.3.0** (#697), and the sim quickstart template pins
+  runtime 0.3.0. Only the locks' release hashes change; the vendored schemas are
+  the same as 0.2.0's.
+
+### Added
+
+- **`anolis-provision workbench-service`** (#700), as the upgrade notes
+  describe.
+
+### Fixed
+
+- **A mistyped `--project` is refused instead of deployed as a simulator
+  project** (#700, Fixes #668).
+- **Deploy and rollback can't be redirected through a planted staging
+  directory, and don't install files removed from the project** (#701, Fixes
+  #652 and #655).
+- **A package export that fails leaves no `.anpkg.tmp` behind** (#702, part of
+  #675). The archive is written to a unique temp file beside the output, which
+  replaces the output only once the archive is closed, and is removed on any
+  failure. An existing `.anpkg` is left as it was, and the archive keeps the
+  mode exports have always had.
+
+### Changed
+
+- Dependency updates: tauri 2.8.4 (#683) and `@types/node` 26 (#684).
+
 ## [0.24.1] - 2026-10-28
 
 ### Fixed
