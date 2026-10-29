@@ -13,6 +13,72 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-29
+
+Upgrade notes:
+
+- **`anolis-provision workbench-service --uninstall` removes the workbench
+  service** and its copy of the runtime token (#705, Fixes #699), without a
+  deploy or a workspace change. From anolis 0.4.0 the runtime's
+  `install.sh --uninstall` keeps `anolis-workbench.service`, so this is the
+  command that removes it. The README's appliance-mode section says so.
+- **Commission's Deploy to device can replace the runtime config already on
+  the device** (#706, Fixes #581). A checkbox, "Replace the runtime config
+  already on the device", passes install.sh `--replace-config`, which moves the
+  old `runtime.yaml` to `runtime.yaml.replaced-<UTC time>` and installs the
+  variant. Deploy then asks for a confirm that names the device, and the result
+  says where the old file went. It needs a project pinning anolis 0.1.56 or
+  later, and an inert variant; anything else is refused before anything runs on
+  the target, and the checkbox is disabled, with the reason, for a variant
+  that isn't inert.
+- **Operate's Telemetry section is a link to Grafana, not an embedded frame**
+  (#711, Fixes anolishq/anolis#646). install.sh's Grafana refuses framing, so
+  the frame was always blank on an installed host.
+- **The mode selector offers only the modes the runtime will accept from the
+  current one** (#708). From FAULT that is MANUAL only, and a note says FAULT
+  refuses every device call until MANUAL.
+- **sim-quickstart declares a safe state** (#709, Fixes #693): its manual
+  variant names every sim output under `safety.safe_state.hooks`, so a new
+  project made from it no longer warns that it has none. Projects already made
+  from the template keep their own config.
+- **The pins:** the sim quickstart template pins runtime 0.4.0, and the
+  contract locks move to anolis 0.4.0 (#704). Only the locks' release hashes
+  change.
+
+### Added
+
+- **`anolis-provision workbench-service --uninstall`** (#705), as the upgrade
+  notes describe.
+- **Replace the runtime config from Commission** (#706), as the upgrade notes
+  describe.
+
+### Changed
+
+- **Operate's software-stop status** (#708, #710, part of #692):
+  - Clearing the latch in FAULT says the runtime is still in FAULT and refuses
+    device calls until MANUAL, not "Actuation re-enabled".
+  - A call the latch refuses says to clear it with Clear latch, in place of the
+    runtime's `POST /v0/estop/clear` hint.
+  - The chip reads "Not ready" while a board's watchdog is tripped.
+  - A failed startup safe state is a one-line summary under Runtime Status,
+    with the calls listed one failure reason per line.
+  - For an imported project, or a runtime installed as a service, the
+    software-stop popover names only `/opt/anolis/config/runtime.yaml` on the
+    installed target.
+- **Commission for an imported project** (#709, Fixes #693) has a subtitle that
+  says what it offers there. For a runtime installed as a service it opens no
+  log stream and says the log is in the journal, `journalctl -u anolis-runtime`.
+- **Operate's readouts** (#712, part of #692): a device's signals are sorted by
+  id, numbers in order; an event-trace `state_update` shows the value; an
+  argument range reads `[-3276.8 to 3276.7]`.
+
+### Fixed
+
+- **Operate's layout** (#707, Fixes #691): the trip list's "Clear trip…"
+  buttons are styled as buttons, a disabled secondary button looks disabled,
+  the sticky software-stop bar meets the topbar, and a boolean argument's
+  checkbox sits beside its label.
+
 ## [0.25.0] - 2026-10-29
 
 Upgrade notes:
