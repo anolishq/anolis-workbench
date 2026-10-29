@@ -41,6 +41,8 @@ Historical note:
   runtime to stop. 409 stays for those conflicts. Both OpenAPI contracts now
   list the 422 for launch and restart, which they did not for the validation
   failure that already returned it.
+  Commission shows such a refusal as "Launch failed: <the route's message>"
+  and reads a launch error as busy only when it is that 409.
 
 ## [0.26.0] - 2026-10-29
 
