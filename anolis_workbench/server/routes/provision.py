@@ -126,6 +126,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: b
             with_telemetry_export=params.get("with_telemetry_export") is True,
             with_observability=params.get("with_observability") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
+            replace_config=params.get("replace_config") is True,
             executor=LocalExecutor(sudo_password=sudo_password),
             progress_callback=_progress,
         )
@@ -145,6 +146,11 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: b
                     "observability": deploy.observability_lines(result.output),
                     "verify": deploy.verify_lines(result.output),
                     "log_path": result.log_path,
+                    "replaced_config": (
+                        {"path": result.replaced_config[0], "backup": result.replaced_config[1]}
+                        if result.replaced_config
+                        else None
+                    ),
                     "grafana_access": deploy.grafana_access(result.output),
                 },
             }
@@ -189,6 +195,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             with_telemetry_export=params.get("with_telemetry_export") is True,
             with_observability=params.get("with_observability") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
+            replace_config=params.get("replace_config") is True,
             progress_callback=_progress,
         )
         # Auto-add host to fleet registry
@@ -209,6 +216,11 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "observability": deploy.observability_lines(result.output),
                     "verify": deploy.verify_lines(result.output),
                     "log_path": result.log_path,
+                    "replaced_config": (
+                        {"path": result.replaced_config[0], "backup": result.replaced_config[1]}
+                        if result.replaced_config
+                        else None
+                    ),
                     "grafana_access": deploy.grafana_access(
                         result.output,
                         ssh_target=target,

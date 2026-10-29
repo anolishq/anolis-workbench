@@ -99,6 +99,14 @@ confirm naming the machine, then shows what `systemctl is-active` reports.
 Without the workbench, run `sudo systemctl stop anolis-runtime` on the
 target.
 
+A deploy keeps the runtime config already on the target. To install this
+project's variant over it, tick **Replace the runtime config already on the
+device** before **Deploy**, and confirm the machine it names. install.sh
+(`--replace-config`, anolis 0.1.56 or later) moves the old `runtime.yaml` to
+`runtime.yaml.replaced-<UTC time>` beside it, and the deploy result names
+both. install.sh replaces it only with an inert variant, so Replace is not
+offered for one that enables automation, such as `automation` or `full`.
+
 ## 4) Export Package (Provenance Record)
 
 Workbench path:
