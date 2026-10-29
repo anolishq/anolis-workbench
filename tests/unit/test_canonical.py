@@ -781,3 +781,28 @@ def test_a_changed_sidecar_is_read_again(tmp_path: pathlib.Path) -> None:
 def test_the_libyaml_loader_is_still_safe() -> None:
     with pytest.raises(yaml.YAMLError):
         machine_profile.safe_load("!!python/object/apply:builtins.len [[1]]\n")
+
+
+# anolis#677 maps the deprecated flat telemetry.influx_token, so a token
+# there is live and shadows INFLUXDB_TOKEN as a nested one does.
+@pytest.mark.parametrize(
+    ("telemetry", "key"),
+    [
+        ({"influxdb": {"token": "dev-token"}}, "telemetry.influxdb.token"),
+        ({"influx_token": "dev-token"}, "telemetry.influx_token"),
+    ],
+)
+def test_an_authored_influx_token_is_named_and_stripped(telemetry: dict, key: str) -> None:
+    doc = {"telemetry": dict(telemetry, enabled=True)}
+
+    problem = canonical.influx_token_error(doc)
+    assert problem is not None and key in problem, problem
+
+    assert canonical.strip_influx_token(doc)
+    assert canonical.influx_token_error(doc) is None
+    assert "influx_token" not in doc["telemetry"]
+    assert "token" not in doc["telemetry"].get("influxdb", {})
+
+
+def test_an_empty_flat_influx_token_is_not_an_error() -> None:
+    assert canonical.influx_token_error({"telemetry": {"influx_token": ""}}) is None
