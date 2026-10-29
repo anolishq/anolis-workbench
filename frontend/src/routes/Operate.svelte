@@ -189,8 +189,6 @@
   let streamManager: ReturnType<typeof createOperateEventStreamManager> | null = null;
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let telemetryLoaded = $state<boolean>(false);
-  let telemetryFrame = $state<HTMLIFrameElement | null>(null);
   let workbenchConfig = $state<WorkbenchConfig | null>(null);
 
   const telemetryUrl = $derived(() => {
@@ -256,7 +254,6 @@
   function startOperate(): void {
     if (pollTimer !== null) return; // already running
     void loadWorkbenchConfig();
-    ensureTelemetryLoaded();
     void refreshOperate();
     pollTimer = setInterval(() => void refreshOperate(), 5000);
     ensureEventStream();
@@ -296,14 +293,6 @@
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
-    telemetryLoaded = false;
-  }
-
-  function ensureTelemetryLoaded(): void {
-    const url = telemetryUrl();
-    if (!telemetryFrame || telemetryLoaded || !url) return;
-    telemetryFrame.src = url;
-    telemetryLoaded = true;
   }
 
   async function loadWorkbenchConfig(): Promise<void> {
@@ -315,8 +304,6 @@
         next.telemetryUrl = config.telemetry_url.trim().replace(/\/$/, "");
       }
       window.__ANOLIS_COMPOSER__ = next;
-      telemetryLoaded = false;
-      ensureTelemetryLoaded();
     } catch {
       // non-fatal; leave telemetry panel in unavailable state when not configured
     }
@@ -345,7 +332,6 @@
     }
 
     ensureEventStream();
-    ensureTelemetryLoaded();
 
     const epoch = estopEpoch;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
@@ -1911,7 +1897,9 @@
       {/if}
     </div>
 
-    <!-- Telemetry iframe -->
+    <!-- Telemetry: a link, not a frame. install.sh's Grafana refuses framing
+         (X-Frame-Options: deny), and drawing it inside Operate is heavy on a
+         Pi (anolis#646). -->
     <div class="operate-section">
       <h3>Telemetry</h3>
       {#if telemetryUrl()}
@@ -1920,13 +1908,6 @@
             >Open Grafana in new tab →</a
           >
         </div>
-        <iframe
-          bind:this={telemetryFrame}
-          title="Telemetry"
-          class="telemetry-frame"
-          frameborder="0"
-          allowfullscreen
-        ></iframe>
       {:else}
         <p class="placeholder">Telemetry URL is not configured.</p>
       {/if}
