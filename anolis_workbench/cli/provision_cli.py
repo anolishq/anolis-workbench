@@ -296,10 +296,15 @@ def _parse_args() -> argparse.Namespace:
     )
 
     # --- workbench-service subcommand (#668) ---
-    subparsers.add_parser(
+    workbench_service_parser = subparsers.add_parser(
         "workbench-service",
         help="Install or refresh the workbench systemd service and its copy of the runtime token, "
         "without touching the runtime install. Run it after rotating the runtime token.",
+    )
+    workbench_service_parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Stop, disable and remove the workbench service and its token copy instead; the runtime is kept.",
     )
 
     # --- check-update subcommand ---
@@ -952,12 +957,21 @@ def _run_rollback(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_workbench_service() -> int:
-    """Install or refresh the workbench service and its token copy, and nothing else (#668)."""
+def _run_workbench_service(args: argparse.Namespace) -> int:
+    """Install or refresh the workbench service and its token copy, or remove
+    them with --uninstall, and nothing else (#668, #699)."""
     from anolis_workbench.core import workbench_service
     from anolis_workbench.core.appliance import tunnel_hint
 
     print("Anolis Provision — Workbench service")
+    if args.uninstall:
+        _print_progress("systemd", "Removing the workbench systemd service and its token copy")
+        removed = workbench_service.uninstall_service()
+        if removed.error:
+            print(f"\nERROR: workbench service: {removed.error}", file=sys.stderr)
+            return 1
+        _print_progress("systemd", "Workbench service removed; the runtime is untouched")
+        return 0
     _print_progress("systemd", "Installing workbench systemd service")
     result = workbench_service.install_service(user=workbench_service.invoking_user())
     if result.error:
@@ -1045,7 +1059,7 @@ def main() -> int:
         print("  remote        Provision a remote machine via SSH", file=sys.stderr)
         print("  fleet         Provision multiple targets from a fleet.yaml", file=sys.stderr)
         print("  rollback      Roll back binaries to previous version", file=sys.stderr)
-        print("  workbench-service  Install or refresh the workbench service and token copy", file=sys.stderr)
+        print("  workbench-service  Install, refresh or (--uninstall) remove the workbench service", file=sys.stderr)
         print("  check-update  Check if a newer version is available", file=sys.stderr)
         print("  update        Download and install the latest version", file=sys.stderr)
         return 2
@@ -1066,7 +1080,7 @@ def main() -> int:
         return _run_rollback(args)
 
     if args.command == "workbench-service":
-        return _run_workbench_service()
+        return _run_workbench_service(args)
 
     if args.command == "check-update":
         return _run_check_update()
