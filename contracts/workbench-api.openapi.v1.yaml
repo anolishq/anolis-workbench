@@ -395,8 +395,9 @@ paths:
     post:
       summary: Stop runtime
       description: >-
-        Stops the running runtime. The project name is a guard (must exist),
-        not a selector — only one runtime process is active at a time.
+        Stops the project's runtime. Only one runtime process is active at a
+        time, and the project must own it: when another project's runtime is
+        running, returns 409 naming that project and leaves it running.
         Idempotent: returns 200 even if nothing was running.
       parameters:
         - $ref: "#/components/parameters/ProjectName"

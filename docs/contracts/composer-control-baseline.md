@@ -36,7 +36,7 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 4. Expected status semantics:
    - `400` invalid project names
    - `404` unknown project
-   - `409` launch conflict
+   - `409` launch conflict, or a stop or restart naming a project other than the running one
    - `500` backend failure
 
 ### Runtime/Path Decoupling
