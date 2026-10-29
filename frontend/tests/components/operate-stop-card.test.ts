@@ -133,8 +133,10 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
     expect(await screen.findByTestId('estop-startup')).toHaveTextContent('⚠ Startup safe state not achieved');
     expect(screen.getByTestId('startup-safe-state')).toHaveTextContent('1 call(s) failed.');
-    // wb#692: the stop is armed, but the machine is not ready.
-    expect(screen.getByTestId('estop-state').textContent?.trim()).toBe('Not ready');
+    // startup_safe_state records one past event, reported until the runtime
+    // restarts: the chip follows current conditions, and the warning beside
+    // it carries the startup failure (wb#692).
+    expect(screen.getByTestId('estop-state').textContent?.trim()).toBe('Ready');
   });
 
   it('keeps an achieved startup safe state out of the row, in Runtime Status', async () => {
