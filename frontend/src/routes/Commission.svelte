@@ -504,19 +504,28 @@
     if (!projectName) return;
     stopRunning = true;
     actionError = "";
+    let refused = false;
     try {
       await fetchJson(`/api/projects/${encodeURIComponent(projectName)}/stop`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",
       });
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      // The route answered and stopped nothing, such as another project's
+      // runtime (#670): say so, and keep watching the runtime that runs on.
+      // Any other failure stays best-effort.
+      if (err instanceof ApiResponseError) {
+        refused = true;
+        actionError = `Not stopped: ${err.message}`;
+      }
     } finally {
-      stopHealthPolling();
-      disconnectLogs();
-      stopCommissionHealthPolling();
-      preflightResults = null;
+      if (!refused) {
+        stopHealthPolling();
+        disconnectLogs();
+        stopCommissionHealthPolling();
+        preflightResults = null;
+      }
       stopRunning = false;
     }
   }
