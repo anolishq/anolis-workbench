@@ -84,13 +84,28 @@ const executeButtons = () => screen.getAllByRole('button', { name: 'Execute' });
 describe('Operate.svelte — function calls (#580)', () => {
   it("shows the runtime's message when a call fails", async () => {
     renderOperate(() =>
-      jsonResponse(409, { status: { code: 'FAILED_PRECONDITION', message: 'Actuation latched by e-stop' } }),
+      jsonResponse(409, { status: { code: 'FAILED_PRECONDITION', message: 'Device bread0/dcmt0 not found' } }),
     );
     await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: '60' } });
     await fireEvent.click(executeButtons()[0]);
 
-    expect(await screen.findByText('Error: Actuation latched by e-stop')).toBeInTheDocument();
+    expect(await screen.findByText('Error: Device bread0/dcmt0 not found')).toBeInTheDocument();
     expect(screen.queryByText(/HTTP 409/)).not.toBeInTheDocument();
+  });
+
+  it('for a call the latch refuses, points at Clear latch, not the runtime endpoint (#692)', async () => {
+    renderOperate(() =>
+      jsonResponse(409, {
+        status: { code: 'FAILED_PRECONDITION', message: 'Actuation latched by e-stop (POST /v0/estop/clear to release)' },
+      }),
+    );
+    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: '60' } });
+    await fireEvent.click(executeButtons()[0]);
+
+    expect(
+      await screen.findByText('Refused: the software stop latch holds actuation. Clear it with Clear latch… above.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/estop\/clear/)).not.toBeInTheDocument();
   });
 
   it('keeps a successful call\'s result next to its form', async () => {
