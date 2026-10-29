@@ -281,6 +281,12 @@ body {
   background: var(--bg-muted);
 }
 
+.btn-secondary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background: #fff;
+}
+
 .btn-sm {
   font-size: 12px;
   padding: 4px 10px;
@@ -819,6 +825,23 @@ body {
   font: inherit;
 }
 
+/* The Watchdog trips list: its own class, so the device list's button reset
+   above leaves its .btn-secondary buttons alone (wb#691). */
+.operate-trip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.operate-trip-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
 .operate-device-select {
   line-height: 1.35;
 }
@@ -1092,7 +1115,7 @@ body {
   margin-bottom: 4px;
 }
 
-.arg-row input {
+.arg-row input:not([type="checkbox"]) {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1472,9 +1495,10 @@ body {
 
 .operate-estop-section {
   border-color: #fca5a5;
-  /* Operate is thousands of pixels tall: keep the stop in view (wb#553). */
+  /* Operate is thousands of pixels tall: keep the stop in view (wb#553).
+     -18px is .workspace's padding, so the bar meets the topbar (wb#691). */
   position: sticky;
-  top: 0;
+  top: -18px;
   z-index: 5;
 }
 .estop-row {
