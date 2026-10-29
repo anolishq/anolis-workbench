@@ -280,7 +280,9 @@
   $effect(() => {
     if (commissionRunningForCurrent && !commissionLiveDataActive) {
       startHealthPolling();
-      connectLogs();
+      // The log stream carries only a runtime the workbench launched; an
+      // installed service logs to the journal (wb#693).
+      if (!runtimeIsService) connectLogs();
       startCommissionHealthPolling();
       commissionLiveDataActive = true;
     } else if (!commissionRunningForCurrent && commissionLiveDataActive) {
@@ -893,7 +895,11 @@
 <section id="workspace-commission" class="workspace visible">
   <div class="workspace-header">
     <h2>Commission</h2>
-    <p>Preflight, launch, monitor logs, and supervise runtime bring-up.</p>
+    {#if imported}
+      <p>Deploy to a device, and watch the runtime's health.</p>
+    {:else}
+      <p>Preflight, launch, monitor logs, and supervise runtime bring-up.</p>
+    {/if}
   </div>
 
   {#if runningForOther}
@@ -1047,7 +1053,12 @@
   </div>
 
   <!-- Log pane -->
-  {#if logVisible}
+  {#if commissionRunningForCurrent && runtimeIsService}
+    <p class="field-note" data-testid="service-log-note">
+      This runtime runs as a service, so its log is in the journal on its machine:
+      <code>journalctl -u anolis-runtime</code>.
+    </p>
+  {:else if logVisible}
     <div id="log-pane" class="log-pane visible">
       <div class="log-toolbar">
         <span>Runtime Log</span>

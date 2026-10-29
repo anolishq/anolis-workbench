@@ -28,6 +28,7 @@
   } from "../lib/canonical";
   import {
     argAllowedValues,
+    callErrorText,
     checkAllowedValue,
     coerceParameterValue,
     deriveOperateAvailability,
@@ -44,10 +45,10 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    modeTargets,
     normalizeParameterType,
     normalizeProviderHealthQuality,
     renderBtOutline,
-    RUNTIME_MODES,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
@@ -553,7 +554,10 @@
         estopFeedback = "Clear requested, but the runtime still reports the latch engaged.";
         estopFeedbackClass = "field-error";
       } else {
-        estopFeedback = "Latch cleared. Actuation re-enabled.";
+        estopFeedback =
+          mode === "FAULT"
+            ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
+            : "Latch cleared. Actuation re-enabled.";
         estopFeedbackClass = "field-note";
         estopEpoch += 1;
         if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
@@ -650,7 +654,7 @@
     } catch (err) {
       tripError = {
         step: stepNumber,
-        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        text: callErrorText(err),
       };
       return false;
     } finally {
@@ -708,7 +712,7 @@
       functionFeedback = {
         ...functionFeedback,
         [fbKey]: {
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          text: callErrorText(err),
           cls: "error",
         },
       };
@@ -806,7 +810,7 @@
       paramFeedback = {
         ...paramFeedback,
         [param.name]: {
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          text: callErrorText(err),
           cls: "error",
         },
       };
@@ -1478,7 +1482,7 @@
               modeSelectorDirty = true;
             }}
           >
-            {#each RUNTIME_MODES as runtimeMode (runtimeMode)}
+            {#each modeTargets(mode) as runtimeMode (runtimeMode)}
               <option value={runtimeMode}>{runtimeMode}</option>
             {/each}
           </select>
@@ -1495,6 +1499,11 @@
           {/if}
         {/if}
       </div>
+      {#if mode === "FAULT"}
+        <p class="field-note" data-testid="mode-fault-note">
+          FAULT refuses every device call. Set the mode to MANUAL to recover.
+        </p>
+      {/if}
     </div>
 
     <!-- Runtime status -->
