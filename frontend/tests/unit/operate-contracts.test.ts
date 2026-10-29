@@ -26,6 +26,7 @@ import {
   normalizeParameterType,
   normalizeProviderHealthQuality,
   normalizeSoftwareSafeState,
+  modeTargets,
   renderBtOutline,
   RUNTIME_MODES,
   SOFTWARE_SAFE_STATES,
@@ -410,6 +411,20 @@ describe("renderBtOutline", () => {
     expect(outline).toContain("|- Sequence");
     expect(outline).toContain("\\- Fallback");
     expect(outline).toContain('"SetMode"');
+  });
+});
+
+describe("modeTargets", () => {
+  it("offers the current mode and the transitions the runtime accepts from it (wb#692)", () => {
+    expect(modeTargets("MANUAL")).toEqual(["MANUAL", "AUTO", "IDLE", "FAULT"]);
+    expect(modeTargets("AUTO")).toEqual(["AUTO", "MANUAL", "FAULT"]);
+    expect(modeTargets("IDLE")).toEqual(["IDLE", "MANUAL", "FAULT"]);
+    expect(modeTargets("FAULT")).toEqual(["MANUAL", "FAULT"]);
+  });
+
+  it("offers every mode while the mode is unknown", () => {
+    expect(modeTargets("UNKNOWN")).toEqual([...RUNTIME_MODES]);
+    expect(modeTargets("--")).toEqual([...RUNTIME_MODES]);
   });
 });
 

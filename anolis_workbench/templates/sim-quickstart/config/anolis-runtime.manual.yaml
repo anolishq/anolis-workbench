@@ -27,5 +27,50 @@ telemetry:
   enabled: false
 logging:
   level: info
+# What the software stop drives (POST /v0/estop): every sim output off.
+# tempctl0 takes set_relay only in open mode, so the mode goes first.
+safety:
+  safe_state:
+    hooks:
+    - device_handle: sim0/motorctl0
+      function_name: set_motor_duty
+      args:
+        motor_index: 1
+        duty: 0.0
+    - device_handle: sim0/motorctl0
+      function_name: set_motor_duty
+      args:
+        motor_index: 2
+        duty: 0.0
+    - device_handle: sim0/tempctl0
+      function_name: set_mode
+      args:
+        mode: open
+    - device_handle: sim0/tempctl0
+      function_name: set_relay
+      args:
+        relay_index: 1
+        state: false
+    - device_handle: sim0/tempctl0
+      function_name: set_relay
+      args:
+        relay_index: 2
+        state: false
+    - device_handle: sim0/relayio0
+      function_name: set_relay_ch1
+      args:
+        enabled: false
+    - device_handle: sim0/relayio0
+      function_name: set_relay_ch2
+      args:
+        enabled: false
+    - device_handle: sim0/relayio0
+      function_name: set_relay_ch3
+      args:
+        enabled: false
+    - device_handle: sim0/relayio0
+      function_name: set_relay_ch4
+      args:
+        enabled: false
 automation:
   enabled: false

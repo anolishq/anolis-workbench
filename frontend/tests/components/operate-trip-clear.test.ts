@@ -308,7 +308,9 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await press(3, "Clear the trip");
 
     expect(
-      await within(step(3)).findByText("Error: Actuation latched by e-stop"),
+      await within(step(3)).findByText(
+        "Refused: the software stop latch holds actuation. Clear it with Clear latch… above.",
+      ),
     ).toBeInTheDocument();
     expect(step(3)).not.toHaveTextContent("Done");
     expect(within(step(3)).getByRole("button", { name: "Clear the trip" })).toBeEnabled();
