@@ -335,11 +335,30 @@ def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> tuple[pathlib.
     return path, warning
 
 
+def _private_staging(executor: Executor) -> str:
+    """A fresh private staging dir on the target, or DeployError before any sudo step (#652)."""
+    try:
+        return executor.make_private_dir()
+    except (RuntimeError, ValueError) as exc:
+        raise DeployError(
+            f"could not create a private staging directory on the target ({exc}); nothing was run"
+        ) from exc
+
+
+def _remove_staging(executor: Executor, staging: str, progress_callback: ProgressCallback | None) -> None:
+    """Remove the staging dir after a run. A failure here is reported, never
+    raised: it must not hide what the run itself did."""
+    try:
+        executor.remove_private_dir(staging)
+    except Exception as exc:  # noqa: BLE001 - reported, and the run's own outcome stands
+        if progress_callback:
+            progress_callback("cleanup", f"could not remove the staging directory {staging}: {exc}")
+
+
 def run_rollback(
     executor: Executor | None = None,
     *,
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
-    staging: str = "/tmp/anolis-deploy",
     progress_callback: ProgressCallback | None = None,
 ) -> str:
     """Restore the previous binaries via `install.sh --rollback` on the target.
@@ -355,18 +374,20 @@ def run_rollback(
     if version is None:
         raise DeployError("could not resolve the latest anolis release (offline?)")
 
+    args = ["--rollback"]
+    if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
+        args += ["--prefix", str(prefix)]
     with tempfile.TemporaryDirectory(prefix="anolis-rollback-") as td:
         install_sh, warning = fetch_install_sh(version, pathlib.Path(td))
         if warning and progress_callback:
             progress_callback("unverified", warning)
-        target_path = f"{staging}/install.sh"
-        executor.mkdir(staging)
-        executor.write_file(target_path, install_sh.read_bytes())
-
-    args = ["--rollback"]
-    if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
-        args += ["--prefix", str(prefix)]
-    result = executor.run(["bash", target_path, *args], sudo=True, timeout=300)
+        staging = _private_staging(executor)
+        try:
+            target_path = f"{staging}/install.sh"
+            executor.write_file(target_path, install_sh.read_bytes())
+            result = executor.run(["bash", target_path, *args], sudo=True, timeout=300)
+        finally:
+            _remove_staging(executor, staging, progress_callback)
     if result.returncode != 0:
         tail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-10:])
         raise DeployError(f"install.sh --rollback failed (exit {result.returncode}):\n{tail}")
@@ -934,10 +955,10 @@ def deploy_remote(
     with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
-    remote_staging: str = "/tmp/anolis-deploy",
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
-    """Copy a canonical project verbatim, push it, run install.sh remotely."""
+    """Copy a canonical project verbatim, push it into a fresh private staging
+    dir on the target, run install.sh there, and remove the dir (#652, #655)."""
 
     def _progress(step: str, detail: str = "") -> None:
         if progress_callback:
@@ -952,31 +973,35 @@ def deploy_remote(
         if warning:
             _progress("unverified", warning)
 
-        remote_root = f"{remote_staging}/{mat.project_dir.name}"
-        _progress("push", f"Pushing project config to {remote_root}")
-        _push_dir(executor, mat.project_dir, remote_root)
-        remote_install = f"{remote_staging}/install.sh"
-        executor.write_file(remote_install, install_sh.read_bytes())
+        staging = _private_staging(executor)
+        try:
+            remote_root = f"{staging}/{mat.project_dir.name}"
+            _progress("push", f"Pushing project config to {remote_root}")
+            _push_dir(executor, mat.project_dir, remote_root)
+            remote_install = f"{staging}/install.sh"
+            executor.write_file(remote_install, install_sh.read_bytes())
 
-        if notice := _existing_config_notice(executor, prefix, variant):
-            _progress("existing-config", notice)
-        _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
-        output, preflight, reboot, log_path = _run_install_sh(
-            executor,
-            remote_install,
-            _install_args(
-                remote_root,
-                prefix=prefix,
-                no_start=no_start,
-                dry_run=dry_run,
-                with_telemetry_export=with_telemetry_export,
-                with_observability=with_observability,
-                variant=variant,
-                allow_unmet_host=allow_unmet_host,
-            ),
-            project_name,
-            progress_callback,
-        )
+            if notice := _existing_config_notice(executor, prefix, variant):
+                _progress("existing-config", notice)
+            _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
+            output, preflight, reboot, log_path = _run_install_sh(
+                executor,
+                remote_install,
+                _install_args(
+                    remote_root,
+                    prefix=prefix,
+                    no_start=no_start,
+                    dry_run=dry_run,
+                    with_telemetry_export=with_telemetry_export,
+                    with_observability=with_observability,
+                    variant=variant,
+                    allow_unmet_host=allow_unmet_host,
+                ),
+                project_name,
+                progress_callback,
+            )
+        finally:
+            _remove_staging(executor, staging, progress_callback)
     preserved = preserved_lines(output)
     return DeployResult(
         project_name=project_name,
