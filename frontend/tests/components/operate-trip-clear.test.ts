@@ -149,6 +149,14 @@ const actionPosts = (rt: { posts: Post[] }) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)", () => {
+  it("says the machine is not ready while a board is tripped (wb#692)", async () => {
+    fakeRuntime({ latched: false, mode: "MANUAL", tripped: { dcmt0: true } });
+    expect(await screen.findByTestId("watchdog-trips")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("estop-state").textContent?.trim()).toBe("Not ready"),
+    );
+  });
+
   it("lists only the tripped boards, badges them, and calls nothing on its own", async () => {
     const rt = fakeRuntime({ tripped: { dcmt0: true, rlht0: false } });
 
