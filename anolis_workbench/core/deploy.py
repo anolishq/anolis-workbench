@@ -67,6 +67,8 @@ ProgressCallback = Callable[[str, str], None]
 # The first runtime whose install.sh refuses to install an older runtime over
 # a newer one (anolishq/anolis#366, phase_version_check).
 DOWNGRADE_GUARD_VERSION = (0, 1, 45)
+# The first install.sh with --replace-config (anolishq/anolis#470).
+REPLACE_CONFIG_VERSION = (0, 1, 56)
 _XYZ_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -107,6 +109,8 @@ class DeployResult:
     install_sh_warning: str | None = None
     # Where install.sh's whole output was kept; None when it could not be written.
     log_path: str | None = None
+    # (runtime.yaml, where --replace-config moved the previous one), or None.
+    replaced_config: tuple[str, str] | None = None
 
 
 def materialize_project_dir(
@@ -404,6 +408,7 @@ def _install_args(
     with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
+    replace_config: bool = False,
 ) -> list[str]:
     args = ["--project", project_dir]
     if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
@@ -425,7 +430,40 @@ def _install_args(
         args.append("--with-observability")
     if allow_unmet_host:
         args.append("--allow-unmet-host")
+    if replace_config:
+        args.append("--replace-config")
     return args
+
+
+def _check_replace_config(project_dir: pathlib.Path, variant: str | None, runtime_version: str) -> None:
+    """Refuse, before anything runs on the target, a --replace-config that
+    install.sh would refuse: one the pinned install.sh lacks, or one whose
+    variant is not inert (#581)."""
+    pinned = _xyz(runtime_version)
+    if pinned is None or pinned < REPLACE_CONFIG_VERSION:
+        need = ".".join(map(str, REPLACE_CONFIG_VERSION))
+        raise DeployError(
+            f"Replacing the device's runtime config needs install.sh --replace-config, from anolis {need}; "
+            f"this project pins runtime {runtime_version}. Nothing was deployed."
+        )
+    name = variant or canonical.MANUAL_VARIANT
+    doc = canonical.read_project(project_dir).get("variants", {}).get(name)
+    if violation := canonical.inertness_violation(doc):
+        raise DeployError(
+            f"install.sh replaces the runtime config only with an inert variant, and '{name}' is not: "
+            f"{violation}. Nothing was deployed."
+        )
+
+
+_REPLACED_RE = re.compile(r"config: replacing (\S+); the previous file is at (\S+)")
+
+
+def replaced_config(stdout: str) -> tuple[str, str] | None:
+    """The runtime.yaml install.sh --replace-config replaced, and where it
+    moved the previous one, from install.sh's output; None when it replaced
+    nothing."""
+    match = _REPLACED_RE.search(_ANSI_RE.sub("", stdout))
+    return (match.group(1), match.group(2)) if match else None
 
 
 def _push_dir(executor: Executor, local_dir: pathlib.Path, remote_root: str) -> None:
@@ -889,6 +927,7 @@ def deploy_local(
     with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
+    replace_config: bool = False,
     executor: Executor | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
@@ -904,12 +943,14 @@ def deploy_local(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
+        if replace_config:
+            _check_replace_config(project_dir, variant, mat.runtime_version)
         _check_downgrade(executor, prefix, mat.runtime_version, _progress)
         _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
         install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
         if warning:
             _progress("unverified", warning)
-        if notice := _existing_config_notice(executor, prefix, variant):
+        if not replace_config and (notice := _existing_config_notice(executor, prefix, variant)):
             _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
         output, preflight, reboot, log_path = _run_install_sh(
@@ -924,6 +965,7 @@ def deploy_local(
                 with_observability=with_observability,
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
+                replace_config=replace_config,
             ),
             project_name,
             progress_callback,
@@ -940,6 +982,7 @@ def deploy_local(
         runtime_config_kept=runtime_config_kept(preserved),
         install_sh_warning=warning,
         log_path=log_path,
+        replaced_config=replaced_config(output),
     )
 
 
@@ -955,6 +998,7 @@ def deploy_remote(
     with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
+    replace_config: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> DeployResult:
     """Copy a canonical project verbatim, push it into a fresh private staging
@@ -968,6 +1012,8 @@ def deploy_remote(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
+        if replace_config:
+            _check_replace_config(project_dir, variant, mat.runtime_version)
         _check_downgrade(executor, prefix, mat.runtime_version, _progress)
         install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
         if warning:
@@ -981,7 +1027,7 @@ def deploy_remote(
             remote_install = f"{staging}/install.sh"
             executor.write_file(remote_install, install_sh.read_bytes())
 
-            if notice := _existing_config_notice(executor, prefix, variant):
+            if not replace_config and (notice := _existing_config_notice(executor, prefix, variant)):
                 _progress("existing-config", notice)
             _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
             output, preflight, reboot, log_path = _run_install_sh(
@@ -996,6 +1042,7 @@ def deploy_remote(
                     with_observability=with_observability,
                     variant=variant,
                     allow_unmet_host=allow_unmet_host,
+                    replace_config=replace_config,
                 ),
                 project_name,
                 progress_callback,
@@ -1014,6 +1061,7 @@ def deploy_remote(
         runtime_config_kept=runtime_config_kept(preserved),
         install_sh_warning=warning,
         log_path=log_path,
+        replaced_config=replaced_config(output),
     )
 
 

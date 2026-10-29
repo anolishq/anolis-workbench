@@ -437,3 +437,48 @@ def test_a_second_deploy_to_a_host_updates_its_fleet_row(
     assert yaml.safe_load(registry.read_text(encoding="utf-8"))["targets"] == [
         {"name": "10-0-0-5", "host": "10.0.0.5", "project": "bioreactor-v1-b3"}
     ]
+
+
+@pytest.mark.parametrize("remote", [False, True])
+@pytest.mark.parametrize("sent", [True, None, "yes"])
+def test_replace_config_reaches_the_deploy_and_its_backup_the_summary(
+    calls, monkeypatch: pytest.MonkeyPatch, remote: bool, sent: object
+) -> None:
+    """#581: Commission's Replace asks for install.sh --replace-config, and
+    shows where the replaced runtime.yaml went. Only a JSON true asks."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(
+            project_name="rig",
+            runtime_version="0.4.0",
+            prefix="/opt/anolis",
+            output="",
+            replaced_config=("/opt/anolis/config/runtime.yaml", "/opt/anolis/config/runtime.yaml.replaced-X"),
+        )
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    params: dict[str, Any] = {"project": "rig"}
+    if sent is not None:
+        params["replace_config"] = sent
+    job = provision.ProvisionJob(job_id="j581")
+    if remote:
+        provision._run_remote_job(job, {**params, "target": "pi@rig"})
+    else:
+        provision._run_install_job(job, params)
+
+    assert calls[-1]["replace_config"] is (sent is True)
+    assert job.events[-1]["summary"]["replaced_config"] == {
+        "path": "/opt/anolis/config/runtime.yaml",
+        "backup": "/opt/anolis/config/runtime.yaml.replaced-X",
+    }

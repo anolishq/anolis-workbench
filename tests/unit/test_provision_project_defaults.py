@@ -168,3 +168,38 @@ def test_a_rerun_on_a_simulator_only_workspace_reuses_sim_quickstart(
 
     assert _workspace(ws) == ["sim-quickstart"]
     assert [c["project_name"] for c in ws["calls"]["deploy_local"]] == ["sim-quickstart"]
+
+
+def test_the_workbench_service_can_be_removed_without_touching_the_runtime(
+    ws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #699: uninstall_service had no command; anolis 0.4.0's --uninstall keeps the unit.
+    removed: list[object] = []
+
+    def _uninstall(**kwargs: object) -> workbench_service.WorkbenchServiceResult:
+        removed.append(kwargs)
+        return workbench_service.WorkbenchServiceResult(installed=False, enabled=False, started=False)
+
+    monkeypatch.setattr(workbench_service, "uninstall_service", _uninstall)
+
+    assert _run(monkeypatch, "workbench-service", "--uninstall") == 0
+
+    assert len(removed) == 1
+    assert ws["calls"]["service"] == []
+    assert ws["calls"]["deploy_local"] == []
+    assert _workspace(ws) == ["bioreactor"]
+
+
+def test_a_failed_workbench_service_removal_fails_the_command(
+    ws: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        workbench_service,
+        "uninstall_service",
+        lambda **kwargs: workbench_service.WorkbenchServiceResult(
+            installed=False, enabled=False, started=False, error="sudo: a password is required"
+        ),
+    )
+
+    assert _run(monkeypatch, "workbench-service", "--uninstall") == 1
+    assert "sudo: a password is required" in capsys.readouterr().err
