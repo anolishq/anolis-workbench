@@ -122,6 +122,7 @@ def launch_stubs(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> _Sp
     """launch()/restart() with everything but the Popen call stubbed out."""
     exe = tmp_path / "anolis-runtime"
     exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    exe.chmod(0o755)  # launch checks the runtime is executable (#672)
     config = tmp_path / "launch.yaml"
     config.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(launcher, "materialize_launch_config", lambda project_dir, system: config)

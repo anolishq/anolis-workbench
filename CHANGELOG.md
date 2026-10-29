@@ -28,9 +28,11 @@ Historical note:
 - **A launch or restart that fails to start the runtime keeps the previous
   run's `latest.log`** (#672). The log was emptied before the runtime was
   started, so the log of the run before was lost.
-- **A restart refused for a missing runtime executable leaves the runtime
-  running** (#672). The executable was checked only after the running runtime
-  had been stopped, so the refusal left nothing running.
+- **A restart whose runtime executable is not set, does not exist or is not
+  executable is refused with the runtime still running** (#672). The path was
+  checked only after the running runtime had been stopped, and only for being
+  set, so the refusal, or the failed start that followed, left nothing
+  running.
 
 ## [0.26.0] - 2026-10-29
 

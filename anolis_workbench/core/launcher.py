@@ -625,6 +625,13 @@ def _runtime_command(system: dict, launch_config: str) -> list[str]:
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
         raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
+    # Checked here, not left to Popen, so restart() can refuse it before it
+    # stops the running runtime (#672).
+    if not runtime_exe.is_file() or not os.access(runtime_exe, os.X_OK):
+        raise RuntimeError(
+            f"Runtime executable '{runtime_exe}' does not exist or is not executable "
+            "(set it in the project's host paths)."
+        )
     return [str(runtime_exe), "--config", launch_config]
 
 
