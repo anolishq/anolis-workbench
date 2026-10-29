@@ -15,8 +15,9 @@ running anything. No test reaches the host.
 from __future__ import annotations
 
 import pathlib
+import secrets
 import shutil
-import tempfile
+import string
 from typing import Callable
 
 import pytest
@@ -40,14 +41,17 @@ class TreeExecutor(Executor):
         assert path.startswith("/"), path
         return self.root / path.lstrip("/")
 
-    def run(self, cmd, *, input=None, sudo=False, timeout=None):  # type: ignore[no-untyped-def]
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
         cmd = list(cmd)
         self.commands.append(cmd)
         if cmd[0] == "mktemp":
             if self.mktemp_fails:
                 return RunResult(returncode=1, stdout="", stderr="mktemp: failed")
-            made = tempfile.mkdtemp(prefix="anolis-deploy.", dir=self.root / "tmp")
-            return RunResult(returncode=0, stdout="/tmp/" + pathlib.Path(made).name + "\n", stderr="")
+            # As mktemp -d does: ten [A-Za-z0-9] in place of the X's, never an
+            # existing path.
+            name = "anolis-deploy." + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
+            self.local(f"/tmp/{name}").mkdir(mode=0o700)
+            return RunResult(returncode=0, stdout=f"/tmp/{name}\n", stderr="")
         if cmd[0] == "test" and cmd[1] == "-L":
             return RunResult(returncode=0 if self.local(cmd[-1]).is_symlink() else 1, stdout="", stderr="")
         if cmd[0] == "rm":
@@ -70,13 +74,13 @@ class TreeExecutor(Executor):
             )
         return RunResult(returncode=1, stdout="", stderr="")
 
-    def write_file(self, path, data):  # type: ignore[no-untyped-def]
+    def write_file(self, path, data):
         self.local(path).write_bytes(data)
 
-    def mkdir(self, path):  # type: ignore[no-untyped-def]
+    def mkdir(self, path):
         self.local(path).mkdir(parents=True, exist_ok=True)
 
-    def file_exists(self, path):  # type: ignore[no-untyped-def]
+    def file_exists(self, path):
         return self.local(path).exists()
 
 

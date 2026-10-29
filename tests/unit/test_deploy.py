@@ -43,14 +43,30 @@ def project_dir(canonical_project: Callable[..., pathlib.Path], tmp_path: pathli
     )
 
 
+# The private staging dir RecordingExecutor's mktemp hands out (#652).
+STAGING = "/tmp/anolis-deploy.AbCdE12345"
+
+
 class RecordingExecutor(Executor):
-    """Fake Executor that records calls and succeeds."""
+    """Fake Executor that records calls and succeeds.
+
+    Its private staging dir is STAGING, made and removed without a command,
+    so commands holds what the deploy itself ran. test_deploy_staging.py
+    covers make_private_dir and remove_private_dir."""
 
     def __init__(self, returncode: int = 0) -> None:
         self.returncode = returncode
         self.commands: list[dict] = []
+        self.staging: list[str] = []
         self.files: dict[str, bytes] = {}
         self.mkdirs: list[str] = []
+
+    def make_private_dir(self):
+        self.staging.append(f"made {STAGING}")
+        return STAGING
+
+    def remove_private_dir(self, path):
+        self.staging.append(f"removed {path}")
 
     def run(self, cmd, *, input=None, sudo=False, timeout=None):
         self.commands.append({"cmd": list(cmd), "sudo": sudo, "timeout": timeout})
@@ -767,18 +783,18 @@ def test_deploy_remote_pushes_config_and_runs(project_dir: pathlib.Path, monkeyp
     )
     assert result.runtime_version == "0.1.27"
     pushed = set(executor.files)
-    assert "/tmp/anolis-deploy/deploy-fixture/machine-profile.yaml" in pushed
-    assert "/tmp/anolis-deploy/deploy-fixture/config/anolis-runtime.manual.yaml" in pushed
-    assert "/tmp/anolis-deploy/deploy-fixture/config/provider-sim.sim0.yaml" in pushed
-    assert "/tmp/anolis-deploy/deploy-fixture/behaviors/local.xml" in pushed
-    assert "/tmp/anolis-deploy/install.sh" in pushed
+    assert f"{STAGING}/deploy-fixture/machine-profile.yaml" in pushed
+    assert f"{STAGING}/deploy-fixture/config/anolis-runtime.manual.yaml" in pushed
+    assert f"{STAGING}/deploy-fixture/config/provider-sim.sim0.yaml" in pushed
+    assert f"{STAGING}/deploy-fixture/behaviors/local.xml" in pushed
+    assert f"{STAGING}/install.sh" in pushed
     call = executor.commands[-1]
     assert call["sudo"] is True
     assert call["cmd"][:4] == [
         "bash",
-        "/tmp/anolis-deploy/install.sh",
+        f"{STAGING}/install.sh",
         "--project",
-        "/tmp/anolis-deploy/deploy-fixture",
+        f"{STAGING}/deploy-fixture",
     ]
 
 
@@ -802,10 +818,10 @@ def test_run_rollback_stages_and_invokes_install_sh(monkeypatch: pytest.MonkeyPa
     executor = RecordingExecutor()
     output = deploy.run_rollback(executor)
     assert output == "ok"
-    assert "/tmp/anolis-deploy/install.sh" in executor.files
+    assert f"{STAGING}/install.sh" in executor.files
     call = executor.commands[-1]
     assert call["sudo"] is True
-    assert call["cmd"] == ["bash", "/tmp/anolis-deploy/install.sh", "--rollback"]
+    assert call["cmd"] == ["bash", f"{STAGING}/install.sh", "--rollback"]
 
 
 def test_run_rollback_passes_custom_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
