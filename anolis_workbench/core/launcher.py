@@ -690,9 +690,19 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
 # ---------------------------------------------------------------------------
 
 
-def stop() -> None:
-    """Gracefully terminate the running process."""
+def stop(name: str) -> None:
+    """Gracefully terminate project `name`'s runtime; a no-op when none runs.
+
+    Refuses, as restart() does, when the running runtime belongs to another
+    project, which a stale page or a second tab could otherwise end (#670).
+    """
     with _lifecycle_lock:
+        current = _current_runtime_snapshot(clean_stale=False)
+        if current["running"] and current["project"] != name:
+            raise RuntimeError(
+                f"Cannot stop '{name}' while '{current['project']}' is running. "
+                f"Stop '{current['project']}' from its own project."
+            )
         _stop_locked()
 
 

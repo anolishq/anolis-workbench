@@ -111,7 +111,11 @@ def stop_project(handler, name: str) -> None:
             },
         )
         return
-    launcher_module.stop()
+    try:
+        launcher_module.stop(name)
+    except RuntimeError as exc:
+        handler._json(409, {"error": str(exc)})
+        return
     handler._json(200, {"ok": True})
 
 

@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`POST /api/projects/<name>/stop` stops only `<name>`'s runtime**
+  (Fixes #670). When another project's runtime is running, it returns 409
+  naming that project and leaves it running, as restart already did. It
+  stopped whichever runtime was running and answered `{"ok": true}`, so a
+  stale Commission page or a second tab could end another project's run.
+  A stop with nothing running is still a no-op.
+
 ## [0.26.0] - 2026-10-29
 
 Upgrade notes:

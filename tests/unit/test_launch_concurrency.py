@@ -89,7 +89,7 @@ def test_two_overlapping_launches_start_one_runtime(spawned: list[_FakeRuntime],
     assert len(spawned) == 1, f"{len(spawned)} runtimes started"
     assert sorted(outcomes) == ["A system is already running.", "ok"]
 
-    launcher.stop()
+    launcher.stop(launcher.get_status()["active_project"])
     assert not spawned[0].alive, "Stop did not reach the runtime the workbench started"
 
 
