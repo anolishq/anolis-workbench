@@ -270,6 +270,9 @@ def _leftover_temp_files(directory: pathlib.Path) -> list[str]:
     return sorted(p.name for p in directory.iterdir() if p.name.endswith(".tmp"))
 
 
+# A ZipFile whose close failed tries again from __del__, after the file under
+# it is closed; pytest reports that as an unraisable exception.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 @pytest.mark.parametrize("failing", ["writestr", "close"])
 def test_a_failed_archive_write_leaves_no_temp_file_and_the_old_archive(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, failing: str
