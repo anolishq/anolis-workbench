@@ -174,6 +174,7 @@
       install_sh_warning?: string | null;
       verify?: string[];
       log_path?: string | null;
+      replaced_config?: { path: string; backup: string } | null;
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -192,6 +193,8 @@
     installShWarning: string;
     verify: string[];
     logPath: string;
+    // The runtime.yaml install.sh --replace-config replaced, and its backup (wb#581).
+    replacedConfig: { path: string; backup: string } | null;
   };
   // The project's pins beside what the target has installed (#567). The
   // verdicts are the server's, the same ones a deploy acts on.
@@ -242,6 +245,11 @@
   let deployVariantChoice = $state<string>("");
   let deployTelemetryExport = $state<boolean>(false);
   let deployObservability = $state<boolean>(false);
+  // Replace the device's runtime.yaml with this variant, through install.sh
+  // --replace-config (wb#581). Offered only for an inert variant, which is all
+  // install.sh replaces with; Deploy then arms a confirm naming the device.
+  let deployReplaceConfig = $state<boolean>(false);
+  let replaceArmed = $state<boolean>(false);
   let deployRunning = $state<boolean>(false);
   // Stop or restart the installed anolis-runtime service on the deploy target
   // (wb#581): the first click arms, the confirm names the machine.
@@ -262,6 +270,9 @@
         ? MANUAL_VARIANT
         : (variants[0] ?? ""),
   );
+
+  const deployVariantViolation = $derived(inertnessViolation(system?.variants?.[deployVariant]));
+  const replacing = $derived(deployReplaceConfig && !deployVariantViolation);
 
   let commissionLiveDataActive = false;
 
@@ -581,6 +592,7 @@
         installShWarning: data.summary?.install_sh_warning ?? "",
         verify: data.summary?.verify ?? [],
         logPath: data.summary?.log_path ?? "",
+        replacedConfig: data.summary?.replaced_config ?? null,
       };
     }
     if (data.stage === "error" || data.stage === "status") {
@@ -598,6 +610,7 @@
         installShWarning: "",
         verify: [],
         logPath: "",
+        replacedConfig: null,
       };
     }
     return null;
@@ -636,6 +649,11 @@
       deployError = "Enter the target as user@host";
       return;
     }
+    if (replacing && !replaceArmed) {
+      replaceArmed = true;
+      return;
+    }
+    replaceArmed = false;
     deployRunning = true;
     deployError = "";
     deployProgress = [];
@@ -645,6 +663,7 @@
     if (deployTelemetryExport) body.with_telemetry_export = true;
     if (deployObservability) body.with_observability = true;
     if (deployTarget === "remote") body.target = host;
+    if (replacing) body.replace_config = true;
     if (deployTarget === "local" && deploySudoPassword) body.sudo_password = deploySudoPassword;
     deploySudoPassword = "";
     try {
@@ -685,6 +704,7 @@
             installShWarning: "",
             verify: [],
             logPath: "",
+            replacedConfig: null,
           });
         };
       });
@@ -807,6 +827,12 @@
       {/if}
       {#if outcome.logPath}
         <p>install.sh's full output: <code>{outcome.logPath}</code></p>
+      {/if}
+      {#if outcome.replacedConfig}
+        <p>
+          Replaced <code>{outcome.replacedConfig.path}</code>; the previous one is at
+          <code>{outcome.replacedConfig.backup}</code>
+        </p>
       {/if}
       {#if outcome.runtimeConfigKept}
         <p>The existing runtime config was kept; the runtime runs it, not this project's.</p>
@@ -1177,8 +1203,27 @@
     <p class="field-note">
       A fresh install accepts only a variant that boots inert. On a device that already has a
       runtime config, install.sh keeps that config: this project's runtime config and the variant
-      are not applied over it.
+      are not applied over it, unless you replace it below.
     </p>
+    <label>
+      <input
+        type="checkbox"
+        disabled={deployRunning || Boolean(deployVariantViolation)}
+        bind:checked={deployReplaceConfig}
+        onchange={() => (replaceArmed = false)}
+      />
+      Replace the runtime config already on the device
+    </label>
+    {#if deployVariantViolation}
+      <p class="field-note">
+        install.sh replaces it only with an inert variant, and {deployVariant} is not: {deployVariantViolation}.
+      </p>
+    {:else}
+      <p class="field-note">
+        install.sh moves the device's runtime.yaml to runtime.yaml.replaced-&lt;UTC time&gt; beside
+        it, then installs this variant. Needs anolis 0.1.56 or later.
+      </p>
+    {/if}
     <label>
       <input type="checkbox" disabled={deployRunning} bind:checked={deployTelemetryExport} />
       Also install telemetry-export
@@ -1280,15 +1325,24 @@
         <p class="field-note">{MANIFEST_NOTE[check.manifest]}</p>
       {/if}
     {/if}
-    <button
-      type="button"
-      class="btn-primary"
-      id="btn-deploy"
-      disabled={deployRunning || (deployTarget === "remote" && !deployHost.trim())}
-      onclick={doDeploy}
-    >
-      {deployRunning ? "Deploying…" : "Deploy"}
-    </button>
+    {#if replaceArmed && replacing}
+      <button type="button" class="btn-primary" disabled={deployRunning} onclick={doDeploy}>
+        Confirm: replace the runtime config on {serviceMachine}
+      </button>
+      <button type="button" class="btn-secondary" onclick={() => (replaceArmed = false)}
+        >Cancel</button
+      >
+    {:else}
+      <button
+        type="button"
+        class="btn-primary"
+        id="btn-deploy"
+        disabled={deployRunning || (deployTarget === "remote" && !deployHost.trim())}
+        onclick={doDeploy}
+      >
+        {deployRunning ? "Deploying…" : "Deploy"}
+      </button>
+    {/if}
     {#if deployError}
       <p class="field-error">{deployError}</p>
     {/if}

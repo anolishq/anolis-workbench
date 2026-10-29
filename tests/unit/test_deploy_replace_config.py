@@ -38,20 +38,20 @@ class InstallExecutor(Executor):
     def remove_private_dir(self, path: str) -> None:
         pass
 
-    def run(self, cmd, *, input=None, sudo=False, timeout=None):  # type: ignore[no-untyped-def]
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
         self.commands.append(list(cmd))
         if sudo and cmd[0] == "bash":
             self.sudo_runs.append(list(cmd))
             return RunResult(returncode=0, stdout=self.output, stderr="")
         return RunResult(returncode=1, stdout="", stderr="")
 
-    def write_file(self, path, data):  # type: ignore[no-untyped-def]
+    def write_file(self, path, data):
         pass
 
-    def mkdir(self, path):  # type: ignore[no-untyped-def]
+    def mkdir(self, path):
         pass
 
-    def file_exists(self, path):  # type: ignore[no-untyped-def]
+    def file_exists(self, path):
         return False
 
 
