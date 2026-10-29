@@ -6,6 +6,7 @@ targeting the local machine or a remote host over SSH.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from abc import ABC, abstractmethod
@@ -38,6 +39,7 @@ _ALLOWED_COMMANDS: set[str] = {
     "ln",
     "ls",
     "mkdir",
+    "mktemp",
     "mv",
     "pip3",
     "python3",
@@ -128,6 +130,29 @@ class Executor(ABC):
     @abstractmethod
     def file_exists(self, path: str) -> bool:
         """Check if a file exists on the target."""
+
+    def make_private_dir(self) -> str:
+        """A fresh directory only this user can enter, to stage what a sudo
+        step then runs (#652, #655): mktemp -d makes it 0700 and owned by the
+        user, and never reuses a path that already exists."""
+        result = self.run(["mktemp", "-d", _PRIVATE_DIR_TEMPLATE], timeout=30)
+        path = result.stdout.strip()
+        if result.returncode != 0 or not _PRIVATE_DIR.fullmatch(path):
+            raise RuntimeError(f"mktemp -d gave {(result.stderr.strip() or path)!r}")
+        return path
+
+    def remove_private_dir(self, path: str) -> None:
+        """Remove a directory make_private_dir returned, and nothing else."""
+        if not _PRIVATE_DIR.fullmatch(path):
+            raise ValueError(f"refusing to remove {path!r}: not a directory make_private_dir creates")
+        if self.run(["test", "-L", path], timeout=30).returncode == 0:
+            raise ValueError(f"refusing to remove {path!r}: it is a symlink")
+        self.run(["rm", "-rf", "--", path], timeout=60)
+
+
+# What make_private_dir makes: mktemp -d replaces the X's with [A-Za-z0-9].
+_PRIVATE_DIR_TEMPLATE = "/tmp/anolis-deploy.XXXXXXXXXX"
+_PRIVATE_DIR = re.compile(r"/tmp/anolis-deploy\.[A-Za-z0-9]{10}")
 
 
 def zero_buffer(buf: bytearray) -> None:
