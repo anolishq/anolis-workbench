@@ -620,38 +620,48 @@ def _launch_locked(name: str, system: dict, project_dir: pathlib.Path) -> None:
     _spawn(name, system, project_dir, launch_config)
 
 
+def _runtime_command(system: dict, launch_config: str) -> list[str]:
+    host = canonical.host_paths({"host_paths": system.get("host_paths")})
+    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
+    if runtime_exe is None:
+        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
+    # Checked here, not left to Popen, so restart() can refuse it before it
+    # stops the running runtime (#672).
+    if not runtime_exe.is_file() or not os.access(runtime_exe, os.X_OK):
+        raise RuntimeError(
+            f"Runtime executable '{runtime_exe}' does not exist or is not executable "
+            "(set it in the project's host paths)."
+        )
+    return [str(runtime_exe), "--config", launch_config]
+
+
 def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: str) -> None:
     """Start the runtime on `launch_config` and publish it as the tracked process.
 
     A failure after the runtime has started stops it again, so nothing runs
     that the workbench does not track (#671).
     """
-    host = canonical.host_paths({"host_paths": system.get("host_paths")})
-    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
-    if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
-    cmd = [str(runtime_exe), "--config", launch_config]
+    cmd = _runtime_command(system, launch_config)
 
-    # Prepare log file (overwrite)
-    log_path = project_dir / "logs" / "latest.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=str(paths_module.DATA_ROOT),
+        bufsize=1,
+        text=True,
+        env=child_env(),
+    )
 
+    log_file = None
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=str(paths_module.DATA_ROOT),
-            bufsize=1,
-            text=True,
-            env=child_env(),
-        )
-    except BaseException:
-        log_file.close()
-        raise
+        # Overwritten only once the runtime has started, so a launch that fails
+        # to start keeps the previous run's log (#672). The runtime's output
+        # waits in its pipe until the reader thread copies it here.
+        log_path = project_dir / "logs" / "latest.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "w", buffering=1, encoding="utf-8")
 
-    try:
         # Write running.json
         running_data = {
             "pid": proc.pid,
@@ -681,7 +691,8 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        log_file.close()
+        if log_file is not None:
+            log_file.close()
         raise
 
 
@@ -773,6 +784,8 @@ def _restart_locked(name: str, project_dir: pathlib.Path) -> None:
     # never handed to the runtime (it may lack runtime.data_dir, #562). Before
     # stop(), so a project that cannot render leaves the runtime running.
     launch_config = str(materialize_launch_config(project_dir, system))
+    # And one with no runtime executable to start, too (#672).
+    _runtime_command(system, launch_config)
 
     _stop_locked()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
