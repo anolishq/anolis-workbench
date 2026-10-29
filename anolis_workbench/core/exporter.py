@@ -10,8 +10,10 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import pathlib
 import re
+import secrets
 import zipfile
 from datetime import datetime, timezone
 from typing import Any
@@ -310,17 +312,34 @@ def _checksums_file_bytes(files: dict[str, bytes]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def _open_unique_temp(out_path: pathlib.Path) -> tuple[int, pathlib.Path]:
+    """A new temp file beside out_path, opened exclusively. Mode 0o666 less the
+    umask, the mode the archive has always had; mkstemp's would be 0o600."""
+    for _ in range(100):
+        tmp_path = out_path.with_name(f".{out_path.name}.{secrets.token_hex(6)}.tmp")
+        try:
+            return os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666), tmp_path
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no unused temp file name beside {out_path}")
+
+
 def _write_zip_deterministic(*, files: dict[str, bytes], out_path: pathlib.Path) -> None:
+    """Write the archive to a unique temp file beside out_path and replace
+    out_path with it only once the archive is closed. On any failure the temp
+    file is removed, out_path is left as it was and the error is re-raised (#675)."""
     out_path = out_path.resolve()  # ensure canonical path at function entry
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-
-    with zipfile.ZipFile(tmp_path, mode="w") as archive:
-        for rel_path in sorted(files):
-            info = zipfile.ZipInfo(filename=rel_path, date_time=_ZIP_EPOCH)
-            info.compress_type = zipfile.ZIP_STORED
-            info.create_system = 3
-            info.external_attr = (0o100644 & 0xFFFF) << 16
-            archive.writestr(info, files[rel_path])
-
-    tmp_path.replace(out_path)
+    fd, tmp_path = _open_unique_temp(out_path)
+    try:
+        with os.fdopen(fd, "wb") as handle, zipfile.ZipFile(handle, mode="w") as archive:
+            for rel_path in sorted(files):
+                info = zipfile.ZipInfo(filename=rel_path, date_time=_ZIP_EPOCH)
+                info.compress_type = zipfile.ZIP_STORED
+                info.create_system = 3
+                info.external_attr = (0o100644 & 0xFFFF) << 16
+                archive.writestr(info, files[rel_path])
+        tmp_path.replace(out_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
