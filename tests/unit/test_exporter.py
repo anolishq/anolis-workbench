@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import pathlib
+import stat
 import zipfile
 from typing import Callable
 
@@ -254,3 +256,57 @@ def test_release_pins_env_seeds_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     assert releases._seed_from_env() == {}
     monkeypatch.delenv("ANOLIS_WB_RELEASE_PINS")
     assert releases._seed_from_env() == {}
+
+
+# ---------------------------------------------------------------------------
+# The archive write (#675): a unique temp file beside the output, replaced
+# onto it only once the archive is closed, and removed on any failure.
+# ---------------------------------------------------------------------------
+
+_ARCHIVE_FILES = {"a.txt": b"x" * 1000, "b.txt": b"y"}
+
+
+def _leftover_temp_files(directory: pathlib.Path) -> list[str]:
+    return sorted(p.name for p in directory.iterdir() if p.name.endswith(".tmp"))
+
+
+@pytest.mark.parametrize("failing", ["writestr", "close"])
+def test_a_failed_archive_write_leaves_no_temp_file_and_the_old_archive(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    out = tmp_path / "demo.anpkg"
+    out.write_bytes(b"the previous export")
+
+    def _fail(self: zipfile.ZipFile, *args: object, **kwargs: object) -> None:
+        raise OSError(f"{failing} failed: disk full")
+
+    monkeypatch.setattr(zipfile.ZipFile, failing, _fail)
+    with pytest.raises(OSError, match=f"{failing} failed: disk full"):
+        exporter._write_zip_deterministic(files=_ARCHIVE_FILES, out_path=out)
+
+    assert _leftover_temp_files(tmp_path) == []
+    assert out.read_bytes() == b"the previous export"
+
+
+def test_a_stale_fixed_temp_path_does_not_stop_an_export(tmp_path: pathlib.Path) -> None:
+    out = tmp_path / "demo.anpkg"
+    (tmp_path / "demo.anpkg.tmp").mkdir()
+
+    exporter._write_zip_deterministic(files=_ARCHIVE_FILES, out_path=out)
+
+    with zipfile.ZipFile(out) as archive:
+        assert archive.testzip() is None
+        assert sorted(archive.namelist()) == ["a.txt", "b.txt"]
+
+
+def test_the_archive_keeps_the_mode_an_export_has_always_had(tmp_path: pathlib.Path) -> None:
+    # open()'s 0o666 less the umask, as before the temp file became unique; a
+    # mkstemp temp file would make it 0o600.
+    umask = os.umask(0)
+    os.umask(umask)
+    out = tmp_path / "demo.anpkg"
+
+    exporter._write_zip_deterministic(files=_ARCHIVE_FILES, out_path=out)
+
+    assert stat.S_IMODE(out.stat().st_mode) == 0o666 & ~umask
+    assert _leftover_temp_files(tmp_path) == []
