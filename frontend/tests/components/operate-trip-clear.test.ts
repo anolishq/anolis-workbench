@@ -164,6 +164,16 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     expect(actionPosts(rt)).toEqual([]);
   });
 
+  it("keeps the trips list out of the device list's button reset (wb#691)", async () => {
+    fakeRuntime({ tripped: { dcmt0: true } });
+    // `.operate-list li button` strips a button to bare text for the device
+    // list; the trips list's "Clear trip…" buttons must keep .btn-secondary.
+    const list = (await screen.findByTestId("watchdog-trips")).querySelector("ul");
+    expect(list).not.toBeNull();
+    expect(list?.classList.contains("operate-list")).toBe(false);
+    expect(list?.classList.contains("operate-trip-list")).toBe(true);
+  });
+
   it("walks a DCMT through release, MANUAL, the clear and the brakes, each step confirmed and in order", async () => {
     const rt = fakeRuntime();
     await fireEvent.click(

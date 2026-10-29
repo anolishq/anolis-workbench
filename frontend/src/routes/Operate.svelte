@@ -1318,7 +1318,7 @@
           <p class="field-note">
             These boards' command watchdogs tripped, so they refuse every command until cleared.
           </p>
-          <ul class="operate-list">
+          <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
               <li>
                 <span>{key}</span>
