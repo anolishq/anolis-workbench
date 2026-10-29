@@ -689,35 +689,46 @@ def test_deploy_local_omits_telemetry_flag_by_default(
     assert "--with-telemetry-export" not in executor.commands[0]["cmd"]
 
 
-def _author_influx_token(project_dir: pathlib.Path, token: str) -> None:
+def _author_influx_token(project_dir: pathlib.Path, token: str, shape: str = "nested") -> None:
     # Imported projects skip save-time validation, so write the file directly.
     path = project_dir / "config" / "anolis-runtime.automation.yaml"
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    doc["telemetry"] = {"enabled": True, "influxdb": {"token": token}}
+    if shape == "nested":
+        doc["telemetry"] = {"enabled": True, "influxdb": {"token": token}}
+    else:
+        # The deprecated flat key, which the runtime maps since anolis#677.
+        doc["telemetry"] = {"enabled": True, "influx_token": token}
     path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
-def test_deploy_refuses_an_authored_influx_token(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("shape", ["nested", "flat"])
+def test_deploy_refuses_an_authored_influx_token(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
     _stub_fetch(monkeypatch)
-    _author_influx_token(project_dir, "dev-token")
+    _author_influx_token(project_dir, "dev-token", shape)
     executor = RecordingExecutor()
     with pytest.raises(deploy.DeployError, match="INFLUXDB_TOKEN"):
         deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=executor)
     assert executor.commands == []
 
 
+@pytest.mark.parametrize("shape", ["nested", "flat"])
 def test_bundle_refuses_an_authored_influx_token(
-    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, shape: str
 ) -> None:
     _stub_fetch(monkeypatch)
-    _author_influx_token(project_dir, "dev-token")
+    _author_influx_token(project_dir, "dev-token", shape)
     with pytest.raises(deploy.DeployError, match="INFLUXDB_TOKEN"):
         deploy.stage_bundle(project_dir=project_dir, project_name="deploy-fixture", out_dir=tmp_path / "out")
 
 
-def test_deploy_accepts_an_empty_influx_token(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("shape", ["nested", "flat"])
+def test_deploy_accepts_an_empty_influx_token(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
     _stub_fetch(monkeypatch)
-    _author_influx_token(project_dir, "")
+    _author_influx_token(project_dir, "", shape)
     executor = RecordingExecutor()
     deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=executor)
     assert len(executor.commands) == 1
