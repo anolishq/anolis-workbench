@@ -219,33 +219,53 @@ def runtime_config_errors(doc: Any) -> list[str]:
     ]
 
 
+def _authored_influx_tokens(doc: Any) -> list[tuple[dict, str, str]]:
+    """Each non-empty authored InfluxDB token in `doc`, as (mapping, key, dotted path).
+
+    Both shapes count: the nested `telemetry.influxdb.token`, and the deprecated
+    flat `telemetry.influx_token`, which the runtime maps since anolis#677.
+    """
+    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
+    if not isinstance(telemetry, dict):
+        return []
+    found = []
+    influxdb = telemetry.get("influxdb")
+    if isinstance(influxdb, dict) and influxdb.get("token") not in (None, ""):
+        found.append((influxdb, "token", "telemetry.influxdb.token"))
+    if telemetry.get("influx_token") not in (None, ""):
+        found.append((telemetry, "influx_token", "telemetry.influx_token"))
+    return found
+
+
+def influx_token_keys(doc: Any) -> list[str]:
+    """The dotted paths of the authored InfluxDB tokens in `doc`."""
+    return [path for _, _, path in _authored_influx_tokens(doc)]
+
+
 def influx_token_error(doc: Any) -> str | None:
-    """An authored `telemetry.influxdb.token`, which no project may carry.
+    """An authored InfluxDB token, which no project may carry.
 
     The runtime applies INFLUXDB_TOKEN from its environment only when the
     config's token is empty, and deploy stages the config verbatim, so an
     authored token would shadow the target's real one.
     """
-    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
-    influxdb = telemetry.get("influxdb") if isinstance(telemetry, dict) else None
-    token = influxdb.get("token") if isinstance(influxdb, dict) else None
-    if token is None or token == "":
+    keys = influx_token_keys(doc)
+    if not keys:
         return None
     return (
-        "telemetry.influxdb.token is set. Remove it and provide INFLUXDB_TOKEN in the runtime's "
+        f"{' and '.join(keys)} {'is' if len(keys) == 1 else 'are'} set. Remove "
+        f"{'it' if len(keys) == 1 else 'them'} and provide INFLUXDB_TOKEN in the runtime's "
         "environment: the runtime reads INFLUXDB_TOKEN only when the config's token is empty, so an "
         "authored token shadows the target's own."
     )
 
 
 def strip_influx_token(doc: Any) -> bool:
-    """Drop an authored `telemetry.influxdb.token`; True when one was there."""
-    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
-    influxdb = telemetry.get("influxdb") if isinstance(telemetry, dict) else None
-    if not isinstance(influxdb, dict) or influx_token_error(doc) is None:
-        return False
-    del influxdb["token"]
-    return True
+    """Drop every authored InfluxDB token; True when one was there."""
+    found = _authored_influx_tokens(doc)
+    for mapping, key, _ in found:
+        del mapping[key]
+    return bool(found)
 
 
 # install.sh's inertness gate is an AWK PASS OVER THE RAW YAML, not a structural

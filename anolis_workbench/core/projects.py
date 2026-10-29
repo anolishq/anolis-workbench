@@ -443,11 +443,12 @@ def _strip_influx_tokens(document: dict) -> list[str]:
     declared = declared if isinstance(declared, dict) else {}
     notes = []
     for variant, doc in sorted(document.get("variants", {}).items()):
+        keys = canonical.influx_token_keys(doc)
         if canonical.strip_influx_token(doc):
             rel = declared.get(variant)
             path = rel if isinstance(rel, str) else canonical.variant_relpath(variant)
             notes.append(
-                f"Removed telemetry.influxdb.token from runtime variant '{variant}' ({path}); "
+                f"Removed {' and '.join(keys)} from runtime variant '{variant}' ({path}); "
                 "save to apply. The runtime reads INFLUXDB_TOKEN from its environment."
             )
     return notes
