@@ -74,17 +74,16 @@ the install copies that token alone into
 user, so Operate can reach a runtime that requires the token on loopback.
 The workbench sends it only to a runtime on this machine. It keeps the
 token out of the environment of the processes it starts, but a program it
-launches runs as the same user and can still read the file. The workbench
-has no command that uninstalls the service. The runtime's
-`install.sh --uninstall` removes the service along with the token copy (the
-token copy only from anolis v0.1.48 on). To remove the workbench service and
-the copy by hand and keep the runtime:
+launches runs as the same user and can still read the file. To remove the
+workbench service and the copy, and keep the runtime:
 
 ```sh
-sudo systemctl disable --now anolis-workbench.service
-sudo rm -f /etc/systemd/system/anolis-workbench.service /etc/anolis/workbench-runtime-token
-sudo systemctl daemon-reload
+anolis-provision workbench-service --uninstall
 ```
+
+The runtime's `install.sh --uninstall` removes the token copy (from anolis
+v0.1.48 on). From anolis 0.4.0 it keeps the workbench service and prints the
+commands that remove it; earlier releases removed the service too.
 
 Anyone who can reach the workbench while the service runs, as a local
 account on the host or over an ssh tunnel to it, can run programs as the
