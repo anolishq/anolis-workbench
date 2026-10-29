@@ -1201,8 +1201,10 @@
             </span>
           {:else}
             <!-- The stop is armed either way; "Ready" claims the machine is,
-                 so not while startup failed or a board is tripped (wb#692). -->
-            {#if trippedKeys.length || (startupSafeState && !summarizeStartupSafeState(startupSafeState).ok)}
+                 so not while a board is tripped (wb#692). Current conditions
+                 only: startup_safe_state is a past event, reported until the
+                 runtime restarts, and has its own warning below. -->
+            {#if trippedKeys.length}
               <span class="estop-chip field-error" data-testid="estop-state">Not ready</span>
             {:else}
               <span class="estop-chip" data-testid="estop-state">Ready</span>
