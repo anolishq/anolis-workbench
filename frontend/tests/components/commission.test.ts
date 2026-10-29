@@ -354,6 +354,33 @@ describe("Commission.svelte", () => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
     });
   });
+
+  it("shows a refused stop instead of passing over it (#670)", async () => {
+    const refusal = "Cannot stop 'demo' while 'other' is running. Stop 'other' from its own project.";
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = pathFromInput(input);
+      if (path === "/api/status")
+        return Promise.resolve(jsonResponse(200, { running: true, active_project: "demo" }));
+      if (path === "/api/projects/demo/stop") return Promise.resolve(jsonResponse(409, { error: refusal }));
+      return Promise.resolve(jsonResponse(200, {}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(Commission, {
+      props: {
+        projectName: "demo",
+        system: createProjectDocument("demo"),
+        runtimeStatus: createRuntimeStatus({ running: true, active_project: "demo" }),
+        commissionRunningForCurrent: true,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(`Not stopped: ${refusal}`)).toBeInTheDocument();
+    });
+  });
 });
 
 describe("Commission.svelte — Deploy to device (#275)", () => {
