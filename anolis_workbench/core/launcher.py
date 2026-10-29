@@ -585,6 +585,18 @@ def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pat
 # ---------------------------------------------------------------------------
 
 
+class LaunchConfigError(RuntimeError):
+    """An executable the project names is not set or cannot be run (#672).
+
+    The routes answer it with 422 and `code`, not with the 409 a runtime that
+    is already running gets: the caller has a project to fix, not one to stop.
+    """
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class LaunchValidationError(RuntimeError):
     """The project fails the blocking validation preflight runs (#414)."""
 
@@ -624,13 +636,17 @@ def _runtime_command(system: dict, launch_config: str) -> list[str]:
     host = canonical.host_paths({"host_paths": system.get("host_paths")})
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
+        raise LaunchConfigError(
+            "Runtime executable path is missing (set it in the project's host paths).",
+            code="runtime_executable_missing",
+        )
     # Checked here, not left to Popen, so restart() can refuse it before it
     # stops the running runtime (#672).
     if not runtime_exe.is_file() or not os.access(runtime_exe, os.X_OK):
-        raise RuntimeError(
+        raise LaunchConfigError(
             f"Runtime executable '{runtime_exe}' does not exist or is not executable "
-            "(set it in the project's host paths)."
+            "(set it in the project's host paths).",
+            code="runtime_executable_missing",
         )
     return [str(runtime_exe), "--config", launch_config]
 
@@ -979,7 +995,10 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
         pid = entry.get("id")
         executable = provider_paths.get(pid, {}).get("executable") if isinstance(pid, str) else None
         if not executable:
-            raise RuntimeError(f"No host executable configured for provider '{pid}' (set it in the project's paths).")
+            raise LaunchConfigError(
+                f"No host executable configured for provider '{pid}' (set it in the project's paths).",
+                code="provider_executable_missing",
+            )
         entry["command"] = str(_resolve_executable_path(executable) or executable)
         rel = profile_providers.get(pid, {}).get("config") if isinstance(pid, str) else None
         if isinstance(rel, str):
