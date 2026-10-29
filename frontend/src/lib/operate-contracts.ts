@@ -427,37 +427,52 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
 export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
   text: string;
   ok: boolean;
+  /** One line per failure reason, naming the calls that hit it, then one per skipped call (wb#692). */
+  calls: string[];
 } {
   const head = `Startup safe state (${s.software_safe_state})`;
+  const byError = new Map<string, string[]>();
+  for (const a of s.failed_actions) {
+    const error = a.error ?? "failed";
+    byError.set(error, [...(byError.get(error) ?? []), `${a.device_handle}/${a.function}`]);
+  }
+  const calls = [
+    ...[...byError].map(([error, names]) => `${names.join(", ")}: ${error}`),
+    ...s.skipped_actions.map((a) => `${a.device_handle}/${a.function} skipped: ${a.reason}`),
+  ];
   // A skipped call's device was absent at startup, and is not driven when it
   // appears later (anolis#461): never ok, whatever the calls that ran did.
   const skipped =
     s.skipped_actions.length === 0
       ? ""
-      : `${s.skipped_actions.length} call(s) skipped, device absent at startup: ` +
-        s.skipped_actions.map((a) => `${a.device_handle}/${a.function}: ${a.reason}`).join("; ");
+      : `${s.skipped_actions.length} call(s) skipped, device absent at startup.`;
   if (s.ran && s.safe_state_achieved) {
     const text = `${head}: every call it issued was accepted by its provider.`;
-    return skipped ? { text: `${text} ${skipped}`, ok: false } : { text, ok: true };
+    return skipped ? { text: `${text} ${skipped}`, ok: false, calls } : { text, ok: true, calls };
   }
   if (s.ran && s.failed_actions.length === 0) {
     if (skipped) {
-      return { text: `${head} issued no call: ${skipped}`, ok: false };
+      return { text: `${head} issued no call: ${skipped}`, ok: false, calls };
     }
     // Otherwise only the zero rung with no actuating function issues no call.
-    return { text: `${head} ran but issued no call, so nothing was driven.`, ok: false };
+    return { text: `${head} ran but issued no call, so nothing was driven.`, ok: false, calls };
   }
   if (s.ran) {
-    const detail = s.failed_actions
-      .map((a) => `${a.device_handle}/${a.function}: ${a.error ?? "failed"}`)
-      .join("; ");
-    const text = `${head}: ${s.failed_actions.length} call(s) failed: ${detail}`;
-    return { text: skipped ? `${text}. ${skipped}` : text, ok: false };
+    const text = `${head}: ${s.failed_actions.length} call(s) failed.`;
+    return { text: skipped ? `${text} ${skipped}` : text, ok: false, calls };
   }
   if (s.on_startup === "leave") {
-    return { text: "Outputs were left as they were at startup (on_startup: leave).", ok: true };
+    return {
+      text: "Outputs were left as they were at startup (on_startup: leave).",
+      ok: true,
+      calls,
+    };
   }
-  return { text: "No software safe state is declared, so nothing ran at startup.", ok: true };
+  return {
+    text: "No software safe state is declared, so nothing ran at startup.",
+    ok: true,
+    calls,
+  };
 }
 
 /**

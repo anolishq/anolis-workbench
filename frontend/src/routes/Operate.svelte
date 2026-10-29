@@ -20,6 +20,7 @@
     UnknownRecord,
     WorkbenchConfig,
   } from "../lib/contracts";
+  import { isImportedDoc } from "../lib/contracts";
   import {
     activeVariant,
     launchVariantMismatch,
@@ -1050,9 +1051,16 @@
 
 {#snippet safeStateFix()}
   <span class="field-note" data-testid="safe-state-fix">
-    Declared under <code>safety.safe_state</code> in the project's
-    <code>{safeStateFile}</code> for dev-launch, or in
-    <code>/opt/anolis/config/runtime.yaml</code> on an installed target, which survives redeploys.
+    {#if isImportedDoc(system) || runtimeStatus?.external}
+      <!-- No dev-launch here, and which variant the target installed is not
+           known (wb#692). -->
+      Declared under <code>safety.safe_state</code> in
+      <code>/opt/anolis/config/runtime.yaml</code> on the installed target, which survives redeploys.
+    {:else}
+      Declared under <code>safety.safe_state</code> in the project's
+      <code>{safeStateFile}</code> for dev-launch, or in
+      <code>/opt/anolis/config/runtime.yaml</code> on an installed target, which survives redeploys.
+    {/if}
   </span>
 {/snippet}
 
@@ -1192,7 +1200,13 @@
               No safe state declared: latch only
             </span>
           {:else}
-            <span class="estop-chip" data-testid="estop-state">Ready</span>
+            <!-- The stop is armed either way; "Ready" claims the machine is,
+                 so not while startup failed or a board is tripped (wb#692). -->
+            {#if trippedKeys.length || (startupSafeState && !summarizeStartupSafeState(startupSafeState).ok)}
+              <span class="estop-chip field-error" data-testid="estop-state">Not ready</span>
+            {:else}
+              <span class="estop-chip" data-testid="estop-state">Ready</span>
+            {/if}
           {/if}
           <InfoToggle label="About the software stop">
             {#if estop.software_safe_state === "hooks"}
@@ -1539,6 +1553,13 @@
           >
             {startup.text}
           </span>
+          {#if startup.calls.length}
+            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
+              {#each startup.calls as call (call)}
+                <li>{call}</li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
       {:else if !statusSettled}
         <!-- Until the first status reply settles, a missing status is not a
