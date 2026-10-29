@@ -19,7 +19,7 @@ import pathlib
 import pytest
 import yaml
 
-from anolis_workbench.core import canonical, canonical_validator, machine_profile
+from anolis_workbench.core import canonical, canonical_validator, machine_profile, projects
 
 TEMPLATES_DIR = pathlib.Path(__file__).parent.parent / "anolis_workbench" / "templates"
 FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "bioreactor"
@@ -54,6 +54,12 @@ def test_template_machine_id_matches_its_directory(template: pathlib.Path) -> No
     and directory disagree produces configs pointing at the wrong project."""
     profile = machine_profile.load_profile(template)
     assert profile["machine_id"] == template.name
+
+
+def test_template_declares_a_safe_state(template: pathlib.Path) -> None:
+    # A project made from a template must not open warning about the template
+    # itself: the software stop needs a safe state to drive (wb#693).
+    assert projects.safe_state_warnings(canonical.read_project(template)) == []
 
 
 def test_template_manual_variant_is_inert(template: pathlib.Path) -> None:
