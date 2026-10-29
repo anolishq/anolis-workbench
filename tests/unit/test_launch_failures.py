@@ -8,6 +8,7 @@ running runtime, so a refused restart left nothing running.
 
 from __future__ import annotations
 
+import os
 import pathlib
 from typing import Any
 
@@ -98,16 +99,28 @@ def test_a_launch_with_no_runtime_executable_keeps_the_previous_runs_log(
     assert log.read_text(encoding="utf-8") == "previous run log\n"
 
 
-def test_a_restart_with_no_runtime_executable_leaves_the_runtime_running(
-    host: dict[str, str], tmp_path: pathlib.Path
+@pytest.mark.parametrize("case", ["empty", "nonexistent", "not executable"])
+def test_a_restart_with_no_usable_runtime_executable_leaves_the_runtime_running(
+    host: dict[str, str], tmp_path: pathlib.Path, case: str
 ) -> None:
     project_dir = tmp_path / "demo"
     launcher.launch("demo", {}, project_dir)
     running = launcher._state["process"]
     assert running is not None and running.alive
-    host["runtime_executable"] = ""  # edited after the launch
+    # Edited after the launch.
+    if case == "empty":
+        host["runtime_executable"] = ""
+    elif case == "nonexistent":
+        host["runtime_executable"] = str(tmp_path / "no-such-runtime")
+    else:
+        if os.name == "nt":
+            pytest.skip("Windows has no execute permission bit to withhold")
+        plain = tmp_path / "plain-file"
+        plain.write_text("not a program\n", encoding="utf-8")
+        plain.chmod(0o644)
+        host["runtime_executable"] = str(plain)
 
-    with pytest.raises(RuntimeError, match="Runtime executable path is missing"):
+    with pytest.raises(RuntimeError, match="Runtime executable"):
         launcher.restart("demo", project_dir)
 
     assert running.alive, "the refused restart stopped the runtime first"
