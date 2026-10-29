@@ -132,7 +132,9 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
     renderOperate(() => jsonResponse(200, status({ software_safe_state: 'hooks' }, startup(false))));
 
     expect(await screen.findByTestId('estop-startup')).toHaveTextContent('⚠ Startup safe state not achieved');
-    expect(screen.getByTestId('startup-safe-state')).toHaveTextContent('1 call(s) failed: p0/heater/set_power: timeout');
+    expect(screen.getByTestId('startup-safe-state')).toHaveTextContent('1 call(s) failed.');
+    // wb#692: the stop is armed, but the machine is not ready.
+    expect(screen.getByTestId('estop-state').textContent?.trim()).toBe('Not ready');
   });
 
   it('keeps an achieved startup safe state out of the row, in Runtime Status', async () => {

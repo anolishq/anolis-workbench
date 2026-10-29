@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import Operate from '../../src/routes/Operate.svelte';
@@ -184,6 +184,12 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     },
   );
 
+  /** The startup report's call lines under Runtime Status, in order. */
+  const calls = () =>
+    within(screen.getByTestId('startup-safe-state-calls'))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent?.trim());
+
   it('warns when calls failed, naming each failed call', async () => {
     renderOperate(
       withStartup({
@@ -198,10 +204,32 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
 
     const line = await screen.findByTestId('startup-safe-state');
     expect(line).toHaveClass('field-error');
-    expect(line).toHaveTextContent(
-      'Startup safe state (setpoints): 2 call(s) failed: p0/heater/set_power: timeout; p1/pump/stop: failed',
-    );
+    expect(line).toHaveTextContent('Startup safe state (setpoints): 2 call(s) failed.');
     expect(line.textContent).not.toMatch(/accepted/);
+    expect(calls()).toEqual(['p0/heater/set_power: timeout', 'p1/pump/stop: failed']);
+  });
+
+  // wb#692: seven calls refused for one reason were one 1,100-character line.
+  it('lists the failed calls one reason per line, the calls that hit it together', async () => {
+    const refused = 'Provider call failed: DCMT SET command refused: WATCHDOG_TRIP';
+    renderOperate(
+      withStartup({
+        safe_state_achieved: false,
+        failed_actions: [
+          { device_handle: 'bread0/dcmt0', function: 'set_mode', success: false, error: refused },
+          { device_handle: 'bread0/dcmt1', function: 'set_mode', success: false, error: refused },
+          { device_handle: 'bread0/rlht0', function: 'set_power', success: false, error: 'timeout' },
+        ],
+      }),
+    );
+
+    expect(await screen.findByTestId('startup-safe-state')).toHaveTextContent(
+      'Startup safe state (hooks): 3 call(s) failed.',
+    );
+    expect(calls()).toEqual([
+      `bread0/dcmt0/set_mode, bread0/dcmt1/set_mode: ${refused}`,
+      'bread0/rlht0/set_power: timeout',
+    ]);
   });
 
   // The runtime's verdict is false with no failed call only when the rung
@@ -231,11 +259,13 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     const line = await screen.findByTestId('startup-safe-state');
     expect(line).toHaveClass('field-error');
     expect(line).toHaveTextContent(
-      'Startup safe state (hooks) issued no call: 2 call(s) skipped, device absent at startup: ' +
-        'bread0/rlht0/set_power: probe failed (version_read_failed): rlht0 did not answer; ' +
-        'bread0/dcmt0/set_open_loop: probe failed (version_read_failed): dcmt0 did not answer',
+      'Startup safe state (hooks) issued no call: 2 call(s) skipped, device absent at startup.',
     );
     expect(line.textContent).not.toMatch(/nothing was driven|accepted|call\(s\) failed/);
+    expect(calls()).toEqual([
+      'bread0/rlht0/set_power skipped: probe failed (version_read_failed): rlht0 did not answer',
+      'bread0/dcmt0/set_open_loop skipped: probe failed (version_read_failed): dcmt0 did not answer',
+    ]);
   });
 
   it('with the calls that ran accepted and one skipped, says both and is not ok', async () => {
@@ -245,9 +275,11 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     expect(line).toHaveClass('field-error');
     expect(line).toHaveTextContent(
       'Startup safe state (hooks): every call it issued was accepted by its provider. ' +
-        '1 call(s) skipped, device absent at startup: ' +
-        'bread0/rlht0/set_power: probe failed (version_read_failed): rlht0 did not answer',
+        '1 call(s) skipped, device absent at startup.',
     );
+    expect(calls()).toEqual([
+      'bread0/rlht0/set_power skipped: probe failed (version_read_failed): rlht0 did not answer',
+    ]);
   });
 
   it('with calls failed and one skipped, names both', async () => {
@@ -262,10 +294,12 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     const line = await screen.findByTestId('startup-safe-state');
     expect(line).toHaveClass('field-error');
     expect(line).toHaveTextContent(
-      'Startup safe state (hooks): 1 call(s) failed: p0/heater/set_power: timeout. ' +
-        '1 call(s) skipped, device absent at startup: ' +
-        'bread0/dcmt0/set_open_loop: probe failed (version_read_failed): dcmt0 did not answer',
+      'Startup safe state (hooks): 1 call(s) failed. 1 call(s) skipped, device absent at startup.',
     );
+    expect(calls()).toEqual([
+      'p0/heater/set_power: timeout',
+      'bread0/dcmt0/set_open_loop skipped: probe failed (version_read_failed): dcmt0 did not answer',
+    ]);
   });
 
   it('says outputs were left as they were under on_startup: leave', async () => {
