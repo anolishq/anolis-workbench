@@ -369,7 +369,8 @@ paths:
       summary: Launch runtime
       description: >-
         Launches the anolis-runtime subprocess for the project. Fails with 409
-        if a runtime is already running.
+        if a runtime is already running, and with 422 if the project fails
+        validation or an executable it names is not set or cannot be run.
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -388,6 +389,8 @@ paths:
           $ref: "#/components/responses/Error404"
         "409":
           $ref: "#/components/responses/Error409"
+        "422":
+          $ref: "#/components/responses/Error422Launch"
         "500":
           $ref: "#/components/responses/Error500"
 
@@ -423,7 +426,9 @@ paths:
       summary: Restart runtime
       description: >-
         Stops then relaunches the runtime for the project. Fails with 409 if
-        the project is not currently running.
+        the project is not currently running, and with 422, before anything is
+        stopped, if the project fails validation or an executable it names is
+        not set or cannot be run.
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -442,6 +447,8 @@ paths:
           $ref: "#/components/responses/Error404"
         "409":
           $ref: "#/components/responses/Error409"
+        "422":
+          $ref: "#/components/responses/Error422Launch"
         "500":
           $ref: "#/components/responses/Error500"
 
@@ -635,6 +642,16 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    Error422Launch:
+      description: >-
+        The project cannot be started as saved. Either it fails validation
+        (`errors` lists the messages), or an executable it names is not set or
+        cannot be run (`code` is runtime_executable_missing or
+        provider_executable_missing). Nothing was started or stopped.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LaunchRefusedResponse"
     Error500:
       description: Unexpected backend error
       content:
@@ -655,6 +672,24 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+
+    LaunchRefusedResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Set when an executable the project names is not set or cannot be run.
+          enum: [runtime_executable_missing, provider_executable_missing]
+        errors:
+          type: array
+          description: Validation messages, when the project fails validation.
+          items:
+            type: string
+      additionalProperties: true
 
     OkResponse:
       type: object

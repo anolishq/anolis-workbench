@@ -33,6 +33,16 @@ Historical note:
   checked only after the running runtime had been stopped, and only for being
   set, so the refusal, or the failed start that followed, left nothing
   running.
+- **Launch and restart answer an executable that isn't configured with 422**
+  (Fixes #672), with `code` `runtime_executable_missing` (the runtime path is
+  not set, does not exist or is not executable) or
+  `provider_executable_missing`. They answered 409, the status "a runtime is
+  already running" uses, so a client could not tell a project to fix from a
+  runtime to stop. 409 stays for those conflicts. Both OpenAPI contracts now
+  list the 422 for launch and restart, which they did not for the validation
+  failure that already returned it.
+  Commission shows such a refusal as "Launch failed: <the route's message>"
+  and reads a launch error as busy only when it is that 409.
 
 ## [0.26.0] - 2026-10-29
 
