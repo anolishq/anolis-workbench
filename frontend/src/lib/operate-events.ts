@@ -2,6 +2,24 @@
 
 import type { UnknownRecord } from "./contracts";
 
+/** A runtime TypedValue (or a plain value) as Operate shows it. */
+export function formatValue(v: unknown): string {
+  if (v === null || v === undefined) return "--";
+  if (typeof v === "object") {
+    const value = v as UnknownRecord;
+    if (typeof value.type === "string") {
+      if (value.type === "double" && value.double !== undefined) return String(value.double);
+      if (value.type === "int64" && value.int64 !== undefined) return String(value.int64);
+      if (value.type === "uint64" && value.uint64 !== undefined) return String(value.uint64);
+      if (value.type === "bool" && value.bool !== undefined) return value.bool ? "true" : "false";
+      if (value.type === "string" && value.string !== undefined) return String(value.string);
+      if (value.type === "bytes" && value.base64 !== undefined) return String(value.base64);
+    }
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
+
 export const DEFAULT_SSE_EVENT_TYPES = [
   "state_update",
   "quality_change",
@@ -82,7 +100,8 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} removed`;
   }
   if (eventType === "state_update") {
-    return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} ${payload.signal_id ?? "signal"}`;
+    const value = payload.value === undefined ? "" : ` = ${formatValue(payload.value)}`;
+    return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} ${payload.signal_id ?? "signal"}${value}`;
   }
   if (eventType === "quality_change") {
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} ${payload.signal_id ?? "signal"} -> ${payload.new_quality ?? "UNKNOWN"}`;

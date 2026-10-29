@@ -101,6 +101,15 @@ describe("operate-events helpers", () => {
     expect(describeEvent("device_removed", { provider_id: "sim0", device_id: "dev0" })).toBe(
       "sim0/dev0 removed",
     );
+    // wb#692: the trace showed which signal changed but not its value.
+    expect(
+      describeEvent("state_update", {
+        provider_id: "sim0",
+        device_id: "tempctl0",
+        signal_id: "tc1_temp",
+        value: { type: "double", double: 25.5 },
+      }),
+    ).toBe("sim0/tempctl0 tc1_temp = 25.5");
     expect(
       describeEvent("stop_chain_change", {
         previous_state: "clear",
