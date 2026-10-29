@@ -383,6 +383,94 @@ describe("Commission.svelte", () => {
   });
 });
 
+describe("Commission.svelte — launch and restart refusals (#672)", () => {
+  const missingRuntime = "Runtime executable path is missing (set it in the project's host paths).";
+
+  function stubLaunch(launch: Response): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === "/api/status") return Promise.resolve(jsonResponse(200, { running: false }));
+        if (path === "/api/projects/demo/preflight")
+          return Promise.resolve(
+            jsonResponse(200, {
+              ok: true,
+              checks: [{ name: "Runtime binary exists", ok: true, error: null, hint: null }],
+              summary: { passed: 1, skipped: 0, failed: 0 },
+            }),
+          );
+        if (path === "/api/projects/demo/launch") return Promise.resolve(launch);
+        return Promise.resolve(jsonResponse(200, {}));
+      }),
+    );
+  }
+
+  async function launch(): Promise<void> {
+    render(Commission, {
+      props: {
+        projectName: "demo",
+        system: createProjectDocument("demo"),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Preflight Check" }));
+    await screen.findByText("Runtime binary exists");
+    await fireEvent.click(screen.getByRole("button", { name: /Launch/ }));
+  }
+
+  it("shows a launch refused for a missing runtime executable as the route says it", async () => {
+    stubLaunch(jsonResponse(422, { error: missingRuntime, code: "runtime_executable_missing" }));
+    await launch();
+    expect(await screen.findByText(`Launch failed: ${missingRuntime}`)).toBeInTheDocument();
+  });
+
+  it("does not take a 422 for a busy runtime, whatever its message says", async () => {
+    const message = "No host executable configured for provider 'already running' (set it in the project's paths).";
+    stubLaunch(jsonResponse(422, { error: message, code: "provider_executable_missing" }));
+    await launch();
+    expect(await screen.findByText(`Launch failed: ${message}`)).toBeInTheDocument();
+    expect(screen.queryByText(/Launch blocked/)).not.toBeInTheDocument();
+  });
+
+  it("still shows a 409 from launch as a runtime already running", async () => {
+    stubLaunch(jsonResponse(409, { error: "A system is already running." }));
+    await launch();
+    expect(
+      await screen.findByText(
+        "Launch blocked: runtime is already active. Stop current runtime before launching this project.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a restart refused for a missing runtime executable as the route says it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === "/api/status")
+          return Promise.resolve(jsonResponse(200, { running: true, active_project: "demo" }));
+        if (path === "/api/projects/demo/restart")
+          return Promise.resolve(jsonResponse(422, { error: missingRuntime, code: "runtime_executable_missing" }));
+        return Promise.resolve(jsonResponse(200, {}));
+      }),
+    );
+    render(Commission, {
+      props: {
+        projectName: "demo",
+        system: createProjectDocument("demo"),
+        runtimeStatus: createRuntimeStatus({ running: true, active_project: "demo" }),
+        commissionRunningForCurrent: true,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    expect(await screen.findByText(`Restart failed: ${missingRuntime}`)).toBeInTheDocument();
+  });
+});
+
 describe("Commission.svelte — Deploy to device (#275)", () => {
   class DrivenEventSource {
     static instances: DrivenEventSource[] = [];
