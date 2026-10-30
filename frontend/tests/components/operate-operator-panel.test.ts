@@ -12,7 +12,9 @@ import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
 
 const RUNNING = { running: true, active_project: "demo" };
 
-function fakeRuntime(opts: { mode?: string; latched?: boolean; tripped?: boolean } = {}) {
+function fakeRuntime(
+  opts: { mode?: string; latched?: boolean; tripped?: boolean; lossLatched?: string[] } = {},
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -27,6 +29,7 @@ function fakeRuntime(opts: { mode?: string; latched?: boolean; tripped?: boolean
           polling_interval_ms: 500,
           providers: [],
           device_count: 1,
+          device_loss_latched: opts.lossLatched ?? [],
           estop: {
             latched: opts.latched ?? false,
             software_safe_state: "hooks",
@@ -109,6 +112,17 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     const engineering = screen.getByTestId("engineering") as HTMLDetailsElement;
     await waitFor(() => expect(engineering.open).toBe(true));
     await waitFor(() => expect(scrolled).toContain(screen.getByTestId("watchdog-trips")));
+  });
+
+  it("does not call a device lost once provider health has it back, while it stays latched", async () => {
+    fakeRuntime({ mode: "MANUAL", lossLatched: ["bread0/dcmt0"] });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).toHaveTextContent(
+        "bread0/dcmt0 came back after a loss. Automation won't drive them until you go MANUAL → AUTO.",
+      ),
+    );
+    expect(screen.getByTestId("machine-line")).not.toHaveTextContent("power");
   });
 
   it("takes the operator to Mode, opening Engineering, in FAULT", async () => {

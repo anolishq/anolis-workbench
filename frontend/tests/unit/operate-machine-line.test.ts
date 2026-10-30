@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { EstopStatus, RuntimeApiStatus, StopChainStatus } from "../../src/lib/contracts";
+import type {
+  EstopStatus,
+  ProviderHealth,
+  RuntimeApiStatus,
+  StopChainStatus,
+} from "../../src/lib/contracts";
 import { machineLine } from "../../src/lib/operate-contracts";
 
 function status(mode: string, extra: Partial<RuntimeApiStatus> = {}): RuntimeApiStatus {
@@ -35,6 +40,24 @@ function chain(state: StopChainStatus["state"], expected_losses: string[] = []):
     mismatches: [],
     since_epoch_ms: null,
   };
+}
+
+// Provider health as Operate polls it: each "provider/device" handle with its
+// health, under a provider in the given state.
+function health(devices: Record<string, string>, state = "AVAILABLE"): ProviderHealth[] {
+  const byProvider = new Map<string, { device_id: string; health: string }[]>();
+  for (const [handle, h] of Object.entries(devices)) {
+    const [provider, device] = handle.split("/");
+    byProvider.set(provider, [
+      ...(byProvider.get(provider) ?? []),
+      { device_id: device, health: h },
+    ]);
+  }
+  return [...byProvider].map(([provider_id, devs]) => ({
+    provider_id,
+    state,
+    devices: devs,
+  })) as unknown as ProviderHealth[];
 }
 
 describe("machineLine (wb#727)", () => {
@@ -83,6 +106,57 @@ describe("machineLine (wb#727)", () => {
       state: "device_lost",
       text: "Device lost: check its power (ezo0/ph0).",
       target: "provider-health",
+    });
+  });
+
+  it("calls a latched device lost while provider health says it is unreachable", () => {
+    const latched = status("MANUAL", { device_loss_latched: ["ezo0/ph0"] });
+    for (const providers of [
+      health({ "ezo0/ph0": "UNAVAILABLE" }),
+      health({ "ezo0/ph0": "STALE" }),
+      health({ "ezo0/ph0": "OK" }, "UNAVAILABLE"),
+      health({ "ezo0/other": "OK" }),
+    ]) {
+      expect(machineLine(latched, null, null, [], providers)).toMatchObject({
+        state: "device_lost",
+        text: "Device lost: check its power (ezo0/ph0).",
+        target: "provider-health",
+      });
+    }
+  });
+
+  it("says a latched device that is back waits for MANUAL to AUTO, with no power advice", () => {
+    // The reference rig on 2026-10-30: all three devices recovered after the
+    // emergency stop was released, and stayed latched in MANUAL.
+    const handles = ["bread0/dcmt0", "bread0/dcmt1", "bread0/rlht0"];
+    const line = machineLine(
+      status("MANUAL", { device_loss_latched: handles }),
+      null,
+      chain("clear"),
+      [],
+      health({ "bread0/dcmt0": "OK", "bread0/dcmt1": "OK", "bread0/rlht0": "WARNING" }),
+    );
+    expect(line).toMatchObject({
+      state: "device_back",
+      text:
+        "bread0/dcmt0, bread0/dcmt1, bread0/rlht0 came back after a loss. " +
+        "Automation won't drive them until you go MANUAL → AUTO.",
+      target: "mode",
+    });
+    expect(line.text).not.toContain("power");
+  });
+
+  it("names only the devices still unreachable when some latched devices are back", () => {
+    const line = machineLine(
+      status("MANUAL", { device_loss_latched: ["bread0/dcmt0", "ezo0/ph0"] }),
+      null,
+      null,
+      [],
+      health({ "bread0/dcmt0": "OK", "ezo0/ph0": "UNAVAILABLE" }),
+    );
+    expect(line).toMatchObject({
+      state: "device_lost",
+      text: "Device lost: check its power (ezo0/ph0).",
     });
   });
 
