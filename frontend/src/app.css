@@ -1553,6 +1553,23 @@ body {
   padding-left: 18px;
 }
 
+/* The declared settings, one form per group (wb#729). */
+.settings-group {
+  margin-bottom: 12px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+
+.setting-row label {
+  min-width: 8em;
+}
+
 .operate-collapsible > summary {
   cursor: pointer;
   font-weight: 600;

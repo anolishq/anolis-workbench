@@ -1,0 +1,345 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import Operate from "../../src/routes/Operate.svelte";
+import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
+
+// wb#729: the operator panel's settings, the declared groups with labels,
+// units, current values and where each value came from, saved one group at a
+// time; a note once after a restart that they are back at their defaults
+// (anolis#681); and Start and Stop experiment, which run the profile's
+// experiment.start and experiment.stop, Start refusing with the reason and
+// the fix while the software stop is latched, a board is tripped or a device
+// is lost.
+
+const RUNNING = { running: true, active_project: "demo" };
+
+const OPERATOR = {
+  settings: [
+    {
+      group: "Dose 1",
+      items: [
+        { parameter: "dose1_enable", label: "On" },
+        { parameter: "dose1_interval_s", label: "Every", unit: "s" },
+        { parameter: "dose1_pulse_s", label: "For", unit: "s" },
+      ],
+    },
+    { group: "Stirring", items: [{ parameter: "impeller_pwm", label: "Speed", unit: "%" }] },
+  ],
+  experiment: {
+    start: { enable: ["impeller_enable", "dose1_enable"], mode: "AUTO" },
+    stop: { disable: ["impeller_enable", "dose1_enable"], mode: "IDLE" },
+  },
+};
+
+type Param = {
+  name: string;
+  type: string;
+  value: unknown;
+  source: string;
+  min?: number;
+  max?: number;
+};
+
+type Post = { path: string; body: Record<string, unknown> };
+
+function fakeRuntime(
+  opts: {
+    mode?: string;
+    latched?: boolean;
+    tripped?: boolean;
+    lost?: boolean;
+    chainInForce?: boolean;
+    down?: boolean;
+    uptimes?: number[];
+    operator?: unknown;
+  } = {},
+) {
+  let mode = opts.mode ?? "IDLE";
+  const uptimes = [...(opts.uptimes ?? [100])];
+  const params: Param[] = [
+    { name: "dose1_enable", type: "bool", value: false, source: "default" },
+    { name: "dose1_interval_s", type: "int64", value: 20, source: "operator", min: 1, max: 86400 },
+    { name: "dose1_pulse_s", type: "int64", value: 3, source: "default", min: 1, max: 60 },
+    { name: "impeller_enable", type: "bool", value: false, source: "default" },
+    { name: "impeller_pwm", type: "int64", value: 80, source: "default", min: 0, max: 100 },
+  ];
+  const posts: Post[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = pathFromInput(input);
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        posts.push({ path, body });
+        if (path === "/v0/parameters") {
+          const p = params.find((x) => x.name === body.name);
+          if (p) Object.assign(p, { value: body.value, source: "operator" });
+          return jsonResponse(200, { status: { code: "OK" } });
+        }
+        if (path === "/v0/mode") {
+          mode = String(body.mode);
+          return jsonResponse(200, { status: { code: "OK" }, mode });
+        }
+        return jsonResponse(200, { status: { code: "OK" } });
+      }
+      if (path === "/api/status") return jsonResponse(200, RUNNING);
+      if (path === "/v0/runtime/status") {
+        if (opts.down) return jsonResponse(503, { status: { code: "UNAVAILABLE" } });
+        const uptime = uptimes.length > 1 ? uptimes.shift() : uptimes[0];
+        return jsonResponse(200, {
+          status: { code: "OK" },
+          version: "0.7.0",
+          mode,
+          uptime_seconds: uptime,
+          polling_interval_ms: 500,
+          providers: [],
+          device_count: 2,
+          device_loss_latched: opts.lost ? ["bread0/dcmt1"] : [],
+          ...(opts.chainInForce
+            ? {
+                stop_chain: {
+                  state: "in_force",
+                  signal: "bread0/gpio0/chain_open",
+                  reason: "open",
+                },
+              }
+            : {}),
+          estop: {
+            latched: opts.latched ?? false,
+            software_safe_state: "hooks",
+            latched_at_epoch_ms: opts.latched ? 1_700_000_000_000 : null,
+            uncovered_actuating_functions: 0,
+          },
+        });
+      }
+      if (path === "/v0/mode") return jsonResponse(200, { status: { code: "OK" }, mode });
+      if (path === "/v0/parameters")
+        return jsonResponse(200, { status: { code: "OK" }, parameters: params });
+      if (path === "/v0/providers/health")
+        return jsonResponse(200, {
+          providers: [
+            {
+              provider_id: "bread0",
+              state: "AVAILABLE",
+              devices: [
+                {
+                  device_id: "dcmt0",
+                  health: "OK",
+                  reported: {
+                    state: "OK",
+                    metrics: { watchdog_tripped: String(opts.tripped ?? false) },
+                  },
+                },
+                ...(opts.lost ? [] : [{ device_id: "dcmt1", health: "OK" }]),
+              ],
+            },
+          ],
+        });
+      return jsonResponse(200, {});
+    }),
+  );
+  const doc = createProjectDocument("demo");
+  if (opts.operator !== null) doc.profile = { ...doc.profile, operator: opts.operator ?? OPERATOR };
+  render(Operate, { props: { projectName: "demo", system: doc, runtimeStatus: RUNNING } });
+  return { posts, mode: () => mode };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+function group(name: string): HTMLElement {
+  return within(screen.getByTestId("operator-settings"))
+    .getByText(name)
+    .closest("[data-testid='settings-group']") as HTMLElement;
+}
+
+function row(groupName: string, label: string): HTMLElement {
+  return within(group(groupName))
+    .getByText(label)
+    .closest("[data-testid='setting']") as HTMLElement;
+}
+
+const paramPosts = (posts: Post[]) =>
+  posts.filter((p) => p.path === "/v0/parameters").map((p) => p.body);
+
+describe("Operate.svelte — the operator panel's settings (#729)", () => {
+  it("shows each group's values with labels, units and where each came from, above Mode", async () => {
+    fakeRuntime();
+
+    await waitFor(() =>
+      expect((within(row("Dose 1", "Every")).getByRole("textbox") as HTMLInputElement).value).toBe(
+        "20",
+      ),
+    );
+    expect(row("Dose 1", "Every")).toHaveTextContent("s");
+    expect(row("Dose 1", "Every")).toHaveTextContent("set");
+    expect(row("Dose 1", "For")).toHaveTextContent("default");
+    expect(within(row("Dose 1", "On")).getByRole("checkbox")).not.toBeChecked();
+    expect(row("Stirring", "Speed")).toHaveTextContent("%");
+
+    const settings = screen.getByTestId("operator-settings");
+    expect(settings.closest("details")).toBeNull();
+    expect(
+      settings.compareDocumentPosition(screen.getByTestId("mode-section")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("saves a group's changed values with one Save, and nothing else", async () => {
+    const rt = fakeRuntime();
+    const every = (await waitFor(() => {
+      const el = within(row("Dose 1", "Every")).getByRole("textbox") as HTMLInputElement;
+      expect(el.value).toBe("20");
+      return el;
+    })) as HTMLInputElement;
+
+    await fireEvent.input(every, { target: { value: "30" } });
+    // Typed, but the value it already has: not sent.
+    await fireEvent.input(within(row("Dose 1", "For")).getByRole("textbox"), {
+      target: { value: "3" },
+    });
+    await fireEvent.click(within(row("Dose 1", "On")).getByRole("checkbox"));
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+
+    // Every post is in once Saved shows, so the list is complete here.
+    expect(await within(group("Dose 1")).findByText("Saved")).toBeInTheDocument();
+    expect(paramPosts(rt.posts)).toEqual([
+      { name: "dose1_enable", value: true },
+      { name: "dose1_interval_s", value: 30 },
+    ]);
+  });
+
+  it("refuses a value out of range, naming it, and saves none of the group", async () => {
+    const rt = fakeRuntime();
+    const pulse = (await waitFor(() => {
+      const el = within(row("Dose 1", "For")).getByRole("textbox") as HTMLInputElement;
+      expect(el.value).toBe("3");
+      return el;
+    })) as HTMLInputElement;
+
+    await fireEvent.input(within(row("Dose 1", "Every")).getByRole("textbox"), {
+      target: { value: "30" },
+    });
+    await fireEvent.input(pulse, { target: { value: "600" } });
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+
+    expect(
+      await within(row("Dose 1", "For")).findByText(/above maximum \(60\)/),
+    ).toBeInTheDocument();
+    expect(paramPosts(rt.posts)).toEqual([]);
+  });
+
+  it("says once, after the runtime restarts, that the settings are back at their defaults", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fakeRuntime({ uptimes: [100, 3] });
+
+    await screen.findByTestId("operator-settings");
+    expect(screen.queryByTestId("settings-restarted")).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    const note = await screen.findByTestId("settings-restarted");
+    expect(note).toHaveTextContent("back at their defaults");
+    await fireEvent.click(within(note).getByRole("button", { name: "OK" }));
+    expect(screen.queryByTestId("settings-restarted")).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(screen.queryByTestId("settings-restarted")).toBeNull();
+  });
+});
+
+describe("Operate.svelte — Start and Stop experiment (#729)", () => {
+  async function click(name: string) {
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).not.toHaveTextContent("not answering"),
+    );
+    await fireEvent.click(
+      within(screen.getByTestId("operator-experiment")).getByRole("button", { name }),
+    );
+  }
+
+  it("Start sets each enable, then goes to AUTO by way of MANUAL", async () => {
+    const rt = fakeRuntime({ mode: "IDLE" });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start experiment");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+    expect(rt.posts.map((p) => p.body)).toEqual([
+      { name: "impeller_enable", value: true },
+      { name: "dose1_enable", value: true },
+      { mode: "MANUAL" },
+      { mode: "AUTO" },
+    ]);
+    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent("started");
+  });
+
+  it("Stop clears each enable, then goes to IDLE by way of MANUAL", async () => {
+    const rt = fakeRuntime({ mode: "AUTO" });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("AUTO"));
+    await click("Stop experiment");
+
+    await waitFor(() => expect(rt.mode()).toBe("IDLE"));
+    expect(rt.posts.map((p) => p.body)).toEqual([
+      { name: "impeller_enable", value: false },
+      { name: "dose1_enable", value: false },
+      { mode: "MANUAL" },
+      { mode: "IDLE" },
+    ]);
+    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent("stopped");
+  });
+
+  it.each([
+    // [case, runtime, the machine line once its status is read, the refusal]
+    [
+      "the software stop is latched",
+      { latched: true },
+      "software stop",
+      /software stop is latched.*Clear the latch/,
+    ],
+    ["a board is tripped", { tripped: true }, "tripped", /bread0\/dcmt0.*tripped.*Clear the trip/],
+    ["a device is lost", { lost: true }, "lost", /bread0\/dcmt1.*lost.*power/],
+    // From FAULT, going by way of MANUAL would clear the fault unseen.
+    [
+      "the runtime is in FAULT",
+      { mode: "FAULT" },
+      "In FAULT",
+      /in FAULT.*Set MANUAL under Mode once the cause is fixed/,
+    ],
+    [
+      "the emergency stop is in force",
+      { chainInForce: true },
+      "Emergency stop in force",
+      /emergency stop is in force.*Release it/,
+    ],
+    ["the runtime is not answering", { down: true }, "not answering", /not answering/],
+  ])(
+    "Start refuses when %s, with the reason and the fix, and sends nothing",
+    async (_c, opts, line, text) => {
+      const rt = fakeRuntime({ mode: "IDLE", ...opts });
+      await waitFor(() =>
+        expect(screen.getByTestId("mode-badge")).toHaveTextContent(
+          (opts as { mode?: string }).mode ?? "IDLE",
+        ),
+      );
+      await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent(line));
+      await fireEvent.click(
+        within(screen.getByTestId("operator-experiment")).getByRole("button", {
+          name: "Start experiment",
+        }),
+      );
+
+      expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(text);
+      expect(rt.posts).toEqual([]);
+    },
+  );
+
+  it("offers neither without an experiment, and no settings without settings", async () => {
+    fakeRuntime({ operator: null });
+
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Ready"));
+    expect(screen.queryByTestId("operator-experiment")).toBeNull();
+    expect(screen.queryByTestId("operator-settings")).toBeNull();
+  });
+});
