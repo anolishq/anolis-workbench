@@ -10,6 +10,7 @@
     variantRelpath,
   } from "../lib/canonical";
   import {
+    installedFrom,
     isImportedDoc,
     type ApiErrorResponse,
     type ProjectDocument,
@@ -55,6 +56,8 @@
     typeof runtimeStatus?.active_project === "string" ? runtimeStatus.active_project : null,
   );
   const showAdvisory = $derived(running && runningProject === projectName);
+  // A systemd install runs its own copy, not this workspace's (#730).
+  const installedPrefix = $derived(installedFrom(system?.meta));
 
   // Persisted notes — import checks, and the migrator's record of what it could
   // NOT carry over (a dropped provider, an automation variant left behind).
@@ -193,9 +196,15 @@
   </div>
 
   {#if showAdvisory}
-    <div class="workspace-advisory">
-      Runtime is currently running from this project. Save edits now; changes take effect only after
-      relaunch from Commission.
+    <div class="workspace-advisory" data-testid="compose-runtime-advisory">
+      {#if installedPrefix}
+        The runtime runs the installed copy of this project, in <code>{installedPrefix}</code>.
+      {:else if imported}
+        Runtime is currently running from this project.
+      {:else}
+        Runtime is currently running from this project. Save edits now; changes take effect only
+        after relaunch from Commission.
+      {/if}
     </div>
   {/if}
 

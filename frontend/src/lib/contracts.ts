@@ -255,6 +255,17 @@ export function isImportedDoc(doc: ProjectDoc | null): boolean {
   return doc !== null && doc.authored === false;
 }
 
+/** Where install.sh installed this project (#724), or null for any other. */
+export function installedFrom(meta: UnknownRecord | undefined): string | null {
+  const value = meta?.installed_from;
+  return typeof value === "string" && value ? value : null;
+}
+
+/** The project installed on this machine, if the workbench has one (#730). */
+export function installedProject(projects: ProjectSummary[]): ProjectSummary | null {
+  return projects.find((p) => installedFrom(p.meta) !== null) ?? null;
+}
+
 export interface RuntimeStatusCode extends UnknownRecord {
   code?: string;
   message?: string;
