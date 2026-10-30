@@ -4,6 +4,7 @@
   import {
     installedProject,
     type ApiErrorResponse,
+    type ProjectDocument,
     type ProjectSummary,
     type RuntimeStatus,
     type TemplateSummary,
@@ -32,6 +33,24 @@
   const listed = $derived(
     installed ? [installed, ...projects.filter((p) => p !== installed)] : projects,
   );
+
+  // The machine's display name, from its profile; the project name until then.
+  let installedDisplayName = $state<string | null>(null);
+  $effect(() => {
+    const name = installed?.name;
+    installedDisplayName = null;
+    if (!name) return;
+    let current = true;
+    fetchJson<ProjectDocument>(`/api/projects/${encodeURIComponent(name)}`)
+      .then((doc) => {
+        const display = doc.profile?.display_name;
+        if (current && typeof display === "string" && display) installedDisplayName = display;
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  });
 
   /** An imported project is read-only, so it opens where it runs: Operate. */
   function openPath(project: ProjectSummary): string {
@@ -250,8 +269,22 @@
 
 <section id="workspace-home" class="workspace visible">
   <div class="workspace-header">
-    <h1>Commissioning Workbench</h1>
-    <p>Choose a project to start or create a new one from a template.</p>
+    {#if installed}
+      {@const machine = installed}
+      <h1>
+        {installedDisplayName ?? machine.name}
+        <span class="badge" title="The project installed on this machine">this machine</span>
+      </h1>
+      <button
+        type="button"
+        class="btn-primary btn-sm"
+        onclick={() => onNavigate(`/projects/${encodeURIComponent(machine.name)}/operate`)}
+        >Go to Operate</button
+      >
+    {:else}
+      <h1>Projects</h1>
+      <p>Choose a project to start or create a new one from a template.</p>
+    {/if}
   </div>
 
   <div class="home-grid">

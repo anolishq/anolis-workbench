@@ -60,6 +60,7 @@ function stubApi(projects: ProjectSummary[]) {
 }
 
 function renderHome(projects: ProjectSummary[], onNavigate = vi.fn()) {
+  stubApi(projects);
   render(Home, {
     props: { projects, templates: [], onNavigate, onProjectsRefreshed: vi.fn() },
   });
@@ -139,7 +140,7 @@ describe("Home.svelte: the installed project and Setup (#730)", () => {
     ]) {
       expect(setup.contains(screen.getByRole("button", { name, hidden: true }))).toBe(true);
     }
-    expect(setup.contains(screen.getByText("bioreactor-v1"))).toBe(false);
+    expect(setup.contains(screen.getByRole("heading", { name: "Existing Projects" }))).toBe(false);
   });
 
   it("leaves Setup open on a workbench with no installed project", () => {

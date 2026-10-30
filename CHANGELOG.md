@@ -33,7 +33,10 @@ Historical note:
   Operate; the Home button still shows the project list. Home lists the
   installed project first as "this machine", and puts Create, Import, updates,
   rollback and the Fleet Dashboard under "Setup", collapsed when a project is
-  installed. Open on an imported project goes to Operate, not Compose.
+  installed. Open on an imported project goes to Operate, not Compose. Home's
+  heading is the installed machine, by its display name, with "Go to
+  Operate"; with no installed project it is "Projects", where it was
+  "Commissioning Workbench".
 
 ### Fixed
 
