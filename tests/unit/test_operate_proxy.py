@@ -10,8 +10,10 @@ interim remote-operate surface until the device-registry UX
 
 from __future__ import annotations
 
+import email.message
 import http.server
 import io
+import json
 import queue
 import socket
 import threading
@@ -642,9 +644,9 @@ def _runtime_answers(monkeypatch: pytest.MonkeyPatch, code: int, body: bytes) ->
     monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_URL", "http://127.0.0.1:8080")
 
     def fake_urlopen(req: urllib.request.Request, timeout: float | None = None):
-        raise urllib.error.HTTPError(
-            req.full_url, code, "refused", {"Content-Type": "application/json"}, io.BytesIO(body)
-        )
+        headers = email.message.Message()
+        headers["Content-Type"] = "application/json"
+        raise urllib.error.HTTPError(req.full_url, code, "refused", headers, io.BytesIO(body))
 
     monkeypatch.setattr(operate.urllib.request, "urlopen", fake_urlopen)
 
@@ -653,9 +655,8 @@ _RUNTIME_401 = b'{"status": {"code": "UNAUTHENTICATED", "message": "unauthorized
 
 
 def _proxied_error(handler: _FakeHandler) -> dict[str, Any]:
-    import json
-
-    return json.loads(handler.wfile.getvalue())
+    payload: dict[str, Any] = json.loads(handler.wfile.getvalue())
+    return payload
 
 
 def test_a_401_with_no_token_says_how_to_install_one(monkeypatch: pytest.MonkeyPatch) -> None:
