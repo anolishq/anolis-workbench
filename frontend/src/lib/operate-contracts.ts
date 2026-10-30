@@ -713,6 +713,7 @@ export interface MachineLine {
     | "fault"
     | "tripped"
     | "device_lost"
+    | "device_back"
     | "running"
     | "ready";
   text: string;
@@ -731,6 +732,7 @@ export function machineLine(
   estop: EstopStatus | null,
   stopChain: StopChainStatus | null,
   trippedDevices: string[],
+  providers: ProviderHealth[] = [],
 ): MachineLine {
   const line = (
     state: MachineLine["state"],
@@ -771,13 +773,33 @@ export function machineLine(
   }
   // A device the emergency stop removed power from is the stop, not a loss (wb#631).
   const stopped = new Set(stopChain?.expected_losses ?? []);
-  const lost = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  const latched = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  // The latch holds a device until MANUAL -> AUTO, even once it is back, so
+  // whether it is lost now comes from provider health.
+  const reachable = new Set<string>();
+  for (const provider of providers) {
+    if (provider.state !== "AVAILABLE") continue;
+    for (const device of provider.devices ?? []) {
+      if (device.health === "OK" || device.health === "WARNING") {
+        reachable.add(`${provider.provider_id}/${device.device_id}`);
+      }
+    }
+  }
+  const lost = latched.filter((handle) => !reachable.has(handle));
   if (lost.length) {
     return line(
       "device_lost",
       `Device lost: check its power (${lost.join(", ")}).`,
       "provider-health",
       "See Provider Health",
+    );
+  }
+  if (latched.length) {
+    return line(
+      "device_back",
+      `${latched.join(", ")} came back after a loss. Automation won't drive them until you go MANUAL → AUTO.`,
+      "mode",
+      "Go to Mode",
     );
   }
   if (status.mode === "AUTO") return line("running", "Experiment running.");

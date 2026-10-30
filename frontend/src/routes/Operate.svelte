@@ -173,7 +173,9 @@
   const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
   // The operator panel's line on what the machine is doing (wb#727).
-  const machine = $derived(machineLine(runtimeStatusData, estop, stopChain, trippedKeys));
+  const machine = $derived(
+    machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth),
+  );
   // Every section below the panel, collapsed until the operator opens it.
   let engineeringOpen = $state<boolean>(false);
   const MACHINE_LINE_SECTIONS: Record<MachineLineTarget, string> = {

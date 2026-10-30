@@ -18,8 +18,10 @@ Historical note:
 - **Operate opens on an operator panel** (#727, part of #232). Its first
   line says what the machine is doing and what to do next: Ready, Experiment
   running, stopped by the software stop, in FAULT (set MANUAL, and why AUTO is
-  not offered), a board tripped or a device lost (each named), the emergency
-  stop in force, or the runtime not answering. A line about something below it
+  not offered), a board tripped or a device lost (each named), a latched
+  device that is back and waits for MANUAL → AUTO, the emergency stop in
+  force, or the runtime not answering. A device is called lost only while
+  provider health says it is unreachable. A line about something below it
   has a button that opens "Engineering" and scrolls to that section. Every
   section Operate showed before is under "Engineering", collapsed; nothing was
   removed. The software-stop row stays above the panel, never collapsed.
