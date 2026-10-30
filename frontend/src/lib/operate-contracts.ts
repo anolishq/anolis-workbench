@@ -701,7 +701,7 @@ export function renderBtOutline(
   return out;
 }
 
-/** Where a machine line's link takes the operator, inside "Engineering". */
+/** Where a machine line's link takes the operator. */
 export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | "runtime-status";
 
 /** The operator panel's one line on what the machine is doing (wb#727). */
