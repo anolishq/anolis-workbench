@@ -700,3 +700,108 @@ export function renderBtOutline(
   }
   return out;
 }
+
+/** Where a machine line's link takes the operator, inside "Engineering". */
+export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | "runtime-status";
+
+/** The operator panel's one line on what the machine is doing (wb#727). */
+export interface MachineLine {
+  state:
+    | "unavailable"
+    | "emergency_stop"
+    | "stopped"
+    | "fault"
+    | "tripped"
+    | "device_lost"
+    | "device_back"
+    | "running"
+    | "ready";
+  text: string;
+  target: MachineLineTarget | null;
+  linkLabel: string;
+}
+
+/**
+ * The operator panel's one line on what the machine is doing and what to do
+ * next (wb#727). From the status Operate already polls, so it is never staler
+ * than the rest of the page. The first state that holds wins, in this order:
+ * what blocks every action comes before what one device needs.
+ */
+export function machineLine(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  stopChain: StopChainStatus | null,
+  trippedDevices: string[],
+  providers: ProviderHealth[] = [],
+): MachineLine {
+  const line = (
+    state: MachineLine["state"],
+    text: string,
+    target: MachineLineTarget | null = null,
+    linkLabel = "",
+  ): MachineLine => ({ state, text, target, linkLabel });
+
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return line(
+      "unavailable",
+      "The runtime is not answering.",
+      "runtime-status",
+      "See Runtime Status",
+    );
+  }
+  if (stopChain?.state === "in_force") {
+    return line("emergency_stop", "Emergency stop in force: release it to continue.");
+  }
+  if (estop?.latched) {
+    return line("stopped", "Stopped by the software stop: clear it to continue.");
+  }
+  if (status.mode === "FAULT") {
+    return line(
+      "fault",
+      "In FAULT: set MANUAL to recover. AUTO is not offered from FAULT, which accepts only MANUAL.",
+      "mode",
+      "Go to Mode",
+    );
+  }
+  if (trippedDevices.length) {
+    return line(
+      "tripped",
+      `Board tripped: clear the trip on ${trippedDevices.join(", ")}.`,
+      "watchdog-trips",
+      "Clear the trip",
+    );
+  }
+  // A device the emergency stop removed power from is the stop, not a loss (wb#631).
+  const stopped = new Set(stopChain?.expected_losses ?? []);
+  const latched = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  // The latch holds a device until MANUAL -> AUTO, even once it is back, so
+  // whether it is lost now comes from provider health.
+  const reachable = new Set<string>();
+  for (const provider of providers) {
+    if (provider.state !== "AVAILABLE") continue;
+    for (const device of provider.devices ?? []) {
+      if (device.health === "OK" || device.health === "WARNING") {
+        reachable.add(`${provider.provider_id}/${device.device_id}`);
+      }
+    }
+  }
+  const lost = latched.filter((handle) => !reachable.has(handle));
+  if (lost.length) {
+    return line(
+      "device_lost",
+      `Device lost: check its power (${lost.join(", ")}).`,
+      "provider-health",
+      "See Provider Health",
+    );
+  }
+  if (latched.length) {
+    return line(
+      "device_back",
+      `${latched.join(", ")} came back after a loss. Automation won't drive them until you go MANUAL → AUTO.`,
+      "mode",
+      "Go to Mode",
+    );
+  }
+  if (status.mode === "AUTO") return line("running", "Experiment running.");
+  return line("ready", "Ready.");
+}
