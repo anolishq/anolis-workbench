@@ -491,7 +491,15 @@
       startCommissionHealthPolling();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      actionError = msg.toLowerCase().includes("already running")
+      // Busy only on a 409: a 422 is a project to fix and must never read as
+      // busy, whatever its message says (#672). Other 409s, such as an
+      // imported project's, are not a running runtime either, so the 409 must
+      // also be the route's "already running" one.
+      const busy =
+        err instanceof ApiResponseError &&
+        err.status === 409 &&
+        msg.toLowerCase().includes("already running");
+      actionError = busy
         ? "Launch blocked: runtime is already active. Stop current runtime before launching this project."
         : `Launch failed: ${msg}`;
     } finally {

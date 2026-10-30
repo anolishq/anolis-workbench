@@ -82,6 +82,8 @@ def launch_project(handler, name: str) -> None:
         handler._json(200, {"ok": True})
     except launcher_module.LaunchValidationError as exc:
         handler._json(422, {"error": str(exc), "errors": exc.errors})
+    except launcher_module.LaunchConfigError as exc:
+        handler._json(422, {"error": str(exc), "code": exc.code})
     except RuntimeError as exc:
         handler._json(409, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001 - HTTP boundary
@@ -137,6 +139,8 @@ def restart_project(handler, name: str) -> None:
         handler._json(200, {"ok": True})
     except launcher_module.LaunchValidationError as exc:
         handler._json(422, {"error": str(exc), "errors": exc.errors})
+    except launcher_module.LaunchConfigError as exc:
+        handler._json(422, {"error": str(exc), "code": exc.code})
     except RuntimeError as exc:
         handler._json(409, {"error": str(exc)})
     except Exception as exc:  # noqa: BLE001 - HTTP boundary

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import urllib.error
@@ -163,6 +164,24 @@ def _open(runtime_base: str, method: str, raw_path: str, body: bytes | None, han
     return urllib.request.urlopen(req, timeout=15)
 
 
+def _unauthorized_body(token_sent: bool) -> bytes:
+    """The runtime's own error shape, saying what to run (#722). The runtime
+    says only "unauthorized", which Operate showed as it stood."""
+    if token_sent:
+        message = (
+            "The runtime refused the workbench's token. Run `anolis-provision workbench-service` "
+            "on this machine to refresh the copy after a token rotation, or correct "
+            "ANOLIS_WORKBENCH_RUNTIME_TOKEN if it is set."
+        )
+    else:
+        message = (
+            "The runtime requires a token and the workbench has no token for it. Run "
+            "`anolis-provision workbench-service` on this machine to install one, or set "
+            "ANOLIS_WORKBENCH_RUNTIME_TOKEN for a runtime on another machine."
+        )
+    return json.dumps({"status": {"code": "UNAUTHENTICATED", "message": message}}).encode("utf-8")
+
+
 def proxy_runtime(handler, method: str, raw_path: str) -> None:
     is_stop = method == "POST" and raw_path.split("?")[0] == "/v0/estop"
     remembered = _last_target if is_stop and not runtime_url_override() else None
@@ -232,6 +251,8 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
             handler.wfile.write(data)
     except urllib.error.HTTPError as exc:
         body_data = exc.read()
+        if exc.code == 401:
+            body_data = _unauthorized_body(bool(runtime_token(runtime_base)))
         handler.send_response(int(exc.code))
         for key, value in exc.headers.items():
             lower = key.lower()

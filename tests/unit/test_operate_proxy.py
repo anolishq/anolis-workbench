@@ -10,8 +10,10 @@ interim remote-operate surface until the device-registry UX
 
 from __future__ import annotations
 
+import email.message
 import http.server
 import io
+import json
 import queue
 import socket
 import threading
@@ -631,3 +633,65 @@ def test_the_runtime_stream_closes_within_two_events_of_the_client_leaving(event
 
     assert state["upstream_closed_after"] is not None, f"upstream still open after events {state['sent']}"
     assert state["upstream_closed_after"] <= 3  # event 1, then at most two after the close
+
+
+# ---------------------------------------------------------------------------
+# A 401 from the runtime says what to run (#722)
+# ---------------------------------------------------------------------------
+
+
+def _runtime_answers(monkeypatch: pytest.MonkeyPatch, code: int, body: bytes) -> None:
+    monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_URL", "http://127.0.0.1:8080")
+
+    def fake_urlopen(req: urllib.request.Request, timeout: float | None = None):
+        headers = email.message.Message()
+        headers["Content-Type"] = "application/json"
+        raise urllib.error.HTTPError(req.full_url, code, "refused", headers, io.BytesIO(body))
+
+    monkeypatch.setattr(operate.urllib.request, "urlopen", fake_urlopen)
+
+
+_RUNTIME_401 = b'{"status": {"code": "UNAUTHENTICATED", "message": "unauthorized"}}'
+
+
+def _proxied_error(handler: _FakeHandler) -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads(handler.wfile.getvalue())
+    return payload
+
+
+def test_a_401_with_no_token_says_how_to_install_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANOLIS_WORKBENCH_RUNTIME_TOKEN", raising=False)
+    _runtime_answers(monkeypatch, 401, _RUNTIME_401)
+    handler = _FakeHandler()
+
+    operate.proxy_runtime(handler, "POST", "/v0/mode")
+
+    assert handler.sent_status == 401
+    message = _proxied_error(handler)["status"]["message"]
+    assert "anolis-provision workbench-service" in message
+    assert "no token" in message
+
+
+def test_a_401_with_a_token_says_how_to_refresh_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_TOKEN", "stale-token")
+    _runtime_answers(monkeypatch, 401, _RUNTIME_401)
+    handler = _FakeHandler()
+
+    operate.proxy_runtime(handler, "GET", "/v0/runtime/status")
+
+    assert handler.sent_status == 401
+    message = _proxied_error(handler)["status"]["message"]
+    assert "anolis-provision workbench-service" in message
+    assert "refused" in message
+    assert "stale-token" not in message
+
+
+def test_another_runtime_error_passes_through_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = b'{"status": {"code": "FAILED_PRECONDITION", "message": "mode change refused"}}'
+    _runtime_answers(monkeypatch, 409, body)
+    handler = _FakeHandler()
+
+    operate.proxy_runtime(handler, "POST", "/v0/mode")
+
+    assert handler.sent_status == 409
+    assert handler.wfile.getvalue() == body
