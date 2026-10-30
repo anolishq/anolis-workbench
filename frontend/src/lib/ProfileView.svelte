@@ -28,16 +28,28 @@
   const importedFrom = $derived(
     typeof doc.meta?.imported_from === "string" ? (doc.meta.imported_from as string) : null,
   );
+  // The project install.sh put on this machine, re-synced at every start (#722).
+  const installedFrom = $derived(
+    typeof doc.meta?.installed_from === "string" ? (doc.meta.installed_from as string) : null,
+  );
 </script>
 
 <div class="profile-view">
-  <div class="workspace-advisory">
-    This project was imported from a machine profile and is carried <strong>verbatim</strong> — the
-    workbench never rewrites it. Edit it in its source repository and re-import.
-    {#if importedFrom}
-      <div><code>{importedFrom}</code></div>
-    {/if}
-  </div>
+  {#if installedFrom}
+    <div class="workspace-advisory" data-testid="installed-project-advisory">
+      This is the project installed on this machine. The workbench imports it again from
+      <code>{installedFrom}</code> each time it starts, so it always matches what is installed and is
+      read-only here: change it in its source repository and redeploy.
+    </div>
+  {:else}
+    <div class="workspace-advisory">
+      This project was imported from a machine profile and is carried <strong>verbatim</strong> —
+      the workbench never rewrites it. Edit it in its source repository and re-import.
+      {#if importedFrom}
+        <div><code>{importedFrom}</code></div>
+      {/if}
+    </div>
+  {/if}
 
   <section class="form-section">
     <h3>Machine</h3>

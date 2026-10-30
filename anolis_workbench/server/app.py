@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
+from anolis_workbench.core import installed_project, provider_schemas
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
-from anolis_workbench.core import provider_schemas
 from anolis_workbench.core.appliance import DEFAULT_PORT, default_host, default_open_browser, tunnel_hint
 from anolis_workbench.server import request_origin
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
@@ -422,6 +422,8 @@ def main(
 ) -> None:
     verify_environment()
     projects_module.cleanup_stale_running_files()
+    # The project install.sh put on this machine, imported or re-synced (#722).
+    installed_project.sync()
     config = resolve_config(host, port, open_browser)
     server = _WorkbenchServer((config.host, config.port), _Handler)
     server.config = config

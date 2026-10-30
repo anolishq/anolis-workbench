@@ -525,7 +525,13 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
         raise ValueError(name_error)
     if project_dir(name).exists():
         raise ValueError(f"Project '{name}' already exists")
+    return _import_verbatim(source, name, {})
 
+
+def _import_verbatim(source: pathlib.Path, name: str, extra_meta: dict) -> tuple[dict, list[str]]:
+    """Copy a validated machine-profile directory into project `name`, which
+    must not exist yet; `extra_meta` is added to the sidecar's meta."""
+    profile_dir_name = source.name
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:
         raise ImportValidationError(report.errors)
@@ -557,6 +563,7 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
             "created": datetime.now(timezone.utc).isoformat(),
             "imported_from": str(source),
             "profile_dir_name": profile_dir_name,
+            **extra_meta,
         }
         sidecar = {
             "schema_version": 1,
@@ -569,6 +576,28 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
         paths_module.rmtree_within(pdir, SYSTEMS_ROOT, ignore_errors=True)
         raise
     return meta, report.warnings
+
+
+def installed_from(name: str) -> str | None:
+    """The install prefix project `name` was synced from, if it is the
+    installed machine's project (#722)."""
+    sidecar = _read_sidecar(project_dir(name))
+    value = _meta_of(sidecar).get("installed_from") if isinstance(sidecar, dict) else None
+    return value if isinstance(value, str) else None
+
+
+@_serialized
+def sync_installed_project(source: pathlib.Path, name: str, prefix: pathlib.Path) -> tuple[dict, list[str]]:
+    """Import `source` as project `name`, the installed machine's project,
+    replacing an earlier sync of it (#722). `source` is the workbench's own
+    reading of the install prefix, not a caller-supplied path, so it skips the
+    import-root allowlist. Never replaces a project that is not such a sync."""
+    pdir = project_dir(name)
+    if pdir.exists():
+        if installed_from(name) is None:
+            raise ValueError(f"Project '{name}' already exists and is not the installed project")
+        paths_module.rmtree_within(pdir, SYSTEMS_ROOT)
+    return _import_verbatim(source, name, {"installed_from": str(prefix)})
 
 
 @_serialized
