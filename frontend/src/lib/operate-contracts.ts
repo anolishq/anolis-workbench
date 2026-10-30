@@ -700,3 +700,31 @@ export function renderBtOutline(
   }
   return out;
 }
+
+/** Where a machine line's link takes the operator, inside "Engineering". */
+export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health";
+
+/** The operator panel's one line on what the machine is doing (wb#727). */
+export interface MachineLine {
+  state:
+    | "unavailable"
+    | "emergency_stop"
+    | "stopped"
+    | "fault"
+    | "tripped"
+    | "device_lost"
+    | "running"
+    | "ready";
+  text: string;
+  target: MachineLineTarget | null;
+  linkLabel: string;
+}
+
+export function machineLine(
+  _status: RuntimeApiStatus | null,
+  _estop: EstopStatus | null,
+  _stopChain: StopChainStatus | null,
+  _trippedDevices: string[],
+): MachineLine {
+  return { state: "ready", text: "", target: null, linkLabel: "" };
+}
