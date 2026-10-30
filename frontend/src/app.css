@@ -1485,6 +1485,39 @@ body {
 
 /* ─── Software e-stop (wb#236) ──────────────────────────────────────────── */
 
+/* The operator panel (wb#727): one line on what the machine is doing. */
+.operator-panel .machine-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.machine-line-ready,
+.machine-line-running {
+  color: var(--feedback-ok);
+}
+
+.machine-line-stopped,
+.machine-line-tripped,
+.machine-line-device_lost,
+.machine-line-unavailable {
+  color: var(--state-warning);
+}
+
+.machine-line-fault,
+.machine-line-emergency_stop {
+  color: var(--state-fault);
+}
+
+.operate-engineering > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}
+
 .operate-estop-section {
   border-color: #fca5a5;
   /* Operate is thousands of pixels tall: keep the stop in view (wb#553).

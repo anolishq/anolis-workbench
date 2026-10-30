@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
   import InfoToggle from "../lib/InfoToggle.svelte";
   import type {
@@ -21,6 +21,7 @@
     WorkbenchConfig,
   } from "../lib/contracts";
   import { isImportedDoc } from "../lib/contracts";
+  import type { MachineLineTarget } from "../lib/operate-contracts";
   import {
     activeVariant,
     launchVariantMismatch,
@@ -46,6 +47,7 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    machineLine,
     modeTargets,
     normalizeParameterType,
     normalizeProviderHealthQuality,
@@ -170,6 +172,26 @@
   // dropped (wb#516). Not rendered, so not state.
   const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
+  // The operator panel's line on what the machine is doing (wb#727).
+  const machine = $derived(machineLine(runtimeStatusData, estop, stopChain, trippedKeys));
+  // Every section below the panel, collapsed until the operator opens it.
+  let engineeringOpen = $state<boolean>(false);
+  const MACHINE_LINE_SECTIONS: Record<MachineLineTarget, string> = {
+    mode: "mode-section",
+    "watchdog-trips": "watchdog-trips",
+    "provider-health": "provider-health",
+    "runtime-status": "runtime-status",
+  };
+
+  /** Open "Engineering" and bring a section of it into view, so a line that
+   *  points into a collapsed section is never a dead end. */
+  async function goToSection(target: MachineLineTarget) {
+    engineeringOpen = true;
+    await tick();
+    document
+      .querySelector(`[data-testid="${MACHINE_LINE_SECTIONS[target]}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
   const dispatchableCoverage = $derived(
@@ -1308,126 +1330,64 @@
       </div>
     </div>
 
-    {#if trippedKeys.length || tripKey}
-      <!-- Boards whose command watchdog tripped refuse every SET until cleared
-           (wb#572). The clear is a sequence the operator confirms step by step. -->
-      <div class="operate-section" data-testid="watchdog-trips">
-        <h3>Watchdog trips</h3>
-        {#if trippedKeys.length}
-          <p class="field-note">
-            These boards' command watchdogs tripped, so they refuse every command until cleared.
-          </p>
-          <ul class="operate-trip-list">
-            {#each trippedKeys as key (key)}
-              <li>
-                <span>{key}</span>
-                <button
-                  type="button"
-                  class="btn-secondary btn-sm"
-                  aria-label={`Clear the watchdog trip on ${key}…`}
-                  disabled={tripKey === key}
-                  onclick={() => openTripClear(key)}
-                >
-                  Clear trip…
-                </button>
-              </li>
-            {/each}
-          </ul>
+    <!-- Operator panel (wb#727): what the machine is doing and what to do next. -->
+    <div class="operate-section operator-panel">
+      <div class="machine-line machine-line-{machine.state}" data-testid="machine-line">
+        <span>{machine.text}</span>
+        {#if machine.target}
+          {@const target = machine.target}
+          <button type="button" class="btn-secondary btn-sm" onclick={() => goToSection(target)}
+            >{machine.linkLabel}</button
+          >
         {/if}
-        {#if tripKey}
-          <div data-testid="trip-clear">
-            <h4>Clearing the watchdog trip on {tripKey}</h4>
-            <ol>
-              <li data-testid="trip-step-1">
-                Release the software stop.
-                {#if tripReleased}
-                  <span class="field-note">Done: the software stop is released.</span>
-                {:else if tripArmed === "release"}
+      </div>
+    </div>
+
+    <details class="operate-engineering" data-testid="engineering" bind:open={engineeringOpen}>
+      <summary>Engineering</summary>
+
+      {#if trippedKeys.length || tripKey}
+        <!-- Boards whose command watchdog tripped refuse every SET until cleared
+           (wb#572). The clear is a sequence the operator confirms step by step. -->
+        <div class="operate-section" data-testid="watchdog-trips">
+          <h3>Watchdog trips</h3>
+          {#if trippedKeys.length}
+            <p class="field-note">
+              These boards' command watchdogs tripped, so they refuse every command until cleared.
+            </p>
+            <ul class="operate-trip-list">
+              {#each trippedKeys as key (key)}
+                <li>
+                  <span>{key}</span>
                   <button
                     type="button"
                     class="btn-secondary btn-sm"
-                    disabled={clearRunning}
-                    onclick={releaseForTrip}
+                    aria-label={`Clear the watchdog trip on ${key}…`}
+                    disabled={tripKey === key}
+                    onclick={() => openTripClear(key)}
                   >
-                    Confirm release — re-enables actuation
+                    Clear trip…
                   </button>
-                  <button
-                    type="button"
-                    class="btn-secondary btn-sm"
-                    onclick={() => (tripArmed = "")}
-                  >
-                    Cancel
-                  </button>
-                {:else}
-                  <button
-                    type="button"
-                    class="btn-secondary btn-sm"
-                    disabled={!estop || clearRunning}
-                    onclick={releaseForTrip}
-                  >
-                    Release the software stop…
-                  </button>
-                {/if}
-              </li>
-              <li data-testid="trip-step-2">
-                Put the runtime in MANUAL.
-                {#if modeFixedReason}
-                  <span class="field-note"
-                    >Skipped: the runtime has no mode to set ({modeFixedReason}).</span
-                  >
-                {:else if mode === "MANUAL"}
-                  <span class="field-note">Done: the runtime is in MANUAL.</span>
-                {:else}
-                  <button
-                    type="button"
-                    class="btn-secondary btn-sm"
-                    disabled={!tripReleased || setModeRunning}
-                    onclick={manualForTrip}
-                  >
-                    Set MANUAL
-                  </button>
-                  {#if modeFeedback && modeFeedbackClass === "field-error"}
-                    <span class="field-error">{modeFeedback}</span>
-                  {/if}
-                {/if}
-              </li>
-              <li data-testid="trip-step-3">
-                Clear the trip with <code>clear_watchdog_trip</code>.
-                {#if !tripCaps}
-                  <span class="field-note">Loading the board's functions…</span>
-                {:else if !tripClearFn}
-                  <span class="field-error">This board offers no clear_watchdog_trip function.</span
-                  >
-                {:else if tripCleared}
-                  <span class="field-note">Done: the trip is cleared.</span>
-                {:else}
-                  <button
-                    type="button"
-                    class="btn-secondary btn-sm"
-                    disabled={!tripReleased || !tripManual || tripRunning}
-                    onclick={clearTrip}
-                  >
-                    Clear the trip
-                  </button>
-                {/if}
-                {#if tripError?.step === 3}<span class="field-error">{tripError.text}</span>{/if}
-              </li>
-              {#if tripBrakeFn}
-                <li data-testid="trip-step-4">
-                  Release both brakes with <code>set_brake(false, false)</code>. The trip engaged
-                  them; released, the motors turn when commanded.
-                  {#if tripBrakes === "released"}
-                    <span class="field-note">Done: both brakes are released.</span>
-                  {:else if tripBrakes === "left"}
-                    <span class="field-note">Skipped: the brakes stay on.</span>
-                  {:else if tripArmed === "brakes"}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if tripKey}
+            <div data-testid="trip-clear">
+              <h4>Clearing the watchdog trip on {tripKey}</h4>
+              <ol>
+                <li data-testid="trip-step-1">
+                  Release the software stop.
+                  {#if tripReleased}
+                    <span class="field-note">Done: the software stop is released.</span>
+                  {:else if tripArmed === "release"}
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
-                      disabled={tripRunning}
-                      onclick={releaseBrakes}
+                      disabled={clearRunning}
+                      onclick={releaseForTrip}
                     >
-                      Confirm — releases both brakes
+                      Confirm release — re-enables actuation
                     </button>
                     <button
                       type="button"
@@ -1440,510 +1400,598 @@
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
-                      disabled={!tripCleared || tripRunning}
-                      onclick={releaseBrakes}
+                      disabled={!estop || clearRunning}
+                      onclick={releaseForTrip}
                     >
-                      Release both brakes…
+                      Release the software stop…
                     </button>
+                  {/if}
+                </li>
+                <li data-testid="trip-step-2">
+                  Put the runtime in MANUAL.
+                  {#if modeFixedReason}
+                    <span class="field-note"
+                      >Skipped: the runtime has no mode to set ({modeFixedReason}).</span
+                    >
+                  {:else if mode === "MANUAL"}
+                    <span class="field-note">Done: the runtime is in MANUAL.</span>
+                  {:else}
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
-                      disabled={!tripCleared || tripRunning}
-                      onclick={() => (tripBrakes = "left")}
+                      disabled={!tripReleased || setModeRunning}
+                      onclick={manualForTrip}
                     >
-                      Leave the brakes on
+                      Set MANUAL
+                    </button>
+                    {#if modeFeedback && modeFeedbackClass === "field-error"}
+                      <span class="field-error">{modeFeedback}</span>
+                    {/if}
+                  {/if}
+                </li>
+                <li data-testid="trip-step-3">
+                  Clear the trip with <code>clear_watchdog_trip</code>.
+                  {#if !tripCaps}
+                    <span class="field-note">Loading the board's functions…</span>
+                  {:else if !tripClearFn}
+                    <span class="field-error"
+                      >This board offers no clear_watchdog_trip function.</span
+                    >
+                  {:else if tripCleared}
+                    <span class="field-note">Done: the trip is cleared.</span>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      disabled={!tripReleased || !tripManual || tripRunning}
+                      onclick={clearTrip}
+                    >
+                      Clear the trip
                     </button>
                   {/if}
-                  {#if tripError?.step === 4}<span class="field-error">{tripError.text}</span>{/if}
+                  {#if tripError?.step === 3}<span class="field-error">{tripError.text}</span>{/if}
                 </li>
+                {#if tripBrakeFn}
+                  <li data-testid="trip-step-4">
+                    Release both brakes with <code>set_brake(false, false)</code>. The trip engaged
+                    them; released, the motors turn when commanded.
+                    {#if tripBrakes === "released"}
+                      <span class="field-note">Done: both brakes are released.</span>
+                    {:else if tripBrakes === "left"}
+                      <span class="field-note">Skipped: the brakes stay on.</span>
+                    {:else if tripArmed === "brakes"}
+                      <button
+                        type="button"
+                        class="btn-secondary btn-sm"
+                        disabled={tripRunning}
+                        onclick={releaseBrakes}
+                      >
+                        Confirm — releases both brakes
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-secondary btn-sm"
+                        onclick={() => (tripArmed = "")}
+                      >
+                        Cancel
+                      </button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn-secondary btn-sm"
+                        disabled={!tripCleared || tripRunning}
+                        onclick={releaseBrakes}
+                      >
+                        Release both brakes…
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-secondary btn-sm"
+                        disabled={!tripCleared || tripRunning}
+                        onclick={() => (tripBrakes = "left")}
+                      >
+                        Leave the brakes on
+                      </button>
+                    {/if}
+                    {#if tripError?.step === 4}<span class="field-error">{tripError.text}</span
+                      >{/if}
+                  </li>
+                {/if}
+              </ol>
+              {#if tripCleared && (!tripBrakeFn || tripBrakes)}
+                <p class="field-note">
+                  {tripKey}: the clear resumes nothing. Commands sent while it was tripped were
+                  ignored, so command it again.
+                </p>
               {/if}
-            </ol>
-            {#if tripCleared && (!tripBrakeFn || tripBrakes)}
-              <p class="field-note">
-                {tripKey}: the clear resumes nothing. Commands sent while it was tripped were
-                ignored, so command it again.
-              </p>
-            {/if}
-            <button type="button" class="btn-secondary btn-sm" onclick={closeTripClear}
-              >Close</button
-            >
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Mode control -->
-    <div class="operate-section operate-mode-section">
-      <h3>Mode</h3>
-      <div class="mode-row">
-        <span>
-          Current: <span class="badge {modeBadgeClass}" data-testid="mode-badge">{mode}</span>
-        </span>
-        {#if modeFixedReason}
-          <span class="field-note" data-testid="mode-fixed">
-            Mode can't be set: {modeFixedReason}.
-          </span>
-        {:else}
-          <select
-            value={modeSelectorValue}
-            onchange={(e: Event) => {
-              modeSelectorValue = selectTarget(e).value;
-              modeSelectorDirty = true;
-            }}
-          >
-            {#each modeTargets(mode) as runtimeMode (runtimeMode)}
-              <option value={runtimeMode}>{runtimeMode}</option>
-            {/each}
-          </select>
-          <button
-            type="button"
-            class="btn-secondary btn-sm"
-            disabled={setModeRunning}
-            onclick={setMode}
-          >
-            {setModeRunning ? "Setting…" : "Set Mode"}
-          </button>
-          {#if modeFeedback}
-            <span class={modeFeedbackClass}>{modeFeedback}</span>
+              <button type="button" class="btn-secondary btn-sm" onclick={closeTripClear}
+                >Close</button
+              >
+            </div>
           {/if}
-        {/if}
-      </div>
-      {#if mode === "FAULT"}
-        <p class="field-note" data-testid="mode-fault-note">
-          FAULT refuses every device call. Set the mode to MANUAL to recover.
-        </p>
+        </div>
       {/if}
-    </div>
 
-    <!-- Runtime status -->
-    <div class="operate-section">
-      <h3>Runtime Status</h3>
-      {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(
-          runtimeStatusData,
-          estop,
-          startupSafeState,
-          stopChain,
-        )}
-        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
-        {#if health.reasons.length > 0}
-          <span class="operate-meta">{health.reasons.join("; ")}.</span>
-        {/if}
-        <span class="operate-meta">
-          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
-          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime
-          {runtimeStatusData.uptime_seconds}s
-        </span>
-        {#if startupSafeState}
-          {@const startup = summarizeStartupSafeState(startupSafeState)}
-          <span
-            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
-            data-testid="startup-safe-state"
-          >
-            {startup.text}
+      <!-- Mode control -->
+      <div class="operate-section operate-mode-section" data-testid="mode-section">
+        <h3>Mode</h3>
+        <div class="mode-row">
+          <span>
+            Current: <span class="badge {modeBadgeClass}" data-testid="mode-badge">{mode}</span>
           </span>
-          {#if startup.calls.length}
-            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-              {#each startup.calls as call (call)}
-                <li>{call}</li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      {:else if !statusSettled}
-        <!-- Until the first status reply settles, a missing status is not a
-             fault (wb#623). A failed reply settles too, and falls through. -->
-        <span class="badge unknown">--</span>
-        <span class="operate-meta">Loading runtime status…</span>
-      {:else}
-        <span class="badge unavailable">UNAVAILABLE</span>
-        {#if statusRefusal}
-          <span class="operate-meta field-error" data-testid="runtime-refusal">{statusRefusal}</span
-          >
-        {:else}
-          <span class="operate-meta">Runtime status unavailable.</span>
-        {/if}
-      {/if}
-    </div>
-
-    <!-- Event stream status -->
-    <div class="operate-section">
-      <h3>Event Stream</h3>
-      {#if streamStatus.state === "connected"}
-        <span class="badge ok">CONNECTED</span> <span class="operate-meta">SSE stream active.</span>
-      {:else if streamStatus.state === "reconnecting"}
-        <span class="badge unavailable">RECONNECTING</span>
-        <span class="operate-meta"
-          >Attempt {streamStatus.attempts}, retry in {Math.max(
-            1,
-            Math.ceil((streamStatus.delay_ms || 0) / 1000),
-          )}s.</span
-        >
-      {:else if streamStatus.state === "stale"}
-        <span class="badge stale">STALE</span>
-        <span class="operate-meta"
-          >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
-        >
-      {:else}
-        <span class="badge unavailable">DISCONNECTED</span>
-        <span class="operate-meta">Stream disconnected.</span>
-      {/if}
-    </div>
-
-    <!-- Provider health -->
-    <div class="operate-section">
-      <h3>Provider Health</h3>
-      <ul class="operate-provider-health">
-        {#if providerHealth.length === 0}
-          <li class="placeholder">No provider health available.</li>
-        {:else}
-          {#each providerHealth as entry (entry.provider_id)}
-            {@const pid = typeof entry?.provider_id === "string" ? entry.provider_id : "unknown"}
-            {@const q = normalizeProviderHealthQuality(entry?.state || "UNKNOWN")}
-            {@const lc = typeof entry?.lifecycle_state === "string" ? entry.lifecycle_state : "--"}
-            {@const dc = Number.isFinite(Number(entry?.device_count))
-              ? Number(entry.device_count)
-              : 0}
-            <li>
-              {pid} <span class="badge {q.toLowerCase()}">{q}</span>
-              <div class="provider-row-meta">{lc} | {dc} device(s)</div>
-            </li>
-          {/each}
-        {/if}
-      </ul>
-    </div>
-
-    <!-- Devices -->
-    <div class="operate-section operate-devices-layout">
-      <div class="operate-device-list-col">
-        <h3>Devices</h3>
-        <ul class="operate-list">
-          {#if !devicesSettled}
-            <li class="placeholder">Loading devices…</li>
-          {:else if devices.length === 0}
-            <li class="placeholder">No devices found.</li>
+          {#if modeFixedReason}
+            <span class="field-note" data-testid="mode-fixed">
+              Mode can't be set: {modeFixedReason}.
+            </span>
           {:else}
-            {#each devices as device (`${device.provider_id}/${device.device_id}`)}
-              {@const key = `${device.provider_id}/${device.device_id}`}
-              <li class:selected={key === selectedKey}>
-                <button
-                  type="button"
-                  class="operate-device-select"
-                  onclick={() => selectDevice(key)}
-                >
-                  {device.display_name || device.device_id || key} ({key})
-                </button>
-                {#if stopChain?.mismatches.some((m) => m.device === key)}
-                  <!-- In scope, but not behaving as the stop should make it (wb#631). -->
-                  <span class="badge fault" data-testid="device-stop-mismatch"
-                    >STOP NOT REACHING</span
-                  >
-                {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
-                  <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
-                  <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
-                {/if}
-                {#if trippedKeys.includes(key)}
-                  <!-- Refuses every command until cleared (wb#572). -->
-                  <span class="badge fault" data-testid="device-watchdog-tripped"
-                    >WATCHDOG TRIPPED</span
-                  >
-                {/if}
-                {#if stopChain?.expectations[key]}
-                  <span class="badge" data-testid="device-stop-expect">
-                    expects {stopChain.expectations[key] === "power_loss"
-                      ? "power loss"
-                      : "estop report"}
-                  </span>
-                {/if}
+            <select
+              value={modeSelectorValue}
+              onchange={(e: Event) => {
+                modeSelectorValue = selectTarget(e).value;
+                modeSelectorDirty = true;
+              }}
+            >
+              {#each modeTargets(mode) as runtimeMode (runtimeMode)}
+                <option value={runtimeMode}>{runtimeMode}</option>
+              {/each}
+            </select>
+            <button
+              type="button"
+              class="btn-secondary btn-sm"
+              disabled={setModeRunning}
+              onclick={setMode}
+            >
+              {setModeRunning ? "Setting…" : "Set Mode"}
+            </button>
+            {#if modeFeedback}
+              <span class={modeFeedbackClass}>{modeFeedback}</span>
+            {/if}
+          {/if}
+        </div>
+        {#if mode === "FAULT"}
+          <p class="field-note" data-testid="mode-fault-note">
+            FAULT refuses every device call. Set the mode to MANUAL to recover.
+          </p>
+        {/if}
+      </div>
+
+      <!-- Runtime status -->
+      <div class="operate-section" data-testid="runtime-status">
+        <h3>Runtime Status</h3>
+        {#if runtimeStatusData}
+          {@const health = summarizeRuntimeHealth(
+            runtimeStatusData,
+            estop,
+            startupSafeState,
+            stopChain,
+          )}
+          <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
+          {#if health.reasons.length > 0}
+            <span class="operate-meta">{health.reasons.join("; ")}.</span>
+          {/if}
+          <span class="operate-meta">
+            {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
+            | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
+            | Uptime
+            {runtimeStatusData.uptime_seconds}s
+          </span>
+          {#if startupSafeState}
+            {@const startup = summarizeStartupSafeState(startupSafeState)}
+            <span
+              class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
+              data-testid="startup-safe-state"
+            >
+              {startup.text}
+            </span>
+            {#if startup.calls.length}
+              <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
+                {#each startup.calls as call (call)}
+                  <li>{call}</li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
+        {:else if !statusSettled}
+          <!-- Until the first status reply settles, a missing status is not a
+             fault (wb#623). A failed reply settles too, and falls through. -->
+          <span class="badge unknown">--</span>
+          <span class="operate-meta">Loading runtime status…</span>
+        {:else}
+          <span class="badge unavailable">UNAVAILABLE</span>
+          {#if statusRefusal}
+            <span class="operate-meta field-error" data-testid="runtime-refusal"
+              >{statusRefusal}</span
+            >
+          {:else}
+            <span class="operate-meta">Runtime status unavailable.</span>
+          {/if}
+        {/if}
+      </div>
+
+      <!-- Event stream status -->
+      <div class="operate-section">
+        <h3>Event Stream</h3>
+        {#if streamStatus.state === "connected"}
+          <span class="badge ok">CONNECTED</span>
+          <span class="operate-meta">SSE stream active.</span>
+        {:else if streamStatus.state === "reconnecting"}
+          <span class="badge unavailable">RECONNECTING</span>
+          <span class="operate-meta"
+            >Attempt {streamStatus.attempts}, retry in {Math.max(
+              1,
+              Math.ceil((streamStatus.delay_ms || 0) / 1000),
+            )}s.</span
+          >
+        {:else if streamStatus.state === "stale"}
+          <span class="badge stale">STALE</span>
+          <span class="operate-meta"
+            >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
+          >
+        {:else}
+          <span class="badge unavailable">DISCONNECTED</span>
+          <span class="operate-meta">Stream disconnected.</span>
+        {/if}
+      </div>
+
+      <!-- Provider health -->
+      <div class="operate-section" data-testid="provider-health">
+        <h3>Provider Health</h3>
+        <ul class="operate-provider-health">
+          {#if providerHealth.length === 0}
+            <li class="placeholder">No provider health available.</li>
+          {:else}
+            {#each providerHealth as entry (entry.provider_id)}
+              {@const pid = typeof entry?.provider_id === "string" ? entry.provider_id : "unknown"}
+              {@const q = normalizeProviderHealthQuality(entry?.state || "UNKNOWN")}
+              {@const lc =
+                typeof entry?.lifecycle_state === "string" ? entry.lifecycle_state : "--"}
+              {@const dc = Number.isFinite(Number(entry?.device_count))
+                ? Number(entry.device_count)
+                : 0}
+              <li>
+                {pid} <span class="badge {q.toLowerCase()}">{q}</span>
+                <div class="provider-row-meta">{lc} | {dc} device(s)</div>
               </li>
             {/each}
           {/if}
         </ul>
       </div>
 
-      <div class="operate-device-detail-col">
-        <h3 id="device-title">
-          {#if selectedKey && getSelectedDevice()}
-            {getSelectedDevice()?.display_name || getSelectedDevice()?.device_id} ({selectedKey})
-          {:else}
-            Device Detail
-          {/if}
-        </h3>
-
-        {#if !selectedKey || !getSelectedDevice()}
-          <p class="placeholder">Select a device to inspect signals and execute functions.</p>
-        {:else}
-          <!-- By name, numbers in order: period1_ms before period2_ms (wb#692). -->
-          {@const signals = [...(deviceStates[selectedKey] ?? [])].sort((a, b) =>
-            (a.signal_id ?? "").localeCompare(b.signal_id ?? "", undefined, { numeric: true }),
-          )}
-          <!-- The first state read, or a failed one, files an entry (wb#623). -->
-          {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
-          {@const capsLoaded = capabilities[selectedKey] !== undefined}
-          {@const caps = capabilities[selectedKey] ?? { functions: [] }}
-
-          {#if !signalsLoaded}
-            <p class="placeholder">Loading signals…</p>
-          {:else if signals.length === 0}
-            <p class="placeholder">No signals available.</p>
-          {:else}
-            <table class="signal-table">
-              <thead><tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr></thead
-              >
-              <tbody>
-                {#each signals as sig (sig.signal_id)}
-                  <tr>
-                    <td>{sig.signal_id || "-"}</td>
-                    <td>{formatValue(sig.value)}</td>
-                    <td>{sig.quality ?? "--"}</td>
-                    <td
-                      >{(sig.timestamp_ms ?? 0) > 0
-                        ? new Date(sig.timestamp_ms ?? 0).toLocaleTimeString()
-                        : "--"}</td
+      <!-- Devices -->
+      <div class="operate-section operate-devices-layout">
+        <div class="operate-device-list-col">
+          <h3>Devices</h3>
+          <ul class="operate-list">
+            {#if !devicesSettled}
+              <li class="placeholder">Loading devices…</li>
+            {:else if devices.length === 0}
+              <li class="placeholder">No devices found.</li>
+            {:else}
+              {#each devices as device (`${device.provider_id}/${device.device_id}`)}
+                {@const key = `${device.provider_id}/${device.device_id}`}
+                <li class:selected={key === selectedKey}>
+                  <button
+                    type="button"
+                    class="operate-device-select"
+                    onclick={() => selectDevice(key)}
+                  >
+                    {device.display_name || device.device_id || key} ({key})
+                  </button>
+                  {#if stopChain?.mismatches.some((m) => m.device === key)}
+                    <!-- In scope, but not behaving as the stop should make it (wb#631). -->
+                    <span class="badge fault" data-testid="device-stop-mismatch"
+                      >STOP NOT REACHING</span
                     >
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
+                  {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
+                    <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
+                    <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
+                  {/if}
+                  {#if trippedKeys.includes(key)}
+                    <!-- Refuses every command until cleared (wb#572). -->
+                    <span class="badge fault" data-testid="device-watchdog-tripped"
+                      >WATCHDOG TRIPPED</span
+                    >
+                  {/if}
+                  {#if stopChain?.expectations[key]}
+                    <span class="badge" data-testid="device-stop-expect">
+                      expects {stopChain.expectations[key] === "power_loss"
+                        ? "power loss"
+                        : "estop report"}
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            {/if}
+          </ul>
+        </div>
 
-          {#if !capsLoaded}
-            <p class="placeholder">Loading functions…</p>
-          {:else if caps.functions?.length === 0}
-            <p class="placeholder">No callable functions declared.</p>
+        <div class="operate-device-detail-col">
+          <h3 id="device-title">
+            {#if selectedKey && getSelectedDevice()}
+              {getSelectedDevice()?.display_name || getSelectedDevice()?.device_id} ({selectedKey})
+            {:else}
+              Device Detail
+            {/if}
+          </h3>
+
+          {#if !selectedKey || !getSelectedDevice()}
+            <p class="placeholder">Select a device to inspect signals and execute functions.</p>
           {:else}
-            {#each caps.functions as func (func.function_id)}
-              {@const fbKey = `${selectedKey}:${func.function_id}`}
-              <div class="function-card">
-                <h4>{func.display_name || func.name || `Function ${func.function_id}`}</h4>
-                {#if func.description}
-                  <p class="function-description">{func.description}</p>
-                {/if}
-                <form
-                  onsubmit={(e: Event) => {
-                    e.preventDefault();
-                    void callFunction(selectedKey, func, getFuncFormData(selectedKey, func));
-                  }}
+            <!-- By name, numbers in order: period1_ms before period2_ms (wb#692). -->
+            {@const signals = [...(deviceStates[selectedKey] ?? [])].sort((a, b) =>
+              (a.signal_id ?? "").localeCompare(b.signal_id ?? "", undefined, { numeric: true }),
+            )}
+            <!-- The first state read, or a failed one, files an entry (wb#623). -->
+            {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
+            {@const capsLoaded = capabilities[selectedKey] !== undefined}
+            {@const caps = capabilities[selectedKey] ?? { functions: [] }}
+
+            {#if !signalsLoaded}
+              <p class="placeholder">Loading signals…</p>
+            {:else if signals.length === 0}
+              <p class="placeholder">No signals available.</p>
+            {:else}
+              <table class="signal-table">
+                <thead
+                  ><tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr></thead
                 >
-                  {#each func.args ?? [] as arg, ai (ai)}
-                    <div class="arg-row">
-                      <label for="fn-{fbKey}-{ai}">
-                        {arg.name}{arg.required !== false ? " *" : ""}
-                        {#if arg.min !== undefined && arg.max !== undefined}
-                          <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
+                <tbody>
+                  {#each signals as sig (sig.signal_id)}
+                    <tr>
+                      <td>{sig.signal_id || "-"}</td>
+                      <td>{formatValue(sig.value)}</td>
+                      <td>{sig.quality ?? "--"}</td>
+                      <td
+                        >{(sig.timestamp_ms ?? 0) > 0
+                          ? new Date(sig.timestamp_ms ?? 0).toLocaleTimeString()
+                          : "--"}</td
+                      >
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+
+            {#if !capsLoaded}
+              <p class="placeholder">Loading functions…</p>
+            {:else if caps.functions?.length === 0}
+              <p class="placeholder">No callable functions declared.</p>
+            {:else}
+              {#each caps.functions as func (func.function_id)}
+                {@const fbKey = `${selectedKey}:${func.function_id}`}
+                <div class="function-card">
+                  <h4>{func.display_name || func.name || `Function ${func.function_id}`}</h4>
+                  {#if func.description}
+                    <p class="function-description">{func.description}</p>
+                  {/if}
+                  <form
+                    onsubmit={(e: Event) => {
+                      e.preventDefault();
+                      void callFunction(selectedKey, func, getFuncFormData(selectedKey, func));
+                    }}
+                  >
+                    {#each func.args ?? [] as arg, ai (ai)}
+                      <div class="arg-row">
+                        <label for="fn-{fbKey}-{ai}">
+                          {arg.name}{arg.required !== false ? " *" : ""}
+                          {#if arg.min !== undefined && arg.max !== undefined}
+                            <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
+                          {/if}
+                        </label>
+                        {#if arg.type === "bool"}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="checkbox"
+                            checked={Boolean(getFuncFormData(selectedKey, func)[`arg_${ai}`])}
+                            onchange={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
+                          />
+                        {:else if argAllowedValues(arg).length > 0}
+                          <select
+                            id="fn-{fbKey}-{ai}"
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            onchange={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                          >
+                            <option value="">Choose…</option>
+                            {#each argAllowedValues(arg) as av (av)}
+                              <option value={av}>{av}</option>
+                            {/each}
+                          </select>
+                        {:else if arg.type === "double"}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="number"
+                            step="any"
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            oninput={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                          />
+                        {:else}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="text"
+                            inputmode={arg.type === "int64" || arg.type === "uint64"
+                              ? "numeric"
+                              : "text"}
+                            placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            oninput={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                          />
                         {/if}
-                      </label>
-                      {#if arg.type === "bool"}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="checkbox"
-                          checked={Boolean(getFuncFormData(selectedKey, func)[`arg_${ai}`])}
-                          onchange={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
-                        />
-                      {:else if argAllowedValues(arg).length > 0}
-                        <select
-                          id="fn-{fbKey}-{ai}"
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          onchange={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                      </div>
+                    {/each}
+                    <div class="function-actions">
+                      <button type="submit" class="btn-secondary btn-sm">Execute</button>
+                      {#if functionFeedback[fbKey]?.text}
+                        <span class="function-feedback {functionFeedback[fbKey].cls}"
+                          >{functionFeedback[fbKey].text}</span
                         >
-                          <option value="">Choose…</option>
-                          {#each argAllowedValues(arg) as av (av)}
-                            <option value={av}>{av}</option>
-                          {/each}
-                        </select>
-                      {:else if arg.type === "double"}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="number"
-                          step="any"
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          oninput={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
-                        />
-                      {:else}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="text"
-                          inputmode={arg.type === "int64" || arg.type === "uint64"
-                            ? "numeric"
-                            : "text"}
-                          placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          oninput={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
-                        />
                       {/if}
                     </div>
-                  {/each}
-                  <div class="function-actions">
-                    <button type="submit" class="btn-secondary btn-sm">Execute</button>
-                    {#if functionFeedback[fbKey]?.text}
-                      <span class="function-feedback {functionFeedback[fbKey].cls}"
-                        >{functionFeedback[fbKey].text}</span
+                  </form>
+                </div>
+              {/each}
+            {/if}
+          {/if}
+        </div>
+      </div>
+
+      <!-- Parameters -->
+      <div class="operate-section">
+        <h3>Parameters</h3>
+        {#if parameters.length === 0}
+          <p class="placeholder">No parameters available.</p>
+        {:else}
+          <div class="parameters-grid">
+            {#each parameters as param (param.name)}
+              {@const ptype = normalizeParameterType(param.type)}
+              <div class="parameter-card">
+                <div class="parameter-header">
+                  <span class="parameter-name">{param.name}</span>
+                  <span class="parameter-type">{ptype ?? String(param.type)}</span>
+                </div>
+                <div class="parameter-value"><strong>{String(param.value)}</strong></div>
+                {#if param.min !== undefined || param.max !== undefined}
+                  <div class="parameter-range">
+                    Range: [{param.min ?? "-inf"}, {param.max ?? "+inf"}]
+                  </div>
+                {/if}
+                {#if ptype}
+                  <div class="parameter-controls">
+                    {#if ptype === "bool"}
+                      <select
+                        value={getParamInput(param.name) || String(param.value).toLowerCase()}
+                        onchange={(e: Event) => setParamInput(param.name, selectTarget(e).value)}
+                      >
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    {:else if ptype === "string" && Array.isArray(param.allowed_values) && param.allowed_values.length > 0}
+                      <select
+                        value={getParamInput(param.name) || String(param.value)}
+                        onchange={(e: Event) => setParamInput(param.name, selectTarget(e).value)}
+                      >
+                        {#each param.allowed_values as av (av)}
+                          <option value={String(av)}>{String(av)}</option>
+                        {/each}
+                      </select>
+                    {:else if ptype === "double"}
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="New value"
+                        value={getParamInput(param.name)}
+                        oninput={(e: Event) => setParamInput(param.name, inputTarget(e).value)}
+                      />
+                    {:else}
+                      <input
+                        type="text"
+                        placeholder="New value"
+                        value={getParamInput(param.name)}
+                        oninput={(e: Event) => setParamInput(param.name, inputTarget(e).value)}
+                      />
+                    {/if}
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      onclick={() => updateParameter(param, getParamInput(param.name))}>Set</button
+                    >
+                    {#if paramFeedback[param.name]?.text}
+                      <span class="feedback {paramFeedback[param.name].cls}"
+                        >{paramFeedback[param.name].text}</span
                       >
                     {/if}
                   </div>
-                </form>
+                {:else}
+                  <span class="feedback error"
+                    >Unsupported parameter type: {String(param.type)}</span
+                  >
+                {/if}
               </div>
             {/each}
-          {/if}
+          </div>
         {/if}
       </div>
-    </div>
 
-    <!-- Parameters -->
-    <div class="operate-section">
-      <h3>Parameters</h3>
-      {#if parameters.length === 0}
-        <p class="placeholder">No parameters available.</p>
-      {:else}
-        <div class="parameters-grid">
-          {#each parameters as param (param.name)}
-            {@const ptype = normalizeParameterType(param.type)}
-            <div class="parameter-card">
-              <div class="parameter-header">
-                <span class="parameter-name">{param.name}</span>
-                <span class="parameter-type">{ptype ?? String(param.type)}</span>
-              </div>
-              <div class="parameter-value"><strong>{String(param.value)}</strong></div>
-              {#if param.min !== undefined || param.max !== undefined}
-                <div class="parameter-range">
-                  Range: [{param.min ?? "-inf"}, {param.max ?? "+inf"}]
-                </div>
-              {/if}
-              {#if ptype}
-                <div class="parameter-controls">
-                  {#if ptype === "bool"}
-                    <select
-                      value={getParamInput(param.name) || String(param.value).toLowerCase()}
-                      onchange={(e: Event) => setParamInput(param.name, selectTarget(e).value)}
-                    >
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
-                  {:else if ptype === "string" && Array.isArray(param.allowed_values) && param.allowed_values.length > 0}
-                    <select
-                      value={getParamInput(param.name) || String(param.value)}
-                      onchange={(e: Event) => setParamInput(param.name, selectTarget(e).value)}
-                    >
-                      {#each param.allowed_values as av (av)}
-                        <option value={String(av)}>{String(av)}</option>
-                      {/each}
-                    </select>
-                  {:else if ptype === "double"}
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="New value"
-                      value={getParamInput(param.name)}
-                      oninput={(e: Event) => setParamInput(param.name, inputTarget(e).value)}
-                    />
-                  {:else}
-                    <input
-                      type="text"
-                      placeholder="New value"
-                      value={getParamInput(param.name)}
-                      oninput={(e: Event) => setParamInput(param.name, inputTarget(e).value)}
-                    />
-                  {/if}
-                  <button
-                    type="button"
-                    class="btn-secondary btn-sm"
-                    onclick={() => updateParameter(param, getParamInput(param.name))}>Set</button
-                  >
-                  {#if paramFeedback[param.name]?.text}
-                    <span class="feedback {paramFeedback[param.name].cls}"
-                      >{paramFeedback[param.name].text}</span
-                    >
-                  {/if}
-                </div>
-              {:else}
-                <span class="feedback error">Unsupported parameter type: {String(param.type)}</span>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
-
-    <!-- Automation status -->
-    <div class="operate-section">
-      <h3>Automation</h3>
-      {#if !automationStatus}
-        <p class="placeholder">Automation status unavailable.</p>
-      {:else}
-        {@const execStatus = automationStatus.execution_status}
-        <div class="automation-status-grid">
-          <span
-            >Status: <span class="badge exec-{execStatus}">{execStatus.toUpperCase()}</span></span
-          >
-          {#if automationStatus.execution_reason}
-            <span>Reason: {automationStatus.execution_reason}</span>
-          {/if}
-          <span>Run: {automationStatus.run_id ?? "--"}</span>
-          <span>Definition: {formatAutomationVersion(automationStatus.automation_version)}</span>
-          <span>Last evaluation: {formatEpochMs(automationStatus.last_evaluation_at_epoch_ms)}</span
-          >
-          {#if automationStatus.last_error}
+      <!-- Automation status -->
+      <div class="operate-section">
+        <h3>Automation</h3>
+        {#if !automationStatus}
+          <p class="placeholder">Automation status unavailable.</p>
+        {:else}
+          {@const execStatus = automationStatus.execution_status}
+          <div class="automation-status-grid">
             <span
-              class="error-text {execStatus === 'failed'
-                ? 'alarm'
-                : execStatus === 'blocked'
-                  ? 'warning'
-                  : ''}"
+              >Status: <span class="badge exec-{execStatus}">{execStatus.toUpperCase()}</span></span
             >
-              Last error: {automationStatus.last_error}
-            </span>
-          {/if}
-          {#if automationFault}
-            <span class="error-text alarm">
-              Fault ({new Date(automationFault.timestamp_ms).toLocaleTimeString()}): {automationFault.message}
-            </span>
-          {/if}
-        </div>
-        <pre class="bt-viewer">{formatBtOutline(behaviorTree)}</pre>
-      {/if}
-    </div>
+            {#if automationStatus.execution_reason}
+              <span>Reason: {automationStatus.execution_reason}</span>
+            {/if}
+            <span>Run: {automationStatus.run_id ?? "--"}</span>
+            <span>Definition: {formatAutomationVersion(automationStatus.automation_version)}</span>
+            <span
+              >Last evaluation: {formatEpochMs(automationStatus.last_evaluation_at_epoch_ms)}</span
+            >
+            {#if automationStatus.last_error}
+              <span
+                class="error-text {execStatus === 'failed'
+                  ? 'alarm'
+                  : execStatus === 'blocked'
+                    ? 'warning'
+                    : ''}"
+              >
+                Last error: {automationStatus.last_error}
+              </span>
+            {/if}
+            {#if automationFault}
+              <span class="error-text alarm">
+                Fault ({new Date(automationFault.timestamp_ms).toLocaleTimeString()}): {automationFault.message}
+              </span>
+            {/if}
+          </div>
+          <pre class="bt-viewer">{formatBtOutline(behaviorTree)}</pre>
+        {/if}
+      </div>
 
-    <!-- Event trace -->
-    <div class="operate-section">
-      <h3>Event Trace</h3>
-      {#if eventTrace.length === 0}
-        <p class="placeholder">No events yet.</p>
-      {:else}
-        <div class="event-items">
-          {#each [...eventTrace].reverse() as ev (ev.timestamp_ms)}
-            {@const ts = Number.isFinite(Number(ev.timestamp_ms))
-              ? new Date(Number(ev.timestamp_ms)).toLocaleTimeString()
-              : "--"}
-            {@const typeClass = String(ev.type || "event").replaceAll("_", "-")}
-            <div class="event-item {typeClass}">
-              <span class="event-time">{ts}</span>
-              <span class="event-type">{ev.type}</span>
-              <span class="event-details">{ev.details}</span>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
+      <!-- Event trace -->
+      <div class="operate-section">
+        <h3>Event Trace</h3>
+        {#if eventTrace.length === 0}
+          <p class="placeholder">No events yet.</p>
+        {:else}
+          <div class="event-items">
+            {#each [...eventTrace].reverse() as ev (ev.timestamp_ms)}
+              {@const ts = Number.isFinite(Number(ev.timestamp_ms))
+                ? new Date(Number(ev.timestamp_ms)).toLocaleTimeString()
+                : "--"}
+              {@const typeClass = String(ev.type || "event").replaceAll("_", "-")}
+              <div class="event-item {typeClass}">
+                <span class="event-time">{ts}</span>
+                <span class="event-type">{ev.type}</span>
+                <span class="event-details">{ev.details}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
 
-    <!-- Telemetry: a link, not a frame. install.sh's Grafana refuses framing
+      <!-- Telemetry: a link, not a frame. install.sh's Grafana refuses framing
          (X-Frame-Options: deny), and drawing it inside Operate is heavy on a
          Pi (anolis#646). -->
-    <div class="operate-section">
-      <h3>Telemetry</h3>
-      {#if telemetryUrl()}
-        <div class="telemetry-bar">
-          <a href={telemetryUrl()} target="_blank" rel="noopener noreferrer"
-            >Open Grafana in new tab →</a
-          >
-        </div>
-      {:else}
-        <p class="placeholder">Telemetry URL is not configured.</p>
-      {/if}
-    </div>
+      <div class="operate-section">
+        <h3>Telemetry</h3>
+        {#if telemetryUrl()}
+          <div class="telemetry-bar">
+            <a href={telemetryUrl()} target="_blank" rel="noopener noreferrer"
+              >Open Grafana in new tab →</a
+            >
+          </div>
+        {:else}
+          <p class="placeholder">Telemetry URL is not configured.</p>
+        {/if}
+      </div>
+    </details>
   {/if}
 </section>

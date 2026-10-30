@@ -702,7 +702,7 @@ export function renderBtOutline(
 }
 
 /** Where a machine line's link takes the operator, inside "Engineering". */
-export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health";
+export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | "runtime-status";
 
 /** The operator panel's one line on what the machine is doing (wb#727). */
 export interface MachineLine {
@@ -720,11 +720,66 @@ export interface MachineLine {
   linkLabel: string;
 }
 
+/**
+ * The operator panel's one line on what the machine is doing and what to do
+ * next (wb#727). From the status Operate already polls, so it is never staler
+ * than the rest of the page. The first state that holds wins, in this order:
+ * what blocks every action comes before what one device needs.
+ */
 export function machineLine(
-  _status: RuntimeApiStatus | null,
-  _estop: EstopStatus | null,
-  _stopChain: StopChainStatus | null,
-  _trippedDevices: string[],
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  stopChain: StopChainStatus | null,
+  trippedDevices: string[],
 ): MachineLine {
-  return { state: "ready", text: "", target: null, linkLabel: "" };
+  const line = (
+    state: MachineLine["state"],
+    text: string,
+    target: MachineLineTarget | null = null,
+    linkLabel = "",
+  ): MachineLine => ({ state, text, target, linkLabel });
+
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return line(
+      "unavailable",
+      "The runtime is not answering.",
+      "runtime-status",
+      "See Runtime Status",
+    );
+  }
+  if (stopChain?.state === "in_force") {
+    return line("emergency_stop", "Emergency stop in force: release it to continue.");
+  }
+  if (estop?.latched) {
+    return line("stopped", "Stopped by the software stop: clear it to continue.");
+  }
+  if (status.mode === "FAULT") {
+    return line(
+      "fault",
+      "In FAULT: set MANUAL to recover. AUTO is not offered from FAULT, which accepts only MANUAL.",
+      "mode",
+      "Go to Mode",
+    );
+  }
+  if (trippedDevices.length) {
+    return line(
+      "tripped",
+      `Board tripped: clear the trip on ${trippedDevices.join(", ")}.`,
+      "watchdog-trips",
+      "Clear the trip",
+    );
+  }
+  // A device the emergency stop removed power from is the stop, not a loss (wb#631).
+  const stopped = new Set(stopChain?.expected_losses ?? []);
+  const lost = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  if (lost.length) {
+    return line(
+      "device_lost",
+      `Device lost: check its power (${lost.join(", ")}).`,
+      "provider-health",
+      "See Provider Health",
+    );
+  }
+  if (status.mode === "AUTO") return line("running", "Experiment running.");
+  return line("ready", "Ready.");
 }
