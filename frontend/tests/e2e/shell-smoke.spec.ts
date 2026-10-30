@@ -215,6 +215,9 @@ test("workspace shell navigation + runtime strip + operate stream state", async 
   await expect(page).toHaveURL(/\/projects\/alpha\/operate$/);
   await expect(page.locator("#workspace-operate")).toBeVisible();
 
+  // Operate opens on the operator panel; the stream sits under "Engineering" (wb#727).
+  await expect(page.getByTestId("machine-line")).toBeVisible();
+  await page.getByText("Engineering", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Event Stream" })).toBeVisible();
   await expect(page.locator("#workspace-operate")).toContainText("CONNECTED");
 });
