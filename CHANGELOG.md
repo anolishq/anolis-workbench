@@ -15,6 +15,12 @@ Historical note:
 
 ### Fixed
 
+- **A runtime that refuses the workbench says what to run** (#722). The
+  operate proxy answers the runtime's 401 with a message naming
+  `anolis-provision workbench-service`: to install the token copy when the
+  workbench sent none, or to refresh it when the runtime refused the one it
+  sent. Operate's Runtime Status shows it, and so does "Failed to set mode",
+  where both said only "unauthorized" or "Runtime status unavailable".
 - **`POST /api/projects/<name>/stop` stops only `<name>`'s runtime**
   (Fixes #670). When another project's runtime is running, it returns 409
   naming that project and leaves it running, as restart already did. It

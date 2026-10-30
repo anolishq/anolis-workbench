@@ -1000,3 +1000,21 @@ describe('Operate.svelte — a device_removed event (#516)', () => {
     await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0', 'dev0']));
   });
 });
+
+describe('Operate.svelte — a runtime that refuses the workbench (#722)', () => {
+  const told =
+    'The runtime requires a token and the workbench has no token for it. Run `anolis-provision workbench-service` on this machine to install one.';
+
+  it('says why Runtime Status is unavailable, in the words the proxy gives', async () => {
+    renderOperate(jsonResponse(401, { status: { code: 'UNAUTHENTICATED', message: told } }));
+
+    expect(await screen.findByText(told)).toBeInTheDocument();
+    expect(screen.queryByText('Runtime status unavailable.')).not.toBeInTheDocument();
+  });
+
+  it('still says only "unavailable" for a failure that is not a refusal', async () => {
+    renderOperate(jsonResponse(502, { error: 'Bad gateway' }));
+
+    expect(await screen.findByText('Runtime status unavailable.')).toBeInTheDocument();
+  });
+});

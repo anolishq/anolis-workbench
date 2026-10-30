@@ -133,6 +133,9 @@
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
   let statusSettled = $state<boolean>(false);
+  // Why the runtime refused the status poll, when it did: the proxy names the
+  // command that gives the workbench a token (#722).
+  let statusRefusal = $state<string>("");
   // Whether /v0/devices has answered once: until then the list is loading,
   // not empty (#568).
   let devicesSettled = $state<boolean>(false);
@@ -368,6 +371,12 @@
     }
 
     runtimeStatusData = rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value) : null;
+    statusRefusal =
+      rtRes.status === "rejected" &&
+      rtRes.reason instanceof ApiResponseError &&
+      rtRes.reason.status === 401
+        ? rtRes.reason.message
+        : "";
     // Keep the last-known estop state on a transient status-poll failure so the
     // safety control never disappears mid-session (wb#236), and the state a
     // stop or clear reply reported since this poll left (wb#614).
@@ -1549,7 +1558,12 @@
         <span class="operate-meta">Loading runtime status…</span>
       {:else}
         <span class="badge unavailable">UNAVAILABLE</span>
-        <span class="operate-meta">Runtime status unavailable.</span>
+        {#if statusRefusal}
+          <span class="operate-meta field-error" data-testid="runtime-refusal">{statusRefusal}</span
+          >
+        {:else}
+          <span class="operate-meta">Runtime status unavailable.</span>
+        {/if}
       {/if}
     </div>
 
