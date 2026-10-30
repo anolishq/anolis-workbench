@@ -22,9 +22,11 @@ Historical note:
   device that is back and waits for MANUAL → AUTO, the emergency stop in
   force, or the runtime not answering. A device is called lost only while
   provider health says it is unreachable. A line about something below it
-  has a button that opens "Engineering" and scrolls to that section. Every
-  section Operate showed before is under "Engineering", collapsed; nothing was
-  removed. The software-stop row stays above the panel, never collapsed.
+  has a button that scrolls to that section. Below the line, watchdog trips,
+  Mode, Runtime Status, Event Stream and Provider Health are always shown;
+  Devices, Parameters, Automation and Event Trace each collapse on their own,
+  closed by default; Telemetry comes last. Nothing was removed. The
+  software-stop row stays above the panel, never collapsed.
 
 ## [0.27.0] - 2026-10-30
 
