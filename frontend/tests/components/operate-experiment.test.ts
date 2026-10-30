@@ -49,6 +49,8 @@ function fakeRuntime(
     latched?: boolean;
     tripped?: boolean;
     lost?: boolean;
+    chainInForce?: boolean;
+    down?: boolean;
     uptimes?: number[];
     operator?: unknown;
   } = {},
@@ -83,6 +85,7 @@ function fakeRuntime(
       }
       if (path === "/api/status") return jsonResponse(200, RUNNING);
       if (path === "/v0/runtime/status") {
+        if (opts.down) return jsonResponse(503, { status: { code: "UNAVAILABLE" } });
         const uptime = uptimes.length > 1 ? uptimes.shift() : uptimes[0];
         return jsonResponse(200, {
           status: { code: "OK" },
@@ -93,6 +96,15 @@ function fakeRuntime(
           providers: [],
           device_count: 2,
           device_loss_latched: opts.lost ? ["bread0/dcmt1"] : [],
+          ...(opts.chainInForce
+            ? {
+                stop_chain: {
+                  state: "in_force",
+                  signal: "bread0/gpio0/chain_open",
+                  reason: "open",
+                },
+              }
+            : {}),
           estop: {
             latched: opts.latched ?? false,
             software_safe_state: "hooks",
@@ -215,7 +227,9 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
     await fireEvent.input(pulse, { target: { value: "600" } });
     await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
 
-    expect(await within(row("Dose 1", "For")).findByText(/above maximum \(60\)/)).toBeInTheDocument();
+    expect(
+      await within(row("Dose 1", "For")).findByText(/above maximum \(60\)/),
+    ).toBeInTheDocument();
     expect(paramPosts(rt.posts)).toEqual([]);
   });
 
@@ -238,7 +252,9 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
 
 describe("Operate.svelte — Start and Stop experiment (#729)", () => {
   async function click(name: string) {
-    await waitFor(() => expect(screen.getByTestId("machine-line")).not.toHaveTextContent("not answering"));
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).not.toHaveTextContent("not answering"),
+    );
     await fireEvent.click(
       within(screen.getByTestId("operator-experiment")).getByRole("button", { name }),
     );
@@ -275,18 +291,49 @@ describe("Operate.svelte — Start and Stop experiment (#729)", () => {
   });
 
   it.each([
-    ["the software stop is latched", { latched: true }, /software stop is latched.*Clear the latch/],
-    ["a board is tripped", { tripped: true }, /bread0\/dcmt0.*tripped.*Clear the trip/],
-    ["a device is lost", { lost: true }, /bread0\/dcmt1.*lost.*power/],
-  ])("Start refuses when %s, with the reason and the fix, and sends nothing", async (_c, opts, text) => {
-    const rt = fakeRuntime({ mode: "IDLE", ...opts });
-    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
-    await waitFor(() => expect(screen.getByTestId("machine-line")).not.toHaveTextContent("Ready"));
-    await click("Start experiment");
+    // [case, runtime, the machine line once its status is read, the refusal]
+    [
+      "the software stop is latched",
+      { latched: true },
+      "software stop",
+      /software stop is latched.*Clear the latch/,
+    ],
+    ["a board is tripped", { tripped: true }, "tripped", /bread0\/dcmt0.*tripped.*Clear the trip/],
+    ["a device is lost", { lost: true }, "lost", /bread0\/dcmt1.*lost.*power/],
+    // From FAULT, going by way of MANUAL would clear the fault unseen.
+    [
+      "the runtime is in FAULT",
+      { mode: "FAULT" },
+      "In FAULT",
+      /in FAULT.*Set MANUAL under Mode once the cause is fixed/,
+    ],
+    [
+      "the emergency stop is in force",
+      { chainInForce: true },
+      "Emergency stop in force",
+      /emergency stop is in force.*Release it/,
+    ],
+    ["the runtime is not answering", { down: true }, "not answering", /not answering/],
+  ])(
+    "Start refuses when %s, with the reason and the fix, and sends nothing",
+    async (_c, opts, line, text) => {
+      const rt = fakeRuntime({ mode: "IDLE", ...opts });
+      await waitFor(() =>
+        expect(screen.getByTestId("mode-badge")).toHaveTextContent(
+          (opts as { mode?: string }).mode ?? "IDLE",
+        ),
+      );
+      await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent(line));
+      await fireEvent.click(
+        within(screen.getByTestId("operator-experiment")).getByRole("button", {
+          name: "Start experiment",
+        }),
+      );
 
-    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(text);
-    expect(rt.posts).toEqual([]);
-  });
+      expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(text);
+      expect(rt.posts).toEqual([]);
+    },
+  );
 
   it("offers neither without an experiment, and no settings without settings", async () => {
     fakeRuntime({ operator: null });
