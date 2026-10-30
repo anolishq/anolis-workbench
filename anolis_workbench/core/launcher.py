@@ -233,6 +233,21 @@ def _runtime_alive(bind: str, port: int, timeout_s: float = 0.5) -> bool:
         return False
 
 
+def installed_runtime_target(name: str) -> tuple[str, int] | None:
+    """(host, port) of the installed runtime when project `name` is the
+    installed machine's project (#722): loopback, on the http.port of the
+    runtime config install.sh left in that prefix. None for any other project,
+    or when that config cannot be read."""
+    from anolis_workbench.core import installed_project
+    from anolis_workbench.core import projects as projects_module
+
+    prefix = projects_module.installed_from(name)
+    if prefix is None:
+        return None
+    port = installed_project.installed_runtime_port(pathlib.Path(prefix))
+    return None if port is None else ("127.0.0.1", port)
+
+
 def _discover_external_runtime() -> dict | None:
     """Detect a runtime the workbench did not launch (e.g. one installed as a
     systemd service by install.sh) by probing each known project's configured
@@ -252,6 +267,20 @@ def _discover_external_runtime() -> dict | None:
 
     for project_dir in sorted(systems_dir.iterdir()):
         if not project_dir.is_dir():
+            continue
+        installed = installed_runtime_target(project_dir.name)
+        if installed is not None:
+            # The installed machine's project: the runtime runs install.sh's
+            # copy of the config, so probe it where install.sh's health probe
+            # does (#722).
+            if _runtime_alive(*installed):
+                return {
+                    "running": True,
+                    "project": project_dir.name,
+                    "pid": None,
+                    "managed": False,
+                    "external": True,
+                }
             continue
         try:
             document = projects_module.get_project(project_dir.name)

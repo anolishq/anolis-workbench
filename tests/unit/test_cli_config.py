@@ -104,6 +104,7 @@ def test_startup_names_the_loopback_url_for_this_machine(monkeypatch, capsys, ho
     opened: list[str] = []
     monkeypatch.setattr(app_module, "verify_environment", lambda: None)
     monkeypatch.setattr(app_module.projects_module, "cleanup_stale_running_files", lambda: None)
+    monkeypatch.setattr(app_module.installed_project, "sync", lambda *args: None)
     monkeypatch.setattr(app_module, "_WorkbenchServer", _Server)
     monkeypatch.setattr(app_module, "_open_browser", opened.append)
     monkeypatch.setattr(app_module.threading, "Thread", _InlineThread)

@@ -110,6 +110,14 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     except FileNotFoundError:
         return None, f"Running project '{active_project}' not found", 500
 
+    global _last_target
+    installed = launcher_module.installed_runtime_target(active_project)
+    if installed is not None:
+        # The installed machine's project: install.sh's copy of the config,
+        # not the project's variant, is what the runtime runs (#722).
+        _last_target = f"http://{installed[0]}:{installed[1]}"
+        return _last_target, None, 200
+
     # The proxy target comes from the variant that is actually running (#255).
     # Reading a fixed default here would silently point Operate at :8080 while
     # the runtime listens elsewhere — and the launcher WOULD report it running,
@@ -133,7 +141,6 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     if not isinstance(port, int) or isinstance(port, bool):
         return None, "Runtime port is invalid", 500
 
-    global _last_target
     _last_target = f"http://{host}:{port}"
     return _last_target, None, 200
 

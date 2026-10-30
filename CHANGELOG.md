@@ -13,6 +13,19 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- **The workbench imports the project install.sh put on this machine at
+  startup** (#722). When `/opt/anolis/manifest.json` exists, it imports
+  `/opt/anolis/projects/<profile>/` as a read-only project marked as the
+  installed one, and re-imports it on every start. Operate then reaches the
+  installed runtime on loopback at the port `/opt/anolis/config/runtime.yaml`
+  sets, with no import by hand and no `ANOLIS_WORKBENCH_RUNTIME_URL`, and the
+  import never goes stale after an upgrade (#558). A project of the user's own
+  with that name is kept, and the installed one is imported as
+  `<profile>-installed`. Nothing is imported when the manifest, the runtime
+  config or the project cannot be read.
+
 ### Fixed
 
 - **A runtime that refuses the workbench says what to run** (#722). The
