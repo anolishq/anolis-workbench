@@ -439,6 +439,8 @@ export interface ParameterDefinition extends UnknownRecord {
   min?: number;
   max?: number;
   allowed_values?: string[];
+  /** Whether the value is the project's default or an operator set it (anolis#681). */
+  source?: "default" | "operator" | string;
 }
 
 export type ExecutionStatus = "idle" | "running" | "blocked" | "failed" | "completed" | "unknown";

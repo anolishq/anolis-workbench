@@ -37,6 +37,18 @@ Historical note:
   actuator is moving. Both sit above Mode, always shown. Without the block,
   the panel shows neither.
 
+- **Settings and Start/Stop experiment in the operator panel** (#729, part of
+  #232). Settings shows the profile's declared groups with labels, units and
+  current values, each marked default or set, and saves a group with one
+  Save; a value out of range is refused, naming the limit, and nothing in the
+  group is saved. After a runtime restart, it says once that the settings
+  are back at their defaults. Start experiment sets the declared enable
+  parameters, then the declared mode, by way of MANUAL where the runtime
+  does not allow the move directly; Stop experiment clears them, then sets
+  its mode. Start refuses, with the reason and the fix, while the software
+  stop is latched, a board is tripped or a device is lost. The software stop
+  stays the emergency control.
+
 - **The workbench opens on the machine** (#730, part of #232). With an
   installed project (#724), opening the workbench goes straight to its
   Operate; the Home button still shows the project list. Home lists the

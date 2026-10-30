@@ -723,6 +723,56 @@ export interface MachineLine {
 }
 
 /**
+ * The devices the runtime holds as lost (wb#731): `latched` is every handle
+ * the loss latch holds, `lost` those of them unreachable now.
+ */
+export function deviceLosses(
+  status: RuntimeApiStatus,
+  stopChain: StopChainStatus | null,
+  providers: ProviderHealth[],
+): { latched: string[]; lost: string[] } {
+  // A device the emergency stop removed power from is the stop, not a loss (wb#631).
+  const stopped = new Set(stopChain?.expected_losses ?? []);
+  const latched = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  // The latch holds a device until MANUAL -> AUTO, even once it is back, so
+  // whether it is lost now comes from provider health.
+  const reachable = new Set<string>();
+  for (const provider of providers) {
+    if (provider.state !== "AVAILABLE") continue;
+    for (const device of provider.devices ?? []) {
+      if (device.health === "OK" || device.health === "WARNING") {
+        reachable.add(`${provider.provider_id}/${device.device_id}`);
+      }
+    }
+  }
+  return { latched, lost: latched.filter((handle) => !reachable.has(handle)) };
+}
+
+/**
+ * Why Start experiment would not work, with the fix, or "" (wb#729). Only
+ * what Operate reads exactly: a brake has no declaration yet (anolis#686).
+ */
+export function experimentStartRefusal(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  stopChain: StopChainStatus | null,
+  trippedDevices: string[],
+  providers: ProviderHealth[],
+): string {
+  if (estop?.latched) {
+    return "Refused: the software stop is latched. Clear the latch above, then Start.";
+  }
+  if (trippedDevices.length) {
+    return `Refused: ${trippedDevices.join(", ")} tripped its command watchdog. Clear the trip under Watchdog trips, then Start.`;
+  }
+  const lost = status ? deviceLosses(status, stopChain, providers).lost : [];
+  if (lost.length) {
+    return `Refused: ${lost.join(", ")} lost. Check its power (see Provider Health), then Start.`;
+  }
+  return "";
+}
+
+/**
  * The operator panel's one line on what the machine is doing and what to do
  * next (wb#727). From the status Operate already polls, so it is never staler
  * than the rest of the page. The first state that holds wins, in this order:
@@ -772,21 +822,7 @@ export function machineLine(
       "Clear the trip",
     );
   }
-  // A device the emergency stop removed power from is the stop, not a loss (wb#631).
-  const stopped = new Set(stopChain?.expected_losses ?? []);
-  const latched = status.device_loss_latched.filter((handle) => !stopped.has(handle));
-  // The latch holds a device until MANUAL -> AUTO, even once it is back, so
-  // whether it is lost now comes from provider health.
-  const reachable = new Set<string>();
-  for (const provider of providers) {
-    if (provider.state !== "AVAILABLE") continue;
-    for (const device of provider.devices ?? []) {
-      if (device.health === "OK" || device.health === "WARNING") {
-        reachable.add(`${provider.provider_id}/${device.device_id}`);
-      }
-    }
-  }
-  const lost = latched.filter((handle) => !reachable.has(handle));
+  const { latched, lost } = deviceLosses(status, stopChain, providers);
   if (lost.length) {
     return line(
       "device_lost",
