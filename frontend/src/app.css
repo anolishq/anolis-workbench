@@ -208,6 +208,16 @@ body {
   margin-top: 16px;
 }
 
+.home-setup {
+  margin-top: 24px;
+}
+
+.home-setup > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}
+
 .home-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);

@@ -26,6 +26,20 @@ Historical note:
   section Operate showed before is under "Engineering", collapsed; nothing was
   removed. The software-stop row stays above the panel, never collapsed.
 
+- **The workbench opens on the machine** (#730, part of #232). With an
+  installed project (#724), opening the workbench goes straight to its
+  Operate; the Home button still shows the project list. Home lists the
+  installed project first as "this machine", and puts Create, Import, updates,
+  rollback and the Fleet Dashboard under "Setup", collapsed when a project is
+  installed. Open on an imported project goes to Operate, not Compose.
+
+### Fixed
+
+- **Compose's running-runtime advisory** no longer tells an imported project
+  to save edits it cannot make, and for the installed project says the
+  runtime runs the installed copy instead of "running from this project"
+  (#730).
+
 ## [0.27.0] - 2026-10-30
 
 Upgrade notes:

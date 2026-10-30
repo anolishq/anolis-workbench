@@ -1,11 +1,12 @@
 <script lang="ts">
   import ConfirmModal from "../lib/ConfirmModal.svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
-  import type {
-    ApiErrorResponse,
-    ProjectSummary,
-    RuntimeStatus,
-    TemplateSummary,
+  import {
+    installedProject,
+    type ApiErrorResponse,
+    type ProjectSummary,
+    type RuntimeStatus,
+    type TemplateSummary,
   } from "../lib/contracts";
 
   let {
@@ -24,6 +25,19 @@
     onNavigate: (path: string) => void;
     onProjectsRefreshed: () => Promise<void> | void;
   } = $props();
+
+  // The installed project is this machine (#730): listed first, and the rest of
+  // Home is setup, folded away when there is a machine to run.
+  const installed = $derived(installedProject(projects));
+  const listed = $derived(
+    installed ? [installed, ...projects.filter((p) => p !== installed)] : projects,
+  );
+
+  /** An imported project is read-only, so it opens where it runs: Operate. */
+  function openPath(project: ProjectSummary): string {
+    const workspace = project.authored === false ? "operate" : "compose";
+    return `/projects/${encodeURIComponent(project.name)}/${workspace}`;
+  }
 
   let createName = $state<string>("");
   let createTemplate = $state<string>("");
@@ -253,10 +267,13 @@
         </ul>
       {:else}
         <ul class="home-project-list">
-          {#each projects as project (project.name)}
+          {#each listed as project (project.name)}
             <li class="home-project-item">
               <span
-                >{project.name}{#if project.authored === false}
+                >{project.name}{#if project === installed}
+                  <span class="badge" title="The project installed on this machine"
+                    >this machine</span
+                  >{:else if project.authored === false}
                   <span class="badge" title="Imported machine profile — carried verbatim"
                     >imported</span
                   >{/if}</span
@@ -264,164 +281,169 @@
               <button
                 type="button"
                 class="btn-secondary btn-sm"
-                onclick={() => onNavigate(`/projects/${encodeURIComponent(project.name)}/compose`)}
-                >Open</button
+                onclick={() => onNavigate(openPath(project))}>Open</button
               >
             </li>
           {/each}
         </ul>
       {/if}
     </div>
+  </div>
 
-    <div class="home-card">
-      <h2>Create Project</h2>
-      <div class="form-group">
-        <label for="create-project-name">Project name</label>
-        <input
-          id="create-project-name"
-          type="text"
-          maxlength="64"
-          placeholder="my-system"
-          autocomplete="off"
-          spellcheck="false"
-          bind:value={createName}
-        />
-      </div>
-      <div class="form-group">
-        <label for="create-project-template">Template</label>
-        <select
-          id="create-project-template"
-          bind:value={createTemplate}
-          disabled={templates.length === 0}
-        >
-          {#if templates.length === 0}
-            <option value="">No templates available</option>
-          {:else}
-            {#each templates as t (t.id)}
-              {#if t.error}
-                <option value={t.id} disabled title={t.error}
-                  >{t.meta?.name ?? t.id} (unavailable: {t.error})</option
-                >
-              {:else}
-                <option value={t.id}>{t.meta?.name ?? t.id}</option>
-              {/if}
-            {/each}
-          {/if}
-        </select>
-      </div>
-      <button
-        id="btn-create-project"
-        type="button"
-        class="btn-primary"
-        disabled={creating}
-        onclick={handleCreate}>{creating ? "Creating…" : "Create Project"}</button
-      >
-      {#if createError}
-        <p class="field-error">{createError}</p>
-      {/if}
-    </div>
-
-    <div class="home-card">
-      <h2>Import Machine Profile</h2>
-      <p class="field-note">
-        Imports a canonical machine-profile project directory verbatim (read-only; deploy-focused).
-      </p>
-      <div class="form-group">
-        <label for="import-project-path">Profile directory</label>
-        <input
-          id="import-project-path"
-          type="text"
-          spellcheck="false"
-          style="font-family:monospace"
-          placeholder="/path/to/anolis-projects/projects/bioreactor-v1"
-          bind:value={importPath}
-        />
-      </div>
-      <div class="form-group">
-        <label for="import-project-name">Project name (optional)</label>
-        <input
-          id="import-project-name"
-          type="text"
-          maxlength="64"
-          placeholder="defaults to the directory name"
-          autocomplete="off"
-          spellcheck="false"
-          bind:value={importName}
-        />
-      </div>
-      <button
-        id="btn-import-project"
-        type="button"
-        class="btn-primary"
-        disabled={importing}
-        onclick={handleImport}>{importing ? "Importing…" : "Import Project"}</button
-      >
-      {#if importError}
-        <p class="field-error">{importError}</p>
-        {#if importErrors.length > 0}
-          <ul class="field-error">
-            {#each importErrors as e, i (i)}
-              <li>{e.message ?? "Validation error"}</li>
-            {/each}
-          </ul>
-        {/if}
-      {/if}
-    </div>
-
-    <!-- System Updates -->
-    <div class="home-card">
-      <h2>System</h2>
-      <div class="system-update-row">
+  <details class="home-setup" data-testid="home-setup" open={!installed}>
+    <summary>Setup</summary>
+    <div class="home-grid">
+      <div class="home-card">
+        <h2>Create Project</h2>
+        <div class="form-group">
+          <label for="create-project-name">Project name</label>
+          <input
+            id="create-project-name"
+            type="text"
+            maxlength="64"
+            placeholder="my-system"
+            autocomplete="off"
+            spellcheck="false"
+            bind:value={createName}
+          />
+        </div>
+        <div class="form-group">
+          <label for="create-project-template">Template</label>
+          <select
+            id="create-project-template"
+            bind:value={createTemplate}
+            disabled={templates.length === 0}
+          >
+            {#if templates.length === 0}
+              <option value="">No templates available</option>
+            {:else}
+              {#each templates as t (t.id)}
+                {#if t.error}
+                  <option value={t.id} disabled title={t.error}
+                    >{t.meta?.name ?? t.id} (unavailable: {t.error})</option
+                  >
+                {:else}
+                  <option value={t.id}>{t.meta?.name ?? t.id}</option>
+                {/if}
+              {/each}
+            {/if}
+          </select>
+        </div>
         <button
+          id="btn-create-project"
           type="button"
-          class="btn-secondary btn-sm"
-          disabled={updateChecking}
-          onclick={checkForUpdate}
+          class="btn-primary"
+          disabled={creating}
+          onclick={handleCreate}>{creating ? "Creating…" : "Create Project"}</button
         >
-          {updateChecking ? "Checking…" : "Check for Updates"}
-        </button>
-        {#if updateInfo?.update_available}
+        {#if createError}
+          <p class="field-error">{createError}</p>
+        {/if}
+      </div>
+
+      <div class="home-card">
+        <h2>Import Machine Profile</h2>
+        <p class="field-note">
+          Imports a canonical machine-profile project directory verbatim (read-only;
+          deploy-focused).
+        </p>
+        <div class="form-group">
+          <label for="import-project-path">Profile directory</label>
+          <input
+            id="import-project-path"
+            type="text"
+            spellcheck="false"
+            style="font-family:monospace"
+            placeholder="/path/to/anolis-projects/projects/bioreactor-v1"
+            bind:value={importPath}
+          />
+        </div>
+        <div class="form-group">
+          <label for="import-project-name">Project name (optional)</label>
+          <input
+            id="import-project-name"
+            type="text"
+            maxlength="64"
+            placeholder="defaults to the directory name"
+            autocomplete="off"
+            spellcheck="false"
+            bind:value={importName}
+          />
+        </div>
+        <button
+          id="btn-import-project"
+          type="button"
+          class="btn-primary"
+          disabled={importing}
+          onclick={handleImport}>{importing ? "Importing…" : "Import Project"}</button
+        >
+        {#if importError}
+          <p class="field-error">{importError}</p>
+          {#if importErrors.length > 0}
+            <ul class="field-error">
+              {#each importErrors as e, i (i)}
+                <li>{e.message ?? "Validation error"}</li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+      </div>
+
+      <!-- System Updates -->
+      <div class="home-card">
+        <h2>System</h2>
+        <div class="system-update-row">
           <button
             type="button"
-            class="btn-primary btn-sm"
-            disabled={updateRunning}
-            onclick={doUpdate}
+            class="btn-secondary btn-sm"
+            disabled={updateChecking}
+            onclick={checkForUpdate}
           >
-            {updateRunning ? "Updating…" : `Update to v${updateInfo.latest_version}`}
+            {updateChecking ? "Checking…" : "Check for Updates"}
           </button>
+          {#if updateInfo?.update_available}
+            <button
+              type="button"
+              class="btn-primary btn-sm"
+              disabled={updateRunning}
+              onclick={doUpdate}
+            >
+              {updateRunning ? "Updating…" : `Update to v${updateInfo.latest_version}`}
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="btn-secondary btn-sm"
+            disabled={rollbackRunning}
+            onclick={() => (rollbackConfirmOpen = true)}
+          >
+            {rollbackRunning ? "Rolling back…" : "Rollback"}
+          </button>
+        </div>
+        {#if updateFeedback}
+          <p
+            class="system-feedback"
+            style="color: {updateIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+          >
+            {updateFeedback}
+          </p>
         {/if}
-        <button
-          type="button"
-          class="btn-secondary btn-sm"
-          disabled={rollbackRunning}
-          onclick={() => (rollbackConfirmOpen = true)}
-        >
-          {rollbackRunning ? "Rolling back…" : "Rollback"}
-        </button>
-      </div>
-      {#if updateFeedback}
-        <p
-          class="system-feedback"
-          style="color: {updateIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
-        >
-          {updateFeedback}
-        </p>
-      {/if}
-      {#if rollbackFeedback}
-        <p
-          class="system-feedback"
-          style="color: {rollbackIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
-        >
-          {rollbackFeedback}
-        </p>
-      {/if}
-      <div class="system-update-row" style="margin-top: 0.5rem">
-        <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/fleet")}>
-          Fleet Dashboard
-        </button>
+        {#if rollbackFeedback}
+          <p
+            class="system-feedback"
+            style="color: {rollbackIsError ? 'var(--feedback-error)' : 'var(--feedback-ok)'}"
+          >
+            {rollbackFeedback}
+          </p>
+        {/if}
+        <div class="system-update-row" style="margin-top: 0.5rem">
+          <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/fleet")}>
+            Fleet Dashboard
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </details>
 </section>
 
 <ConfirmModal
