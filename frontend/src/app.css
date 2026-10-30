@@ -1522,6 +1522,37 @@ body {
   color: var(--state-fault);
 }
 
+/* The declared readings, large (wb#728). */
+.operator-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.operator-reading {
+  display: flex;
+  flex-direction: column;
+}
+
+.operator-reading-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.operator-reading-value {
+  font-size: 2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.operator-now {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .operate-collapsible > summary {
   cursor: pointer;
   font-weight: 600;

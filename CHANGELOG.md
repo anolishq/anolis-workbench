@@ -28,6 +28,15 @@ Historical note:
   closed by default; Telemetry comes last. Nothing was removed. The
   software-stop row stays above the panel, never collapsed.
 
+- **The operator panel shows the machine's readings** (#728, part of #232).
+  With an `operator` block in the profile (anolis 0.7.0), Readings shows each
+  declared signal large, with its label, unit and declared decimals, and says
+  when it is stale, faulted, unavailable or not reported. Now has a line per
+  settings group with its values; a group holding one of the experiment's
+  enable parameters reads on or off, where on means scheduled, not that its
+  actuator is moving. Both sit above Mode, always shown. Without the block,
+  the panel shows neither.
+
 - **The workbench opens on the machine** (#730, part of #232). With an
   installed project (#724), opening the workbench goes straight to its
   Operate; the Home button still shows the project list. Home lists the

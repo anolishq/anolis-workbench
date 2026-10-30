@@ -207,6 +207,17 @@ export interface MachineProfile extends UnknownRecord {
   } & UnknownRecord;
   safety?: UnknownRecord;
   validation?: UnknownRecord;
+  operator?: OperatorBlock;
+}
+
+/** The profile's operator panel presentation (anolis#682); nothing in it is checked. */
+export interface OperatorBlock {
+  readings?: { signal: string; label: string; unit?: string; decimals?: number }[];
+  settings?: { group: string; items: { parameter: string; label: string; unit?: string }[] }[];
+  experiment?: {
+    start?: { enable?: string[]; mode: string };
+    stop?: { disable?: string[]; mode: string };
+  };
 }
 
 /**

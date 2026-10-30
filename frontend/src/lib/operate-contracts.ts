@@ -10,6 +10,7 @@ import type {
   ExecutionStatus,
   FunctionArgSpec,
   FunctionSpec,
+  OperatorBlock,
   ParameterDefinition,
   ProviderHealth,
   RuntimeApiStatus,
@@ -804,4 +805,85 @@ export function machineLine(
   }
   if (status.mode === "AUTO") return line("running", "Experiment running.");
   return line("ready", "Ready.");
+}
+
+/** One of the operator panel's readings (wb#728). */
+export interface OperatorReading {
+  label: string;
+  /** The value with its unit, or "--" when there is none. */
+  text: string;
+  /** Empty while the reading is good, else what is wrong with it. */
+  note: "" | "stale" | "faulted" | "unavailable" | "no reading";
+}
+
+function typedNumber(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  const v = asObject(value);
+  const n =
+    v.type === "double" ? v.double : v.type === "int64" || v.type === "uint64" ? v[v.type] : null;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function typedText(value: unknown): string {
+  const v = asObject(value);
+  if (typeof v.type !== "string")
+    return value === null || value === undefined ? "--" : String(value);
+  const raw = v[v.type === "bytes" ? "base64" : v.type];
+  return raw === undefined ? "--" : String(raw);
+}
+
+/**
+ * The profile's declared readings, from the state Operate holds per device
+ * (wb#728). A reading with declared decimals is rounded to them; without, it
+ * reads as the runtime sent it.
+ */
+export function operatorReadings(
+  operator: OperatorBlock | undefined,
+  deviceStates: Record<string, DeviceStateValue[]>,
+): OperatorReading[] {
+  return (operator?.readings ?? []).map((r) => {
+    const [providerId, deviceId, signalId] = r.signal.split("/");
+    const sig = deviceStates[`${providerId}/${deviceId}`]?.find((v) => v.signal_id === signalId);
+    if (!sig) return { label: r.label, text: "--", note: "no reading" };
+    const n = typedNumber(sig.value);
+    const value =
+      n !== null && r.decimals !== undefined ? n.toFixed(r.decimals) : typedText(sig.value);
+    const quality = String(sig.quality ?? "OK").toUpperCase();
+    const note: OperatorReading["note"] =
+      quality === "STALE"
+        ? "stale"
+        : quality === "FAULT"
+          ? "faulted"
+          : quality === "UNAVAILABLE"
+            ? "unavailable"
+            : "";
+    return { label: r.label, text: r.unit ? `${value} ${r.unit}` : value, note };
+  });
+}
+
+/**
+ * A line per settings group on what is set now (wb#728), from the declared
+ * settings and the parameters' values only. A group whose items include one
+ * of experiment.start's enable parameters reads on or off from it: on means
+ * scheduled, not that its actuator is running now.
+ */
+export function operatorSettingsLines(
+  operator: OperatorBlock | undefined,
+  parameters: ParameterDefinition[],
+): string[] {
+  const enables = new Set(operator?.experiment?.start?.enable ?? []);
+  const byName = new Map(parameters.map((p) => [p.name, p]));
+  return (operator?.settings ?? []).map((group) => {
+    const parts: string[] = [];
+    for (const item of group.items) {
+      const param = byName.get(item.parameter);
+      if (enables.has(item.parameter)) {
+        parts.unshift(param ? (param.value === true ? "on" : "off") : "--");
+        continue;
+      }
+      const value = param ? String(param.value) : "--";
+      parts.push(`${item.label} ${value}${item.unit ? ` ${item.unit}` : ""}`);
+    }
+    return `${group.group}: ${parts.join(", ")}`;
+  });
 }

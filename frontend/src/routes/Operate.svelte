@@ -51,6 +51,8 @@
     modeTargets,
     normalizeParameterType,
     normalizeProviderHealthQuality,
+    operatorReadings,
+    operatorSettingsLines,
     renderBtOutline,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
@@ -189,6 +191,9 @@
       .querySelector(`[data-testid="${MACHINE_LINE_SECTIONS[target]}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  // The profile's operator block (wb#728): absent, the panel shows neither part.
+  const operator = $derived(system?.profile?.operator);
+  const readings = $derived(operatorReadings(operator, deviceStates));
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
   const dispatchableCoverage = $derived(
@@ -388,6 +393,7 @@
     } else {
       devices = [];
     }
+    await loadReadingDevices();
 
     runtimeStatusData = rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value) : null;
     statusRefusal =
@@ -486,6 +492,35 @@
       if (stale()) return;
       capabilities = { ...capabilities, [key]: caps };
     }
+  }
+
+  // The devices the operator panel's readings name (wb#728), other than the
+  // selected one, which ensureSelectedDeviceLoaded has just read.
+  async function loadReadingDevices(): Promise<void> {
+    const keys = (operator?.readings ?? [])
+      .map((r) => r.signal.split("/").slice(0, 2).join("/"))
+      .filter((key, i, all) => key !== selectedKey && all.indexOf(key) === i);
+    await Promise.all(
+      keys.map(async (key) => {
+        const removal = deviceRemovals[key] ?? 0;
+        const [providerId, deviceId] = key.split("/");
+        let values: DeviceStateValue[] | null;
+        try {
+          values = extractDeviceStateValues(
+            await fetchJson<UnknownRecord>(
+              `/v0/state/${encodeURIComponent(providerId)}/${encodeURIComponent(deviceId)}`,
+            ),
+          );
+        } catch {
+          values = null;
+        }
+        if ((deviceRemovals[key] ?? 0) !== removal) return;
+        const next = { ...deviceStates };
+        if (values) next[key] = values;
+        else delete next[key];
+        deviceStates = next;
+      }),
+    );
   }
 
   function getSelectedDevice(): Device | null {
@@ -1501,6 +1536,35 @@
             >
           </div>
         {/if}
+      </div>
+    {/if}
+
+    {#if readings.length}
+      <!-- The profile's declared readings (wb#728). -->
+      <div class="operate-section" data-testid="operator-readings">
+        <h3>Readings</h3>
+        <ul class="operator-readings">
+          {#each readings as r, i (i)}
+            <li class="operator-reading" data-testid="operator-reading">
+              <span class="operator-reading-label">{r.label}</span>
+              <span class="operator-reading-value">{r.text}</span>
+              {#if r.note}<span class="field-error operator-reading-note">{r.note}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if operator?.settings?.length}
+      <!-- What is set now, per settings group (wb#728): on is scheduled, not
+           running. Nothing here says whether an actuator is moving. -->
+      <div class="operate-section" data-testid="operator-now">
+        <h3>Now</h3>
+        <ul class="operator-now">
+          {#each operatorSettingsLines(operator, parameters) as line, i (i)}
+            <li>{line}</li>
+          {/each}
+        </ul>
       </div>
     {/if}
 
