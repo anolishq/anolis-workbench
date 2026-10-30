@@ -237,12 +237,19 @@ describe("experimentStartRefusal", () => {
     expect(experimentStartRefusal(lost, null, null, [], [])).toMatch(/bread0\/dcmt1 lost/);
   });
 
-  it("does not refuse for a latched device that is back, or one the stop chain removed", () => {
+  it("does not call a latched device that is back, or one the stop chain removed, lost", () => {
     const back = status("IDLE", { device_loss_latched: ["bread0/dcmt1"] });
     expect(experimentStartRefusal(back, null, null, [], reachable)).toBe("");
-    expect(experimentStartRefusal(back, null, chain("in_force", ["bread0/dcmt1"]), [], [])).toBe(
-      "",
+    // Refused for the stop itself, not for the device it removed.
+    const underStop = experimentStartRefusal(
+      back,
+      null,
+      chain("in_force", ["bread0/dcmt1"]),
+      [],
+      [],
     );
+    expect(underStop).toMatch(/emergency stop is in force/);
+    expect(underStop).not.toMatch(/lost/);
   });
 });
 

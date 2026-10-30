@@ -987,6 +987,7 @@
         stopChain,
         trippedKeys,
         providerHealth,
+        automationFault?.message ?? "",
       );
       if (refusal) {
         experimentFeedback = { text: refusal, cls: "field-error" };

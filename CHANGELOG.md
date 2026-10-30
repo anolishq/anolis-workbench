@@ -45,9 +45,11 @@ Historical note:
   are back at their defaults. Start experiment sets the declared enable
   parameters, then the declared mode, by way of MANUAL where the runtime
   does not allow the move directly; Stop experiment clears them, then sets
-  its mode. Start refuses, with the reason and the fix, while the software
-  stop is latched, a board is tripped or a device is lost. The software stop
-  stays the emergency control.
+  its mode. Start refuses, with the reason and the fix, while the runtime is
+  not answering, the emergency stop is in force, the software stop is
+  latched, the runtime is in FAULT, a board is tripped or a device is lost.
+  From FAULT it sends nothing: recovering is MANUAL under Mode, once the
+  cause is fixed. The software stop stays the emergency control.
 
 - **The workbench opens on the machine** (#730, part of #232). With an
   installed project (#724), opening the workbench goes straight to its

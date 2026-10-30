@@ -751,6 +751,8 @@ export function deviceLosses(
 /**
  * Why Start experiment would not work, with the fix, or "" (wb#729). Only
  * what Operate reads exactly: a brake has no declaration yet (anolis#686).
+ * FAULT is refused rather than left by way of MANUAL, which would clear the
+ * fault before the operator saw its cause.
  */
 export function experimentStartRefusal(
   status: RuntimeApiStatus | null,
@@ -758,14 +760,25 @@ export function experimentStartRefusal(
   stopChain: StopChainStatus | null,
   trippedDevices: string[],
   providers: ProviderHealth[],
+  faultReason = "",
 ): string {
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return "Refused: the runtime is not answering. See Runtime Status, then Start.";
+  }
+  if (stopChain?.state === "in_force") {
+    return "Refused: the emergency stop is in force. Release it, then Start.";
+  }
   if (estop?.latched) {
     return "Refused: the software stop is latched. Clear the latch above, then Start.";
+  }
+  if (status.mode === "FAULT") {
+    const why = faultReason ? ` (${faultReason})` : "";
+    return `Refused: the runtime is in FAULT${why}. Set MANUAL under Mode once the cause is fixed, then Start.`;
   }
   if (trippedDevices.length) {
     return `Refused: ${trippedDevices.join(", ")} tripped its command watchdog. Clear the trip under Watchdog trips, then Start.`;
   }
-  const lost = status ? deviceLosses(status, stopChain, providers).lost : [];
+  const { lost } = deviceLosses(status, stopChain, providers);
   if (lost.length) {
     return `Refused: ${lost.join(", ")} lost. Check its power (see Provider Health), then Start.`;
   }
