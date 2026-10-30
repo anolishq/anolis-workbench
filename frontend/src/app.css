@@ -1512,7 +1512,7 @@ body {
   color: var(--state-fault);
 }
 
-.operate-engineering > summary {
+.operate-collapsible > summary {
   cursor: pointer;
   font-weight: 600;
   padding: 8px 0;
