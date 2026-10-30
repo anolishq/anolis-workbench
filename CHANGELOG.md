@@ -13,6 +13,33 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-30
+
+Upgrade notes:
+
+- **On a machine with an install, the workbench now imports the installed
+  project at startup** (#724, part of #722). When `/opt/anolis/manifest.json`
+  exists, a read-only project for `/opt/anolis/projects/<profile>/` appears in
+  the workspace, and is replaced from `/opt/anolis` on every start. Operate
+  reaches the installed runtime through it on the port
+  `/opt/anolis/config/runtime.yaml` sets. A project of your own with that name
+  is kept, and the installed one is imported as `<profile>-installed` beside
+  it. `ANOLIS_WORKBENCH_RUNTIME_URL` still overrides the target when set.
+- **Launch and restart answer an executable that isn't configured with 422,
+  not 409** (#721, Fixes #672). The body carries `code`
+  `runtime_executable_missing` or `provider_executable_missing`. A client that
+  read any 409 from these routes as "a runtime is already running" now gets
+  409 only for a real conflict.
+- **A stop request stops only the named project's runtime** (#716, Fixes
+  #670). `POST /api/projects/<name>/stop` returns 409 naming the running
+  project, and leaves it running, when that runtime belongs to another
+  project. It stopped whichever runtime was running.
+- **The pins:** the sim quickstart template pins runtime 0.6.0, and the
+  contract locks move to anolis 0.6.0 (#714, #715). The vendored runtime-config
+  schema accepts `automation.on_terminal`, and the runtime-http contract
+  describes the function policy's `allowed_modes`, `min_interval_ms` and
+  `requires_lease`, and the tree's terminal states.
+
 ### Added
 
 - **The workbench imports the project install.sh put on this machine at
