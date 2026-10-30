@@ -54,6 +54,8 @@
     normalizeProviderHealthQuality,
     operatorReadings,
     operatorSettingsLines,
+    signalDevice,
+    unmetStartRequirements,
     renderBtOutline,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
@@ -499,9 +501,16 @@
   // The devices the operator panel's readings name (wb#728), other than the
   // selected one, which ensureSelectedDeviceLoaded has just read.
   async function loadReadingDevices(): Promise<void> {
-    const keys = (operator?.readings ?? [])
-      .map((r) => r.signal.split("/").slice(0, 2).join("/"))
-      .filter((key, i, all) => key !== selectedKey && all.indexOf(key) === i);
+    await loadDeviceStates(
+      (operator?.readings ?? [])
+        .map((r) => signalDevice(r.signal))
+        .filter((k) => k !== selectedKey),
+    );
+  }
+
+  /** Reads each device's state into deviceStates; a failed read files none. */
+  async function loadDeviceStates(deviceKeys: string[]): Promise<void> {
+    const keys = deviceKeys.filter((key, i, all) => all.indexOf(key) === i);
     await Promise.all(
       keys.map(async (key) => {
         const removal = deviceRemovals[key] ?? 0;
@@ -992,6 +1001,17 @@
       if (refusal) {
         experimentFeedback = { text: refusal, cls: "field-error" };
         return;
+      }
+      // The profile's own conditions (anolis#686), on signals read now, not
+      // up to a poll old.
+      const require = start?.require ?? [];
+      if (require.length) {
+        await loadDeviceStates(require.map((r) => signalDevice(r.signal)));
+        const unmet = unmetStartRequirements(require, deviceStates);
+        if (unmet.length) {
+          experimentFeedback = { text: `Refused: ${unmet.join("; ")}.`, cls: "field-error" };
+          return;
+        }
       }
     }
     const names = (kind === "start" ? start?.enable : stop?.disable) ?? [];

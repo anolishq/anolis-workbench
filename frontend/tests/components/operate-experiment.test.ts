@@ -53,6 +53,8 @@ function fakeRuntime(
     down?: boolean;
     uptimes?: number[];
     operator?: unknown;
+    /** Signals by "provider/device", for /v0/state. */
+    states?: Record<string, { signal_id: string; value: unknown; quality: string }[]>;
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
@@ -136,6 +138,18 @@ function fakeRuntime(
             },
           ],
         });
+      const state = path.match(/^\/v0\/state\/([^/]+)\/([^/]+)$/);
+      if (state && opts.states) {
+        const values = opts.states[`${state[1]}/${state[2]}`];
+        if (!values) return jsonResponse(404, { status: { code: "NOT_FOUND" } });
+        return jsonResponse(200, {
+          status: { code: "OK" },
+          provider_id: state[1],
+          device_id: state[2],
+          quality: "OK",
+          values: values.map((v) => ({ ...v, timestamp_epoch_ms: 1_700_000_000_000, age_ms: 5 })),
+        });
+      }
       return jsonResponse(200, {});
     }),
   );
@@ -341,5 +355,112 @@ describe("Operate.svelte — Start and Stop experiment (#729)", () => {
     await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Ready"));
     expect(screen.queryByTestId("operator-experiment")).toBeNull();
     expect(screen.queryByTestId("operator-settings")).toBeNull();
+  });
+});
+
+// anolis#686: the profile's experiment.start.require, conditions on signals
+// that must hold before Start runs. Start reads each named signal when
+// clicked and refuses with the declared message while one does not hold,
+// after the generic refusals.
+describe("Operate.svelte — Start's declared requirements (#686)", () => {
+  const REQUIRING = {
+    ...OPERATOR,
+    experiment: {
+      ...OPERATOR.experiment,
+      start: {
+        ...OPERATOR.experiment.start,
+        require: [
+          {
+            signal: "bread0/dcmt1/motor1_brake",
+            equals: false,
+            message: "Release dose pump 1's brake",
+          },
+          {
+            signal: "bread0/dcmt1/motor2_brake",
+            equals: false,
+            message: "Release dose pump 2's brake",
+          },
+        ],
+      },
+    },
+  };
+  const brakes = (one: boolean, two: boolean, quality = "OK") => ({
+    "bread0/dcmt1": [
+      { signal_id: "motor1_brake", value: { type: "bool", bool: one }, quality },
+      { signal_id: "motor2_brake", value: { type: "bool", bool: two }, quality },
+    ],
+  });
+
+  async function start(line: string) {
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent(line));
+    await fireEvent.click(
+      within(screen.getByTestId("operator-experiment")).getByRole("button", {
+        name: "Start experiment",
+      }),
+    );
+  }
+
+  it("refuses with the declared message while a required signal does not hold", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: brakes(true, false) });
+    await start("Ready");
+
+    const feedback = await screen.findByTestId("experiment-feedback");
+    expect(feedback).toHaveTextContent("Release dose pump 1's brake");
+    expect(feedback).not.toHaveTextContent("pump 2");
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("names every requirement that does not hold", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: brakes(true, true) });
+    await start("Ready");
+
+    const feedback = await screen.findByTestId("experiment-feedback");
+    expect(feedback).toHaveTextContent("Release dose pump 1's brake");
+    expect(feedback).toHaveTextContent("Release dose pump 2's brake");
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("runs Start once every requirement holds", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: brakes(false, false) });
+    await start("Ready");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+  });
+
+  it("does not count a stale reading as holding", async () => {
+    const stale = fakeRuntime({
+      mode: "IDLE",
+      operator: REQUIRING,
+      states: brakes(false, false, "STALE"),
+    });
+    await start("Ready");
+    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(
+      /Release dose pump 1's brake.*stale/,
+    );
+    expect(stale.posts).toEqual([]);
+  });
+
+  it("refuses when a required signal has no reading", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: {} });
+    await start("Ready");
+    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(
+      /Release dose pump 1's brake.*no reading/,
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("gives a generic refusal first", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      latched: true,
+      operator: REQUIRING,
+      states: brakes(true, true),
+    });
+    await start("software stop");
+
+    const feedback = await screen.findByTestId("experiment-feedback");
+    expect(feedback).toHaveTextContent("software stop is latched");
+    expect(feedback).not.toHaveTextContent("brake");
+    expect(rt.posts).toEqual([]);
   });
 });

@@ -51,6 +51,15 @@ Historical note:
   From FAULT it sends nothing: recovering is MANUAL under Mode, once the
   cause is fixed. The software stop stays the emergency control.
 
+- **Start checks the profile's own conditions** (#729,
+  anolishq/anolis#686). With `operator.experiment.start.require` in the
+  profile, Start reads each named signal when clicked and, after the generic
+  refusals, refuses with the declared message of every condition that does
+  not hold, such as "Release dose pump 1's brake". A reading that is stale,
+  faulted or missing does not count as holding, and the message says so.
+  Profiles carry the list once the workbench vendors the machine-profile
+  schema from the anolis release that adds it.
+
 - **The workbench opens on the machine** (#730, part of #232). With an
   installed project (#724), opening the workbench goes straight to its
   Operate; the Home button still shows the project list. Home lists the
