@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { OperatorBlock, ParameterDefinition } from "../../src/lib/contracts";
-import { operatorReadings, operatorSettingsLines } from "../../src/lib/operate-contracts";
+import type { DeviceStateValue, OperatorBlock, ParameterDefinition } from "../../src/lib/contracts";
+import {
+  operatorReadings,
+  operatorSettingsLines,
+  signalDevice,
+  unmetStartRequirements,
+} from "../../src/lib/operate-contracts";
 
 // wb#728: the operator panel's readings and its line per settings group.
 
@@ -80,5 +85,64 @@ describe("operatorSettingsLines", () => {
 
   it("is empty without settings", () => {
     expect(operatorSettingsLines(undefined, params(true))).toEqual([]);
+  });
+});
+
+// anolis#686: experiment.start.require, compared by the value's type.
+describe("unmetStartRequirements", () => {
+  const REQUIRE = [
+    { signal: "bread0/dcmt1/motor1_brake", equals: false, message: "Release the brake" },
+    { signal: "ezo0/rtd0/temp_c", equals: 37, message: "Wait for 37 °C" },
+    { signal: "door0/latch0/state", equals: "closed", message: "Close the door" },
+  ];
+  const ok = (signal_id: string, value: DeviceStateValue["value"]): DeviceStateValue => ({
+    signal_id,
+    value,
+    quality: "OK",
+  });
+
+  it("is empty when every condition holds, whatever the typed value's shape", () => {
+    expect(
+      unmetStartRequirements(REQUIRE, {
+        "bread0/dcmt1": [ok("motor1_brake", { type: "bool", bool: false })],
+        "ezo0/rtd0": [ok("temp_c", { type: "int64", int64: 37 })],
+        "door0/latch0": [ok("state", { type: "string", string: "closed" })],
+      }),
+    ).toEqual([]);
+    expect(
+      unmetStartRequirements(REQUIRE, {
+        "bread0/dcmt1": [ok("motor1_brake", false)],
+        "ezo0/rtd0": [ok("temp_c", { type: "double", double: 37 })],
+        "door0/latch0": [ok("state", "closed")],
+      }),
+    ).toEqual([]);
+  });
+
+  it("names each condition that does not hold, a missing or not-OK reading included", () => {
+    expect(
+      unmetStartRequirements(REQUIRE, {
+        "bread0/dcmt1": [ok("motor1_brake", { type: "bool", bool: true })],
+        "ezo0/rtd0": [
+          { signal_id: "temp_c", value: { type: "double", double: 37 }, quality: "FAULT" },
+        ],
+      }),
+    ).toEqual([
+      "Release the brake",
+      "Wait for 37 °C (ezo0/rtd0/temp_c: reading is fault)",
+      "Close the door (door0/latch0/state: no reading)",
+    ]);
+  });
+
+  it("does not take a string or number for a bool", () => {
+    expect(
+      unmetStartRequirements([REQUIRE[0]], { "bread0/dcmt1": [ok("motor1_brake", "false")] }),
+    ).toEqual(["Release the brake"]);
+    expect(
+      unmetStartRequirements([REQUIRE[0]], { "bread0/dcmt1": [ok("motor1_brake", 0)] }),
+    ).toEqual(["Release the brake"]);
+  });
+
+  it("reads the device from provider/device/signal", () => {
+    expect(signalDevice("bread0/dcmt1/motor1_brake")).toBe("bread0/dcmt1");
   });
 });

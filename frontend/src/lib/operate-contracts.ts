@@ -12,6 +12,7 @@ import type {
   FunctionSpec,
   OperatorBlock,
   ParameterDefinition,
+  StartRequirement,
   ProviderHealth,
   RuntimeApiStatus,
   SoftwareSafeState,
@@ -935,4 +936,44 @@ export function operatorSettingsLines(
     }
     return `${group.group}: ${parts.join(", ")}`;
   });
+}
+
+/** The "provider/device" a "provider/device/signal" reads from. */
+export function signalDevice(signal: string): string {
+  return signal.split("/").slice(0, 2).join("/");
+}
+
+/**
+ * The messages of experiment.start.require entries that do not hold
+ * (anolis#686), from the state Operate holds per device. A reading that is
+ * missing or not OK cannot show the condition holds, so it does not, and the
+ * message says which.
+ */
+export function unmetStartRequirements(
+  require: StartRequirement[],
+  deviceStates: Record<string, DeviceStateValue[]>,
+): string[] {
+  const unmet: string[] = [];
+  for (const r of require) {
+    const signalId = r.signal.split("/")[2];
+    const sig = deviceStates[signalDevice(r.signal)]?.find((v) => v.signal_id === signalId);
+    if (!sig) {
+      unmet.push(`${r.message} (${r.signal}: no reading)`);
+      continue;
+    }
+    const quality = String(sig.quality ?? "OK").toUpperCase();
+    if (quality !== "OK") {
+      unmet.push(`${r.message} (${r.signal}: reading is ${quality.toLowerCase()})`);
+      continue;
+    }
+    const v = asObject(sig.value);
+    const holds =
+      typeof r.equals === "boolean"
+        ? (v.type === "bool" ? v.bool : sig.value) === r.equals
+        : typeof r.equals === "number"
+          ? typedNumber(sig.value) === r.equals
+          : typedText(sig.value) === r.equals;
+    if (!holds) unmet.push(r.message);
+  }
+  return unmet;
 }
