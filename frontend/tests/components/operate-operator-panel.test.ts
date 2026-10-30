@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Operate from "../../src/routes/Operate.svelte";
 import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
 
 // wb#727: Operate opens on an operator panel whose first element is one line
-// on what the machine is doing and what to do next. Every section that was
-// there before sits below it, collapsed under "Engineering"; the software-stop
-// row stays above both, never collapsed. A line that points into a collapsed
-// section opens "Engineering" and takes the operator there.
+// on what the machine is doing and what to do next. The software-stop row
+// stays above it. Watchdog trips, Mode, Runtime Status, Event Stream and
+// Provider Health follow, always shown; Devices, Parameters, Automation and
+// the event trace each collapse on their own; Telemetry comes last, shown.
+// A line's link scrolls to the section it names.
 
 const RUNNING = { running: true, active_project: "demo" };
 
@@ -71,18 +72,75 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function scrollSpy(): Element[] {
+  const scrolled: Element[] = [];
+  Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+    scrolled.push(this);
+  });
+  return scrolled;
+}
+
+function heading(name: string): HTMLElement {
+  return screen.getByRole("heading", { name, level: 3 });
+}
+
 describe("Operate.svelte — the operator panel (#727)", () => {
-  it("opens on the machine line, with every other section collapsed under Engineering", async () => {
+  it("shows the machine line, then the runtime's sections, none collapsed", async () => {
+    fakeRuntime({ mode: "MANUAL", tripped: true });
+
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("tripped"));
+    expect(screen.queryByTestId("engineering")).toBeNull();
+    const shown = [
+      screen.getByTestId("machine-line"),
+      screen.getByTestId("watchdog-trips"),
+      screen.getByTestId("mode-section"),
+      screen.getByTestId("runtime-status"),
+      heading("Event Stream"),
+      screen.getByTestId("provider-health"),
+    ];
+    for (const el of shown) expect(el.closest("details")).toBeNull();
+    for (let i = 1; i < shown.length; i += 1) {
+      expect(
+        shown[i - 1].compareDocumentPosition(shown[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("collapses Devices, Parameters, Automation and the event trace, each on its own", async () => {
     fakeRuntime();
 
     await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Ready."));
-    const engineering = screen.getByTestId("engineering") as HTMLDetailsElement;
-    expect(engineering.open).toBe(false);
-    expect(within(engineering).getByText("Runtime Status")).toBeInTheDocument();
-    expect(within(engineering).getByText("Provider Health")).toBeInTheDocument();
+    const sections = [
+      ["devices-section", "Devices"],
+      ["parameters-section", "Parameters"],
+      ["automation-section", "Automation"],
+      ["event-trace-section", "Event Trace"],
+    ].map(([id, name]) => {
+      const el = screen.getByTestId(id) as HTMLDetailsElement;
+      expect(el.tagName).toBe("DETAILS");
+      expect(el.open).toBe(false);
+      expect(el.querySelector(":scope > summary")).toHaveTextContent(name);
+      return el;
+    });
+    expect(new Set(sections).size).toBe(4);
+    for (const el of sections) expect(el.parentElement?.closest("details")).toBeNull();
+    expect(
+      heading("Provider Health").compareDocumentPosition(sections[0]) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("keeps the software stop above the panel, outside Engineering", async () => {
+  it("shows Telemetry last, not collapsed", async () => {
+    fakeRuntime();
+
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toBeInTheDocument());
+    const telemetry = heading("Telemetry");
+    expect(telemetry.closest("details")).toBeNull();
+    const sections = document.querySelectorAll("#workspace-operate .operate-section");
+    expect(sections[sections.length - 1]).toBe(telemetry.closest(".operate-section"));
+  });
+
+  it("keeps the software stop above the panel, never collapsed", async () => {
     fakeRuntime({ latched: true });
 
     await waitFor(() =>
@@ -92,14 +150,15 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     );
     const stop = document.querySelector(".btn-estop");
     expect(stop).not.toBeNull();
-    expect(screen.getByTestId("engineering").contains(stop)).toBe(false);
+    expect(stop?.closest("details")).toBeNull();
+    expect(
+      stop!.compareDocumentPosition(screen.getByTestId("machine-line")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("takes the operator to the trip clear, opening Engineering, when a board tripped", async () => {
-    const scrolled: Element[] = [];
-    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
-      scrolled.push(this);
-    });
+  it("takes the operator to the trip clear when a board tripped", async () => {
+    const scrolled = scrollSpy();
     fakeRuntime({ mode: "MANUAL", tripped: true });
 
     await waitFor(() =>
@@ -109,8 +168,6 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     );
     await fireEvent.click(screen.getByRole("button", { name: "Clear the trip" }));
 
-    const engineering = screen.getByTestId("engineering") as HTMLDetailsElement;
-    await waitFor(() => expect(engineering.open).toBe(true));
     await waitFor(() => expect(scrolled).toContain(screen.getByTestId("watchdog-trips")));
   });
 
@@ -125,11 +182,22 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     expect(screen.getByTestId("machine-line")).not.toHaveTextContent("power");
   });
 
-  it("takes the operator to Mode, opening Engineering, in FAULT", async () => {
-    const scrolled: Element[] = [];
-    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
-      scrolled.push(this);
-    });
+  it("takes the operator to Provider Health when a latched device is unreachable", async () => {
+    const scrolled = scrollSpy();
+    fakeRuntime({ mode: "MANUAL", lossLatched: ["ezo0/ph0"] });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).toHaveTextContent(
+        "Device lost: check its power (ezo0/ph0).",
+      ),
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "See Provider Health" }));
+
+    await waitFor(() => expect(scrolled).toContain(screen.getByTestId("provider-health")));
+  });
+
+  it("takes the operator to Mode in FAULT", async () => {
+    const scrolled = scrollSpy();
     fakeRuntime({ mode: "FAULT" });
 
     await waitFor(() =>
@@ -137,9 +205,6 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     );
     await fireEvent.click(screen.getByRole("button", { name: "Go to Mode" }));
 
-    await waitFor(() =>
-      expect((screen.getByTestId("engineering") as HTMLDetailsElement).open).toBe(true),
-    );
     await waitFor(() => expect(scrolled).toContain(screen.getByTestId("mode-section")));
   });
 });
