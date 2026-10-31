@@ -13,6 +13,18 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Operate's settings** (#745). A box ticked and saved no longer flickers
+  back to its old value while the values refresh. Save now says "Applied"
+  while the runtime is in AUTO, where the automation uses the values at once,
+  and "Saved" otherwise, with a tooltip that settings take effect when the
+  automation runs.
+- **"Go to Mode" and the other machine-line links** (#745) land the section
+  below the sticky software-stop row instead of under it.
+- **The "not covered" chip's explanation** (#745) now says what it means: a
+  software stop leaves those outputs as they were.
+
 ## [0.28.0] - 2026-10-30
 
 Upgrade notes:
