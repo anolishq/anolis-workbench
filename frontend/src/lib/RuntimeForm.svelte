@@ -3,7 +3,7 @@
   import type { ProjectDocument, RuntimeConfigDoc, RuntimeTelemetry } from "./contracts";
 
   /**
-   * RuntimeForm.svelte — the runtime-config form.
+   * RuntimeForm.svelte: the runtime-config form.
    *
    * Since #255 this edits the runtime config DIRECTLY (one variant of
    * `config/anolis-runtime.<variant>.yaml`) rather than a shadow document that
@@ -74,7 +74,7 @@
       return;
     }
     // The runtime schema requires a non-empty list when http is enabled, so an
-    // empty box has to mean "no CORS section" — writing [] makes the project
+    // empty box has to mean "no CORS section": writing [] makes the project
     // unsaveable with an error that names neither the rule nor the fix.
     const config = (doc.variants[name] ??= {});
     if (config.http) delete config.http.cors_allowed_origins;
@@ -94,7 +94,7 @@
   {#if inertnessError}
     <div class="bus-note note-warning" data-testid="inertness-warning">
       The <code>{MANUAL_VARIANT}</code> variant must boot inert ({inertnessError}). install.sh
-      refuses to install it otherwise — author automation into a separate variant.
+      refuses to install it otherwise. Put automation in a separate variant.
     </div>
   {/if}
 
@@ -129,8 +129,8 @@
       oninput={(e: Event) => setIn("http", "bind", inputTarget(e).value)}
     />
     <span class="field-note"
-      >Keep <code>127.0.0.1</code> unless the rig must be reachable over the LAN — install.sh turns on
-      authentication when it rewrites this for LAN exposure.</span
+      >Keep <code>127.0.0.1</code> unless the machine must be reachable over the LAN. install.sh turns
+      on authentication when it rewrites this for LAN exposure.</span
     >
   </div>
 
@@ -279,7 +279,7 @@
       oninput={(e: Event) => setRuntimeExecutable(inputTarget(e).value)}
     />
     <span class="field-note"
-      >Host path, used for dev-launch only. It is never deployed — install.sh installs the pinned
+      >Host path, used for dev-launch only. It is never deployed: install.sh installs the pinned
       runtime under its own prefix.</span
     >
   </div>

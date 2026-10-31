@@ -1,7 +1,16 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import ConnectionSection from "../lib/ConnectionSection.svelte";
   import InfoToggle from "../lib/InfoToggle.svelte";
+  import {
+    pushSample,
+    readingSamples,
+    type Sample,
+    sparklineMinSpan,
+    sparklinePath,
+    sparklineRange,
+  } from "../lib/sparkline";
   import type {
     AutomationCallFailure,
     AutomationStatus,
@@ -50,6 +59,7 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    CONNECTING_LINE,
     machineLine,
     modeTargets,
     normalizeParameterType,
@@ -66,6 +76,7 @@
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
+    summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
   } from "../lib/operate-contracts";
@@ -165,7 +176,7 @@
   let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
-  // Boards whose command watchdog tripped, and the one being cleared (wb#572).
+  // Devices whose command watchdog tripped, and the one being cleared (wb#572).
   // Each step of the clear is the operator's click; nothing runs on its own.
   const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
   let tripKey = $state<string>("");
@@ -184,8 +195,11 @@
   const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
   // The operator panel's line on what the machine is doing (wb#727).
+  // Until the first status settles, it is connecting, not down (wb#754).
   const machine = $derived(
-    machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth),
+    statusSettled
+      ? machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth)
+      : CONNECTING_LINE,
   );
   // Where each machine-line link scrolls to; none is in a collapsed section.
   const MACHINE_LINE_SECTIONS: Record<MachineLineTarget, string> = {
@@ -208,7 +222,26 @@
   }
   // The profile's operator block (wb#728): absent, the panel shows neither part.
   const operator = $derived(system?.profile?.operator);
-  const readings = $derived(operatorReadings(operator, deviceStates));
+  const readings = $derived(operatorReadings(operator, deviceStates, !statusSettled));
+  // Each declared reading's last ten minutes, by signal (wb#747): a point
+  // when the reading's own timestamp moves, null while it is not OK. Empty
+  // on load, with no backfill.
+  let readingHistory = $state<Record<string, Sample[]>>({});
+  let readingStamps: Record<string, string> = {};
+  $effect(() => {
+    const samples = readingSamples(operator, deviceStates);
+    untrack(() => {
+      const next = { ...readingHistory };
+      let moved = false;
+      for (const s of samples) {
+        if (readingStamps[s.signal] === s.stamp) continue;
+        readingStamps[s.signal] = s.stamp;
+        next[s.signal] = pushSample(next[s.signal] ?? [], { t: Date.now(), v: s.value });
+        moved = true;
+      }
+      if (moved) readingHistory = next;
+    });
+  });
   // operator.run, or its deprecated alias operator.experiment (anolis#696).
   const run = $derived(operatorRun(operator));
   // What `uncovered_actuating_functions` means depends on the runtime
@@ -219,7 +252,7 @@
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
-  // not an execution_status — the next status poll reflects the engine's truth).
+  // not an execution_status; the next status poll reflects the engine's truth).
   let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
   // From status on each poll, and from automation_call_failed between polls.
   let callFailures = $state<AutomationCallFailure[]>([]);
@@ -349,6 +382,8 @@
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
+    readingHistory = {};
+    readingStamps = {};
   }
 
   async function loadWorkbenchConfig(): Promise<void> {
@@ -591,7 +626,7 @@
     }
   }
 
-  // ── Software e-stop (wb#236) — thin trigger over POST /v0/estop ─────────────
+  // ── Software e-stop (wb#236): thin trigger over POST /v0/estop ──────────────
   async function refreshEstopOnly(): Promise<void> {
     const epoch = estopEpoch;
     try {
@@ -733,7 +768,7 @@
     await setMode();
   }
 
-  /** POSTs one call for the board being cleared; false, with the error shown, if refused. */
+  /** POSTs one call for the device being cleared; false, with the error shown, if refused. */
   async function callForTrip(stepNumber: number, func: FunctionSpec): Promise<boolean> {
     const [providerId, deviceId] = tripKey.split("/");
     tripError = null;
@@ -1048,6 +1083,14 @@
     const step = kind === "start" ? start : stop;
     if (!step) return;
     runFeedback = null;
+    if (kind === "start" && !statusSettled) {
+      // Not "not answering": the first status has not arrived yet (wb#754).
+      runFeedback = {
+        text: "Refused: still connecting to the runtime. Start again in a moment.",
+        cls: "field-error",
+      };
+      return;
+    }
     if (kind === "start") {
       const refusal = runStartRefusal(
         runtimeStatusData,
@@ -1272,7 +1315,7 @@
 
   function consumeAutomationFaultEvent(payload: UnknownRecord): void {
     // A fault is an event, not a status. Record it for display but never
-    // fabricate an execution_status — the polled /v0/automation/status is the
+    // fabricate an execution_status: the polled /v0/automation/status is the
     // single source of truth for the engine's state.
     const errorText =
       typeof payload.error === "string" && payload.error.trim() !== ""
@@ -1397,7 +1440,7 @@
              runtime is harmless, and a stale read must never hide it (wb#553). -->
         {#if estop?.latched}
           <div class="estop-latched-banner" data-testid="other-project-latch">
-            <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+            <span class="estop-latched-title">SAFE-STATE ENGAGED: actuation latched</span>
             <span class="estop-latched-meta">
               Latched at {formatEpochMs(estop.latched_at_epoch_ms)} on the runtime running "{runningProject}".
               Clear it from
@@ -1452,7 +1495,7 @@
       {/if}
     </div>
   {:else}
-    <!-- Software stop (wb#236) — thin trigger over POST /v0/estop. NOT an
+    <!-- Software stop (wb#236): thin trigger over POST /v0/estop. NOT an
          emergency stop: it commands devices that stay powered. One row at
          button height (wb#613): the detail sits behind click-open notes, and
          what needs attention stays in the row. -->
@@ -1492,7 +1535,7 @@
               disabled={clearRunning}
               onclick={clearEstop}
             >
-              {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
+              {clearRunning ? "Clearing…" : "Confirm clear: re-enables actuation"}
             </button>
             <button
               type="button"
@@ -1513,15 +1556,9 @@
               No safe state declared: latch only
             </span>
           {:else}
-            <!-- The stop is armed either way; "Ready" claims the machine is,
-                 so not while a board is tripped (wb#692). Current conditions
-                 only: startup_safe_state is a past event, reported until the
-                 runtime restarts, and has its own warning below. -->
-            {#if trippedKeys.length}
-              <span class="estop-chip field-error" data-testid="estop-state">Not ready</span>
-            {:else}
-              <span class="estop-chip" data-testid="estop-state">Ready</span>
-            {/if}
+            <!-- About the stop only (wb#748): the machine line says whether the
+                 machine is ready, and why not. The stop is armed either way. -->
+            <span class="estop-chip" data-testid="estop-state">Stop ready</span>
           {/if}
           <InfoToggle label="About the software stop">
             {#if estop.software_safe_state === "hooks"}
@@ -1630,7 +1667,7 @@
         <span class="estop-disclaimer">
           Not an emergency stop: use the hardware E-stop
           <InfoToggle label="Why this is not an emergency stop">
-            Not an emergency stop — it commands devices that stay powered, and needs the runtime,
+            Not an emergency stop: it commands devices that stay powered, and needs the runtime,
             providers and bus all working. For any physical hazard use the hardware emergency stop.
             If in doubt, isolate power to the machine.
           </InfoToggle>
@@ -1652,13 +1689,13 @@
     </div>
 
     {#if trippedKeys.length || tripKey}
-      <!-- Boards whose command watchdog tripped refuse every SET until cleared
+      <!-- Devices whose command watchdog tripped refuse every SET until cleared
            (wb#572). The clear is a sequence the operator confirms step by step. -->
       <div class="operate-section" data-testid="watchdog-trips">
         <h3>Watchdog trips</h3>
         {#if trippedKeys.length}
           <p class="field-note">
-            These boards' command watchdogs tripped, so they refuse every command until cleared.
+            These devices' command watchdogs tripped, so they refuse every command until cleared.
           </p>
           <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
@@ -1692,7 +1729,7 @@
                     disabled={clearRunning}
                     onclick={releaseForTrip}
                   >
-                    Confirm release — re-enables actuation
+                    Confirm release: re-enables actuation
                   </button>
                   <button
                     type="button"
@@ -1737,9 +1774,10 @@
               <li data-testid="trip-step-3">
                 Clear the trip with <code>clear_watchdog_trip</code>.
                 {#if !tripCaps}
-                  <span class="field-note">Loading the board's functions…</span>
+                  <span class="field-note">Loading the device's functions…</span>
                 {:else if !tripClearFn}
-                  <span class="field-error">This board offers no clear_watchdog_trip function.</span
+                  <span class="field-error"
+                    >This device offers no clear_watchdog_trip function.</span
                   >
                 {:else if tripCleared}
                   <span class="field-note">Done: the trip is cleared.</span>
@@ -1770,7 +1808,7 @@
                       disabled={tripRunning}
                       onclick={releaseBrakes}
                     >
-                      Confirm — releases both brakes
+                      Confirm: releases both brakes
                     </button>
                     <button
                       type="button"
@@ -1821,10 +1859,37 @@
         <h3>Readings</h3>
         <ul class="operator-readings">
           {#each readings as r, i (i)}
+            {@const declared = operator?.readings?.[i]}
+            {@const signal = declared?.signal ?? ""}
+            {@const history = readingHistory[signal] ?? []}
+            {@const range = history.length > 1 ? sparklineRange(history) : null}
             <li class="operator-reading" data-testid="operator-reading">
               <span class="operator-reading-label">{r.label}</span>
               <span class="operator-reading-value">{r.text}</span>
-              {#if r.note}<span class="field-error operator-reading-note">{r.note}</span>{/if}
+              <span class="operator-sparkline-row">
+                <svg
+                  class="operator-sparkline"
+                  data-testid="sparkline"
+                  viewBox="0 0 120 24"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                  ><path
+                    d={sparklinePath(history, 120, 24, sparklineMinSpan(declared?.decimals))}
+                  /></svg
+                >
+                {#if range}
+                  <!-- The window's high over its low (wb#747). -->
+                  <span class="operator-sparkline-range" data-testid="sparkline-range">
+                    <span>{range.hi.toFixed(declared?.decimals ?? 2)}</span>
+                    <span>{range.lo.toFixed(declared?.decimals ?? 2)}</span>
+                  </span>
+                {/if}
+              </span>
+              {#if r.note}<span
+                  class="{r.note === 'loading'
+                    ? 'field-note'
+                    : 'field-error'} operator-reading-note">{r.note}</span
+                >{/if}
             </li>
           {/each}
         </ul>
@@ -1838,9 +1903,13 @@
       <div class="operate-section" data-testid="operator-now">
         <h3>Now</h3>
         <ul class="operator-now">
-          {#each operatorSettingsLines(operator, parameters) as line, i (i)}
-            <li>{line}</li>
-          {/each}
+          {#if !statusSettled}
+            <li class="field-note">Loading…</li>
+          {:else}
+            {#each operatorSettingsLines(operator, parameters) as line, i (i)}
+              <li>{line}</li>
+            {/each}
+          {/if}
           <!-- Keyed by the line: with an index key the text stayed stale
                when a second event changed it in place. Lines are unique, as
                the runtime keeps one entry per device and function. -->
@@ -1912,7 +1981,9 @@
                   <div class="setting-row" data-testid="setting">
                     <label for={id}>{item.label}</label>
                     {#if !param}
-                      <span class="field-note">not reported by the runtime</span>
+                      <span class="field-note"
+                        >{statusSettled ? "not reported by the runtime" : "loading…"}</span
+                      >
                     {:else if param.type === "bool"}
                       <input
                         {id}
@@ -1939,7 +2010,7 @@
                     {/if}
                     {#if item.unit}<span>{item.unit}</span>{/if}
                     {#if param?.source === "operator"}
-                      <span class="badge ok">set</span>
+                      <span class="badge ok">changed</span>
                     {:else if param?.source === "default"}
                       <span class="badge unknown">default</span>
                     {/if}
@@ -1999,89 +2070,17 @@
           {/if}
         {/if}
       </div>
-      {#if mode === "FAULT"}
-        <p class="field-note" data-testid="mode-fault-note">
-          FAULT refuses every device call. Set the mode to MANUAL to recover.
-        </p>
-      {/if}
     </div>
 
-    <!-- Runtime status -->
-    <div class="operate-section" data-testid="runtime-status">
-      <h3>Runtime Status</h3>
-      {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(
-          runtimeStatusData,
-          estop,
-          startupSafeState,
-          stopChain,
-        )}
-        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
-        {#if health.reasons.length > 0}
-          <span class="operate-meta">{health.reasons.join("; ")}.</span>
-        {/if}
-        <span class="operate-meta">
-          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
-          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime
-          {runtimeStatusData.uptime_seconds}s
-        </span>
-        {#if startupSafeState}
-          {@const startup = summarizeStartupSafeState(startupSafeState)}
-          <span
-            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
-            data-testid="startup-safe-state"
-          >
-            {startup.text}
-          </span>
-          {#if startup.calls.length}
-            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-              {#each startup.calls as call (call)}
-                <li>{call}</li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      {:else if !statusSettled}
-        <!-- Until the first status reply settles, a missing status is not a
-             fault (wb#623). A failed reply settles too, and falls through. -->
-        <span class="badge unknown">--</span>
-        <span class="operate-meta">Loading runtime status…</span>
-      {:else}
-        <span class="badge unavailable">UNAVAILABLE</span>
-        {#if statusRefusal}
-          <span class="operate-meta field-error" data-testid="runtime-refusal">{statusRefusal}</span
-          >
-        {:else}
-          <span class="operate-meta">Runtime status unavailable.</span>
-        {/if}
-      {/if}
-    </div>
-
-    <!-- Event stream status -->
-    <div class="operate-section">
-      <h3>Event Stream</h3>
-      {#if streamStatus.state === "connected"}
-        <span class="badge ok">CONNECTED</span>
-        <span class="operate-meta">SSE stream active.</span>
-      {:else if streamStatus.state === "reconnecting"}
-        <span class="badge unavailable">RECONNECTING</span>
-        <span class="operate-meta"
-          >Attempt {streamStatus.attempts}, retry in {Math.max(
-            1,
-            Math.ceil((streamStatus.delay_ms || 0) / 1000),
-          )}s.</span
-        >
-      {:else if streamStatus.state === "stale"}
-        <span class="badge stale">STALE</span>
-        <span class="operate-meta"
-          >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
-        >
-      {:else}
-        <span class="badge unavailable">DISCONNECTED</span>
-        <span class="operate-meta">Stream disconnected.</span>
-      {/if}
-    </div>
+    <!-- The runtime's status and the event stream, one section (wb#748). -->
+    <ConnectionSection
+      status={runtimeStatusData}
+      settled={statusSettled}
+      refusal={statusRefusal}
+      health={summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState, stopChain)}
+      startup={startupSafeState ? summarizeStartupSafeState(startupSafeState) : null}
+      stream={summarizeStream(streamStatus)}
+    />
 
     <!-- Provider health -->
     <div class="operate-section" data-testid="provider-health">

@@ -91,7 +91,7 @@
     try {
       status = await fetchJson<OnboardingStatus>("/api/onboarding");
     } catch {
-      // If endpoint fails, don't block — just show onboarding
+      // If the endpoint fails, don't block: show onboarding
       status = { first_run: true, has_projects: false, has_runtime: false, runtime_path: "" };
     }
   }
@@ -452,7 +452,7 @@
 
       <div class="onboarding-skip">
         <button type="button" class="btn-secondary" onclick={skip}>
-          Skip — go to project list
+          Skip to the project list
         </button>
       </div>
     {:else if provisionMode === "remote"}

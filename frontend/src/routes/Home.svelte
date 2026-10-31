@@ -1,6 +1,7 @@
 <script lang="ts">
   import ConfirmModal from "../lib/ConfirmModal.svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import { folderUpload } from "../lib/folder-upload";
   import {
     installedProject,
     type ApiErrorResponse,
@@ -69,6 +70,7 @@
   let importError = $state<string>("");
   let importErrors = $state<Array<{ path?: string; message?: string }>>([]);
   let importing = $state<boolean>(false);
+  let folderInput = $state<HTMLInputElement | null>(null);
 
   // ── Update state ──────────────────────────────────────────────────────────
   interface UpdateCheckResult {
@@ -153,16 +155,39 @@
       importError = "Project name must be 1-64 chars: letters, digits, hyphens, underscores.";
       return;
     }
+    await postImport("/api/projects/import", name ? { path, name } : { path });
+  }
+
+  /** "Choose folder…" (wb#749): the folder chosen in this browser, uploaded. */
+  async function handleFolder(event: Event) {
+    importError = "";
+    importErrors = [];
+    const input = event.currentTarget as HTMLInputElement;
+    const name = importName.trim();
+    if (name && !validProjectName(name)) {
+      importError = "Project name must be 1-64 chars: letters, digits, hyphens, underscores.";
+      return;
+    }
+    try {
+      const upload = await folderUpload(input.files ?? []);
+      await postImport("/api/projects/import-upload", name ? { ...upload, name } : upload);
+    } catch (err) {
+      importError = err instanceof Error ? err.message : "Failed to read the folder";
+    } finally {
+      // Choosing the same folder again must fire change again.
+      input.value = "";
+    }
+  }
+
+  /** POSTs an import, then opens the project, or shows why it was refused. */
+  async function postImport(url: string, body: object) {
     importing = true;
     try {
-      const result = await fetchJson<{ name: string; warnings?: string[] }>(
-        "/api/projects/import",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(name ? { path, name } : { path }),
-        },
-      );
+      const result = await fetchJson<{ name: string; warnings?: string[] }>(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       importPath = "";
       importName = "";
       await onProjectsRefreshed();
@@ -307,7 +332,7 @@
                   <span class="badge" title="The project installed on this machine"
                     >this machine</span
                   >{:else if project.authored === false}
-                  <span class="badge" title="Imported machine profile — carried verbatim"
+                  <span class="badge" title="Imported machine profile, carried verbatim"
                     >imported</span
                   >{/if}</span
               >
@@ -387,7 +412,7 @@
             type="text"
             spellcheck="false"
             style="font-family:monospace"
-            placeholder="/path/to/anolis-projects/projects/bioreactor-v1"
+            placeholder="/path/to/projects/my-machine"
             bind:value={importPath}
           />
         </div>
@@ -409,6 +434,25 @@
           class="btn-primary"
           disabled={importing}
           onclick={handleImport}>{importing ? "Importing…" : "Import Project"}</button
+        >
+        <p class="field-note">
+          The directory is on the machine running the workbench. From another computer, upload the
+          folder instead.
+        </p>
+        <input
+          bind:this={folderInput}
+          type="file"
+          multiple
+          hidden
+          data-testid="import-folder-input"
+          {...{ webkitdirectory: true }}
+          onchange={handleFolder}
+        />
+        <button
+          type="button"
+          class="btn-secondary"
+          disabled={importing}
+          onclick={() => folderInput?.click()}>Choose folder…</button
         >
         {#if importError}
           <p class="field-error">{importError}</p>

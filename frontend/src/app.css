@@ -24,7 +24,7 @@
   --state-nominal: #374151;
   --state-nominal-bg: #f3f4f6;
 
-  /* UI feedback colors (user action results — intentionally muted) */
+  /* UI feedback colors (user action results, intentionally muted) */
   --feedback-ok: #1a6b3d;
   --feedback-error: #9f1239;
 }
@@ -1546,6 +1546,33 @@ body {
   font-size: 2rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* The reading's last ten minutes (wb#747). */
+.operator-sparkline {
+  width: 120px;
+  height: 24px;
+}
+.operator-sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.operator-sparkline-range {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 24px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.operator-sparkline path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .operator-now {

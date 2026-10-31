@@ -1,4 +1,4 @@
-// operate-contracts.ts — data extraction / normalization for the Operate workspace
+// operate-contracts.ts: data extraction / normalization for the Operate workspace
 
 import type {
   AutomationCallFailure,
@@ -28,7 +28,7 @@ import type {
 /**
  * Runtime modes accepted by `POST /v0/mode` and reported by `GET /v0/mode`.
  * MUST stay in sync with the `RuntimeMode` enum in the vendored runtime-http
- * OpenAPI contract — a unit test guards against drift.
+ * OpenAPI contract; a unit test guards against drift.
  */
 export const RUNTIME_MODES = ["MANUAL", "AUTO", "IDLE", "FAULT"] as const;
 
@@ -392,7 +392,7 @@ export function versionAtLeast(version: string | null | undefined, min: string):
 
 /**
  * Normalize a software-safe-state value. An unrecognized value degrades to the
- * *weakest* claim ("none") — the UI must never advertise a stop rung the runtime
+ * *weakest* claim ("none"): the UI must never advertise a stop rung the runtime
  * did not declare.
  */
 export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
@@ -404,7 +404,7 @@ export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
 
 /**
  * Extract the `estop` block from a `GET /v0/runtime/status` body. Returns null
- * when the block is absent or not an object (the contract keeps it optional) —
+ * when the block is absent or not an object (the contract keeps it optional);
  * the UI must not render a stop control it cannot describe.
  */
 export function extractEstopStatus(payload: unknown): EstopStatus | null {
@@ -613,12 +613,12 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
   const parts: string[] = [];
   let ok = true;
 
-  // Never assert "engaged"/"latched" when the latch did not actually engage —
+  // Never assert "engaged"/"latched" when the latch did not actually engage:
   // this defensive branch exists precisely to be honest about a failed stop.
   if (latched) {
     parts.push(`Software stop engaged (${rung}).`);
   } else {
-    parts.push("WARNING: the latch did not engage — the machine may not be safe.");
+    parts.push("WARNING: the latch did not engage. The machine may not be safe.");
     ok = false;
   }
 
@@ -627,7 +627,7 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
       const warning = typeof r.warning === "string" && r.warning.trim() ? r.warning.trim() : "";
       parts.push(
         warning ||
-          "Actuation is latched, but no software safe-state is declared — outputs were NOT driven.",
+          "Actuation is latched, but no software safe-state is declared, so outputs were NOT driven.",
       );
     }
     // When the latch failed, the leading warning already conveys nothing is safe.
@@ -758,6 +758,7 @@ export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | 
 /** The operator panel's one line on what the machine is doing (wb#727). */
 export interface MachineLine {
   state:
+    | "connecting"
     | "unavailable"
     | "emergency_stop"
     | "stopped"
@@ -846,6 +847,14 @@ export function runStartRefusal(
  * than the rest of the page. The first state that holds wins, in this order:
  * what blocks every action comes before what one device needs.
  */
+/** The machine line before the first runtime status has settled (wb#754). */
+export const CONNECTING_LINE: MachineLine = {
+  state: "connecting",
+  text: "Connecting to the runtime…",
+  target: null,
+  linkLabel: "",
+};
+
 export function machineLine(
   status: RuntimeApiStatus | null,
   estop: EstopStatus | null,
@@ -861,12 +870,7 @@ export function machineLine(
   ): MachineLine => ({ state, text, target, linkLabel });
 
   if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
-    return line(
-      "unavailable",
-      "The runtime is not answering.",
-      "runtime-status",
-      "See Runtime Status",
-    );
+    return line("unavailable", "The runtime is not answering.", "runtime-status", "See Connection");
   }
   if (stopChain?.state === "in_force") {
     return line("emergency_stop", "Emergency stop in force: release it to continue.");
@@ -877,7 +881,7 @@ export function machineLine(
   if (status.mode === "FAULT") {
     return line(
       "fault",
-      "In FAULT: set MANUAL to recover. AUTO is not offered from FAULT, which accepts only MANUAL.",
+      "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
       "mode",
       "Go to Mode",
     );
@@ -885,7 +889,7 @@ export function machineLine(
   if (trippedDevices.length) {
     return line(
       "tripped",
-      `Board tripped: clear the trip on ${trippedDevices.join(", ")}.`,
+      `Device tripped: clear the trip on ${trippedDevices.join(", ")}.`,
       "watchdog-trips",
       "Clear the trip",
     );
@@ -917,10 +921,10 @@ export interface OperatorReading {
   /** The value with its unit, or "--" when there is none. */
   text: string;
   /** Empty while the reading is good, else what is wrong with it. */
-  note: "" | "stale" | "faulted" | "unavailable" | "no reading";
+  note: "" | "stale" | "faulted" | "unavailable" | "no reading" | "loading";
 }
 
-function typedNumber(value: unknown): number | null {
+export function typedNumber(value: unknown): number | null {
   if (typeof value === "number") return value;
   const v = asObject(value);
   const n =
@@ -944,11 +948,13 @@ function typedText(value: unknown): string {
 export function operatorReadings(
   operator: OperatorBlock | undefined,
   deviceStates: Record<string, DeviceStateValue[]>,
+  /** Before the first runtime status: a missing reading is loading (wb#754). */
+  loading = false,
 ): OperatorReading[] {
   return (operator?.readings ?? []).map((r) => {
     const [providerId, deviceId, signalId] = r.signal.split("/");
     const sig = deviceStates[`${providerId}/${deviceId}`]?.find((v) => v.signal_id === signalId);
-    if (!sig) return { label: r.label, text: "--", note: "no reading" };
+    if (!sig) return { label: r.label, text: "--", note: loading ? "loading" : "no reading" };
     const n = typedNumber(sig.value);
     const value =
       n !== null && r.decimals !== undefined ? n.toFixed(r.decimals) : typedText(sig.value);
@@ -966,10 +972,12 @@ export function operatorReadings(
 }
 
 /**
- * A line per settings group on what is set now (wb#728), from the declared
- * settings and the parameters' values only. A group whose items include one
- * of run.start's enable parameters reads on or off from it: on means
- * scheduled, not that its actuator is running now.
+ * What is happening per settings group (wb#728, wb#748): a group whose items
+ * include one of run.start's enable parameters reads on or off from
+ * it, and while on, its first other item, its main value. On means
+ * scheduled, not that its actuator is running now. The rest of the schedule
+ * is in Settings, so it is not repeated here, and a group with no enable is
+ * left out.
  */
 export function operatorSettingsLines(
   operator: OperatorBlock | undefined,
@@ -977,19 +985,28 @@ export function operatorSettingsLines(
 ): string[] {
   const enables = new Set(operatorRun(operator)?.start?.enable ?? []);
   const byName = new Map(parameters.map((p) => [p.name, p]));
-  return (operator?.settings ?? []).map((group) => {
-    const parts: string[] = [];
-    for (const item of group.items) {
-      const param = byName.get(item.parameter);
-      if (enables.has(item.parameter)) {
-        parts.unshift(param ? (param.value === true ? "on" : "off") : "--");
-        continue;
-      }
-      const value = param ? String(param.value) : "--";
-      parts.push(`${item.label} ${value}${item.unit ? ` ${item.unit}` : ""}`);
+  const lines: string[] = [];
+  for (const group of operator?.settings ?? []) {
+    const enable = group.items.find((item) => enables.has(item.parameter));
+    if (!enable) continue;
+    const param = byName.get(enable.parameter);
+    if (!param) {
+      lines.push(`${group.group}: --`);
+      continue;
     }
-    return `${group.group}: ${parts.join(", ")}`;
-  });
+    if (param.value !== true) {
+      lines.push(`${group.group}: off`);
+      continue;
+    }
+    const main = group.items.find((item) => item !== enable);
+    const value = main ? byName.get(main.parameter) : undefined;
+    lines.push(
+      main
+        ? `${group.group}: on, ${main.label} ${value ? String(value.value) : "--"}${main.unit ? ` ${main.unit}` : ""}`
+        : `${group.group}: on`,
+    );
+  }
+  return lines;
 }
 
 /** The "provider/device" a "provider/device/signal" reads from. */
@@ -1060,4 +1077,45 @@ export function unmetStartRequirements(
     if (!holds) unmet.push(r.message);
   }
   return unmet;
+}
+
+/** Uptime for reading at a glance: the two largest units, "14 h 55 min" (wb#748). */
+export function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const units: [number, string][] = [
+    [Math.floor(s / 86400), "d"],
+    [Math.floor((s % 86400) / 3600), "h"],
+    [Math.floor((s % 3600) / 60), "min"],
+    [s % 60, "s"],
+  ];
+  const first = units.findIndex(([n]) => n > 0);
+  if (first === -1) return "0 s";
+  return units
+    .slice(first, first + 2)
+    .filter(([n]) => n > 0)
+    .map(([n, u]) => `${n} ${u}`)
+    .join(" ");
+}
+
+/** The event stream's state as a label, a badge class and a detail (wb#748). */
+export function summarizeStream(s: {
+  state: string;
+  attempts: number;
+  delay_ms?: number;
+  idle_ms?: number;
+}): { label: string; cls: string; detail: string } {
+  if (s.state === "connected") return { label: "Connected", cls: "ok", detail: "" };
+  if (s.state === "reconnecting")
+    return {
+      label: "Reconnecting",
+      cls: "unavailable",
+      detail: `attempt ${s.attempts}, retry in ${Math.max(1, Math.ceil((s.delay_ms || 0) / 1000))} s`,
+    };
+  if (s.state === "stale")
+    return {
+      label: "Quiet",
+      cls: "stale",
+      detail: `no events for ${formatDuration((s.idle_ms || 0) / 1000)}`,
+    };
+  return { label: "Disconnected", cls: "unavailable", detail: "" };
 }

@@ -95,7 +95,6 @@ describe("Operate.svelte — the operator panel (#727)", () => {
       screen.getByTestId("watchdog-trips"),
       screen.getByTestId("mode-section"),
       screen.getByTestId("runtime-status"),
-      heading("Event Stream"),
       screen.getByTestId("provider-health"),
     ];
     for (const el of shown) expect(el.closest("details")).toBeNull();
@@ -157,13 +156,13 @@ describe("Operate.svelte — the operator panel (#727)", () => {
     ).toBeTruthy();
   });
 
-  it("takes the operator to the trip clear when a board tripped", async () => {
+  it("takes the operator to the trip clear when a device tripped", async () => {
     const scrolled = scrollSpy();
     fakeRuntime({ mode: "MANUAL", tripped: true });
 
     await waitFor(() =>
       expect(screen.getByTestId("machine-line")).toHaveTextContent(
-        "Board tripped: clear the trip on bread0/dcmt0.",
+        "Device tripped: clear the trip on bread0/dcmt0.",
       ),
     );
     await fireEvent.click(screen.getByRole("button", { name: "Clear the trip" }));

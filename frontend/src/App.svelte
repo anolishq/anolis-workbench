@@ -142,7 +142,16 @@
 
     const navId = ++lastNavigationId;
     if (!historyAlreadySet) {
-      if (replaceHistory) history.replaceState({}, "", route.path);
+      // A reload or popstate of the same page keeps its query string, which a
+      // page may read on load (wb#754); a redirect elsewhere drops it.
+      if (replaceHistory)
+        history.replaceState(
+          {},
+          "",
+          route.path === window.location.pathname
+            ? route.path + window.location.search
+            : route.path,
+        );
       else history.pushState({}, "", route.path);
     }
 
@@ -280,7 +289,7 @@
             showOnboarding = true;
           }
         } catch {
-          // Non-fatal — just show normal home
+          // Non-fatal: show the normal home
         }
       }
 

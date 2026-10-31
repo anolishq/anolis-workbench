@@ -166,7 +166,7 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     ).toBeInTheDocument();
     // Absent, it reads as bread's default (#688).
     expect(
-      within(select).getByRole("option", { name: "— default: Drive outputs safe —" }),
+      within(select).getByRole("option", { name: "Default: Drive outputs safe" }),
     ).toBeInTheDocument();
     expect("outputs_on_startup" in (config.provider as UnknownRecord)).toBe(false);
     expect(onChanged).not.toHaveBeenCalled();
@@ -449,8 +449,8 @@ describe("SchemaForm — an optional enum's default", () => {
     const onChanged = vi.fn();
     render(SchemaForm, { props: { schema, value: config, onChanged } });
 
-    expect(screen.getByRole("option", { name: "— default: Leave it off —" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "— select —" })).toBeInTheDocument(); // colour has no default
+    expect(screen.getByRole("option", { name: "Default: Leave it off" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Select…" })).toBeInTheDocument(); // colour has no default
     expect("policy" in config).toBe(false);
     expect(onChanged).not.toHaveBeenCalled();
 

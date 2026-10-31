@@ -13,6 +13,26 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- **A sparkline beside each operator reading** (#747): the reading's last ten
+  minutes, kept in the browser from the state updates and polls Operate
+  already gets, drawn as plain SVG. It starts empty when the page loads (no
+  backfill; long history stays in Grafana), adds a point only when the
+  reading's own timestamp moves, and leaves a gap where the reading was
+  stale, faulted or unavailable. The line spans at least ten steps of the
+  reading's declared decimals (0.1 without them), so a reading moving by its
+  last digit draws near flat, and the window's high and low are labelled
+  beside it.
+- **Import a project folder from the browser's computer** (#749). Home's
+  Import Machine Profile has **Choose folder…**: the browser uploads the
+  folder (`POST /api/projects/import-upload`), and the server writes it to a
+  private staging directory under the data dir, validates and imports it as a
+  path import does, and removes the staging directory. A path that is not a
+  plain relative path, more than 200 files or more than 2 MiB is refused
+  before anything is written. The path field stays for a directory on the
+  workbench's machine.
+
 ### Changed
 
 - **The operator panel's Start and Stop open and close a run** (anolishq/anolis#696).
@@ -34,9 +54,54 @@ Historical note:
   switches its `stop.disable` parameters off. A `require` entry with `when`
   applies only while that parameter is on, so a group left off is not held
   to its conditions.
+- **A setting an operator changed reads "changed"** (#232), where it read
+  "set"; one at the project's value still reads "default".
+- **Plain wording in the UI** (#746). The UI's text has no em dashes: each
+  is a colon, a full stop or a comma now. The machine line and the trip
+  clear say "device", not "board" ("Device tripped: clear the trip on …").
+  Home's import box suggests `/path/to/projects/my-machine`. A schema
+  select's empty option reads "Select…" or "Default: <title>". Empty cells
+  read "none" (Fleet's template) or "not set" (an imported profile's
+  identity), and Commission's version table leaves a missing version blank
+  beside its note. Text only.
+- **Operate's Runtime Status and Event Stream are one Connection section**
+  (#748). A grid of facts under the health badge: Runtime, Devices, Poll, Up
+  for (a duration, "14 h 55 min", not seconds) and Event stream (Connected,
+  Reconnecting, Quiet or Disconnected). The mode is no longer repeated there.
+  The machine line's "See Runtime Status" link is now "See Connection".
+- **Each thing is said once** (#748). Mode no longer carries its own FAULT
+  note: the machine line says what to do. The software-stop row's chip says
+  "Stop ready", about the stop only, where it said "Ready", or "Not ready"
+  while a device was tripped; the machine line says whether the machine is
+  ready, and why not. In FAULT it says MANUAL once: "In FAULT: set MANUAL to
+  recover (AUTO isn't available from FAULT)." Now says what is happening:
+  each settings group with an enable on or off, and its main value while on
+  ("Stirring: on, Speed 110 / 255"). The rest of the schedule stays in
+  Settings, and a group with no enable is no longer listed in Now.
 
 ### Fixed
 
+- **Operate says it is connecting until the first status arrives** (#754).
+  The machine line said "The runtime is not answering." while the first
+  runtime status was still on its way; it now says "Connecting to the
+  runtime…", and keeps "not answering" for a status request that failed.
+  Until then Readings say "loading", Now says "Loading…", Settings say
+  "loading…", and Start refuses with "still connecting". A reload of a page
+  keeps its query string, which the first navigation used to drop.
+- **Operate's requests through the workbench are faster** (#754). Each
+  proxied request resolved the runtime's address afresh: the launcher's
+  status (every project, and a probe of the installed runtime), the running
+  project, the installed config and the token file. On the rig that was
+  about 0.2 s a request, and Operate's parallel polls queued behind each
+  other. The address and token are now kept until a file they were read from
+  changes, the workbench's own runtime process changes, or the address
+  refuses a request.
+- **The header's status poll is cheaper** (#754). `/api/status` looked for
+  a runtime the workbench did not start by loading each project and the
+  installed config to learn its port, on every 2 s poll: 0.1 to 0.3 s on the
+  rig. The ports are now kept until a file they were read from changes; the
+  probe of each still runs on every poll, so a runtime that stops or starts
+  shows at once.
 - **Operate's settings** (#745). A box ticked and saved no longer flickers
   back to its old value while the values refresh. Save now says "Applied"
   while the runtime is in AUTO, where the automation uses the values at once,

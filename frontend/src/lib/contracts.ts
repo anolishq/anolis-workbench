@@ -77,7 +77,7 @@ export interface ProviderSchemasResponse extends UnknownRecord {
 }
 
 /**
- * Any provider kind the server offers, which is whatever envelopes it serves —
+ * Any provider kind the server offers, which is whatever envelopes it serves:
  * never a fixed set. The literals that used to be unioned here collapsed to
  * `string` anyway, so they typed nothing and only read like an enum somebody
  * had to extend (#285).
@@ -166,7 +166,7 @@ export interface RuntimeHealth extends UnknownRecord {
 }
 
 /**
- * A runtime-config document — the file the runtime itself consumes
+ * A runtime-config document: the file the runtime itself consumes
  * (`config/anolis-runtime.<variant>.yaml`). The workbench edits it directly
  * now; there is no intermediate shadow document.
  */
@@ -191,7 +191,7 @@ export interface ComponentPin extends UnknownRecord {
   version?: string;
 }
 
-/** Parsed `machine-profile.yaml` — the machine's identity and contents. */
+/** Parsed `machine-profile.yaml`: the machine's identity and contents. */
 export interface MachineProfile extends UnknownRecord {
   schema_version?: number;
   machine_id: string;
@@ -253,7 +253,7 @@ export interface ProviderInstance extends UnknownRecord {
 
 /**
  * Dev-launch only. Host binary paths live in the workbench sidecar and are
- * never deployed — a Windows path does not even resemble a deploy token.
+ * never deployed; a Windows path does not even resemble a deploy token.
  */
 export interface HostPaths extends UnknownRecord {
   runtime_executable?: string;
@@ -326,7 +326,7 @@ export interface RuntimeApiStatus extends UnknownRecord {
  * Which rung of the safe-state ladder a `POST /v0/estop` would run now.
  * "none" = no software safe-state declared (hardware cut only).
  * MUST stay in sync with the `SoftwareSafeState` enum in the vendored
- * runtime-http OpenAPI contract — a unit test guards against drift.
+ * runtime-http OpenAPI contract; a unit test guards against drift.
  */
 export type SoftwareSafeState = "none" | "hooks" | "setpoints" | "zero";
 

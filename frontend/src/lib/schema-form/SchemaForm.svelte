@@ -14,7 +14,7 @@
   } from "./schema";
 
   /**
-   * SchemaForm.svelte — schema-driven form over one provider's native config
+   * SchemaForm.svelte: schema-driven form over one provider's native config
    * document. Renders the envelope's root object schema; every write prunes
    * keys the current discriminator state forbids before flagging dirty.
    */
