@@ -55,6 +55,8 @@ function fakeRuntime(
     operator?: unknown;
     /** Signals by "provider/device", for /v0/state. */
     states?: Record<string, { signal_id: string; value: unknown; quality: string }[]>;
+    /** Holds each GET /v0/parameters after a parameter post until it settles. */
+    refreshAfterSave?: Promise<void>;
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
@@ -116,8 +118,11 @@ function fakeRuntime(
         });
       }
       if (path === "/v0/mode") return jsonResponse(200, { status: { code: "OK" }, mode });
-      if (path === "/v0/parameters")
+      if (path === "/v0/parameters") {
+        if (opts.refreshAfterSave && posts.some((p) => p.path === "/v0/parameters"))
+          await opts.refreshAfterSave;
         return jsonResponse(200, { status: { code: "OK" }, parameters: params });
+      }
       if (path === "/v0/providers/health")
         return jsonResponse(200, {
           providers: [
@@ -225,6 +230,54 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
       { name: "dose1_enable", value: true },
       { name: "dose1_interval_s", value: 30 },
     ]);
+  });
+
+  it("keeps a ticked box ticked while Save refreshes the values (#745)", async () => {
+    let release = () => {};
+    const rt = fakeRuntime({ refreshAfterSave: new Promise<void>((r) => (release = r)) });
+    const on = (await waitFor(() => within(row("Dose 1", "On")).getByRole("checkbox"))) as HTMLInputElement;
+    await waitFor(() => expect(within(row("Dose 1", "Every")).getByRole("textbox")).toHaveValue("20"));
+
+    await fireEvent.click(on);
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(paramPosts(rt.posts)).toEqual([{ name: "dose1_enable", value: true }]));
+
+    // Posted, the refresh still out: the box shows what was saved.
+    expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
+    release();
+    expect(await within(group("Dose 1")).findByText("Saved")).toBeInTheDocument();
+    expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
+  });
+
+  it("says Saved outside AUTO, that settings apply when automation runs (#745)", async () => {
+    fakeRuntime({ mode: "IDLE" });
+    const every = (await waitFor(() => {
+      const el = within(row("Dose 1", "Every")).getByRole("textbox") as HTMLInputElement;
+      expect(el.value).toBe("20");
+      return el;
+    })) as HTMLInputElement;
+
+    await fireEvent.input(every, { target: { value: "30" } });
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+
+    const note = await within(group("Dose 1")).findByText("Saved");
+    expect(note).toHaveAttribute("title", expect.stringContaining("when the automation runs"));
+  });
+
+  it("says Applied in AUTO, where the automation uses the values now (#745)", async () => {
+    fakeRuntime({ mode: "AUTO" });
+    const every = (await waitFor(() => {
+      const el = within(row("Dose 1", "Every")).getByRole("textbox") as HTMLInputElement;
+      expect(el.value).toBe("20");
+      return el;
+    })) as HTMLInputElement;
+    await waitFor(() => expect(screen.getByTestId("mode-section")).toHaveTextContent("AUTO"));
+
+    await fireEvent.input(every, { target: { value: "30" } });
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+
+    expect(await within(group("Dose 1")).findByText("Applied")).toBeInTheDocument();
+    expect(within(group("Dose 1")).queryByText("Saved")).toBeNull();
   });
 
   it("refuses a value out of range, naming it, and saves none of the group", async () => {
