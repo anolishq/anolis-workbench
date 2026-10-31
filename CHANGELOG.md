@@ -15,6 +15,15 @@ Historical note:
 
 ### Added
 
+- **A sparkline beside each operator reading** (#747): the reading's last ten
+  minutes, kept in the browser from the state updates and polls Operate
+  already gets, drawn as plain SVG. It starts empty when the page loads (no
+  backfill; long history stays in Grafana), adds a point only when the
+  reading's own timestamp moves, and leaves a gap where the reading was
+  stale, faulted or unavailable. The line spans at least ten steps of the
+  reading's declared decimals (0.1 without them), so a reading moving by its
+  last digit draws near flat, and the window's high and low are labelled
+  beside it.
 - **Import a project folder from the browser's computer** (#749). Home's
   Import Machine Profile has **Choose folder…**: the browser uploads the
   folder (`POST /api/projects/import-upload`), and the server writes it to a
