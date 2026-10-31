@@ -34,6 +34,12 @@ def _no_host_token_copy(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(workbench_service, "RUNTIME_TOKEN_FILE", tmp_path / "absent-token")
 
 
+@pytest.fixture(autouse=True)
+def _no_cached_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test resolves the target for itself (wb#754)."""
+    monkeypatch.setattr(operate, "_resolved", None)
+
+
 class _FakeHandler:
     """Just enough of BaseHTTPRequestHandler for proxy_runtime."""
 
