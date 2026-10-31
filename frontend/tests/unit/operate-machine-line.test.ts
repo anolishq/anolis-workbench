@@ -87,8 +87,8 @@ describe("machineLine (wb#727)", () => {
   it("says FAULT is left through MANUAL, why not AUTO, and links to Mode", () => {
     const line = machineLine(status("FAULT"), null, null, []);
     expect(line).toMatchObject({ state: "fault", target: "mode" });
-    expect(line.text).toContain("set MANUAL to recover");
-    expect(line.text).toContain("AUTO is not offered from FAULT");
+    expect(line.text).toBe("In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).");
+    expect(line.text.match(/MANUAL/g)).toHaveLength(1);
   });
 
   it("names a tripped device and links to the trip clear", () => {

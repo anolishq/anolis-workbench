@@ -183,15 +183,16 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
     expect(reading("Dissolved oxygen")).not.toHaveTextContent("7.25");
   });
 
-  it("shows a line per settings group: on or off from its enable, then its values", async () => {
+  it("says what is happening per group, on with its main value or off, not the schedule (wb#748)", async () => {
     fakeRuntime();
 
     const now = await screen.findByTestId("operator-now");
-    await waitFor(() => expect(now).toHaveTextContent("Dose 1: on, Every 20 s, For 3 s"));
-    expect(now).toHaveTextContent("Stirring: off, Speed 80");
-    // A group with no enable among experiment.start.enable has no on or off.
-    expect(now).toHaveTextContent("Limits: Max 37.5 °C");
-    expect(now).not.toHaveTextContent(/Limits: (on|off)/);
+    await waitFor(() => expect(now).toHaveTextContent("Dose 1: on, Every 20 s"));
+    expect(now).not.toHaveTextContent("For 3 s");
+    expect(now).toHaveTextContent("Stirring: off");
+    expect(now).not.toHaveTextContent("Speed");
+    // A group with no enable among experiment.start.enable says nothing here.
+    expect(now).not.toHaveTextContent("Limits");
     expect(now.closest("details")).toBeNull();
     expect(
       now.compareDocumentPosition(screen.getByTestId("mode-section")) &

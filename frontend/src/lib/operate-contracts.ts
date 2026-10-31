@@ -855,12 +855,7 @@ export function machineLine(
   ): MachineLine => ({ state, text, target, linkLabel });
 
   if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
-    return line(
-      "unavailable",
-      "The runtime is not answering.",
-      "runtime-status",
-      "See Runtime Status",
-    );
+    return line("unavailable", "The runtime is not answering.", "runtime-status", "See Connection");
   }
   if (stopChain?.state === "in_force") {
     return line("emergency_stop", "Emergency stop in force: release it to continue.");
@@ -871,7 +866,7 @@ export function machineLine(
   if (status.mode === "FAULT") {
     return line(
       "fault",
-      "In FAULT: set MANUAL to recover. AUTO is not offered from FAULT, which accepts only MANUAL.",
+      "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
       "mode",
       "Go to Mode",
     );
@@ -960,10 +955,12 @@ export function operatorReadings(
 }
 
 /**
- * A line per settings group on what is set now (wb#728), from the declared
- * settings and the parameters' values only. A group whose items include one
- * of experiment.start's enable parameters reads on or off from it: on means
- * scheduled, not that its actuator is running now.
+ * What is happening per settings group (wb#728, wb#748): a group whose items
+ * include one of experiment.start's enable parameters reads on or off from
+ * it, and while on, its first other item, its main value. On means
+ * scheduled, not that its actuator is running now. The rest of the schedule
+ * is in Settings, so it is not repeated here, and a group with no enable is
+ * left out.
  */
 export function operatorSettingsLines(
   operator: OperatorBlock | undefined,
@@ -971,19 +968,28 @@ export function operatorSettingsLines(
 ): string[] {
   const enables = new Set(operator?.experiment?.start?.enable ?? []);
   const byName = new Map(parameters.map((p) => [p.name, p]));
-  return (operator?.settings ?? []).map((group) => {
-    const parts: string[] = [];
-    for (const item of group.items) {
-      const param = byName.get(item.parameter);
-      if (enables.has(item.parameter)) {
-        parts.unshift(param ? (param.value === true ? "on" : "off") : "--");
-        continue;
-      }
-      const value = param ? String(param.value) : "--";
-      parts.push(`${item.label} ${value}${item.unit ? ` ${item.unit}` : ""}`);
+  const lines: string[] = [];
+  for (const group of operator?.settings ?? []) {
+    const enable = group.items.find((item) => enables.has(item.parameter));
+    if (!enable) continue;
+    const param = byName.get(enable.parameter);
+    if (!param) {
+      lines.push(`${group.group}: --`);
+      continue;
     }
-    return `${group.group}: ${parts.join(", ")}`;
-  });
+    if (param.value !== true) {
+      lines.push(`${group.group}: off`);
+      continue;
+    }
+    const main = group.items.find((item) => item !== enable);
+    const value = main ? byName.get(main.parameter) : undefined;
+    lines.push(
+      main
+        ? `${group.group}: on, ${main.label} ${value ? String(value.value) : "--"}${main.unit ? ` ${main.unit}` : ""}`
+        : `${group.group}: on`,
+    );
+  }
+  return lines;
 }
 
 /** The "provider/device" a "provider/device/signal" reads from. */
@@ -1024,4 +1030,45 @@ export function unmetStartRequirements(
     if (!holds) unmet.push(r.message);
   }
   return unmet;
+}
+
+/** Uptime for reading at a glance: the two largest units, "14 h 55 min" (wb#748). */
+export function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const units: [number, string][] = [
+    [Math.floor(s / 86400), "d"],
+    [Math.floor((s % 86400) / 3600), "h"],
+    [Math.floor((s % 3600) / 60), "min"],
+    [s % 60, "s"],
+  ];
+  const first = units.findIndex(([n]) => n > 0);
+  if (first === -1) return "0 s";
+  return units
+    .slice(first, first + 2)
+    .filter(([n]) => n > 0)
+    .map(([n, u]) => `${n} ${u}`)
+    .join(" ");
+}
+
+/** The event stream's state as a label, a badge class and a detail (wb#748). */
+export function summarizeStream(s: {
+  state: string;
+  attempts: number;
+  delay_ms?: number;
+  idle_ms?: number;
+}): { label: string; cls: string; detail: string } {
+  if (s.state === "connected") return { label: "Connected", cls: "ok", detail: "" };
+  if (s.state === "reconnecting")
+    return {
+      label: "Reconnecting",
+      cls: "unavailable",
+      detail: `attempt ${s.attempts}, retry in ${Math.max(1, Math.ceil((s.delay_ms || 0) / 1000))} s`,
+    };
+  if (s.state === "stale")
+    return {
+      label: "Quiet",
+      cls: "stale",
+      detail: `no events for ${formatDuration((s.idle_ms || 0) / 1000)}`,
+    };
+  return { label: "Disconnected", cls: "unavailable", detail: "" };
 }

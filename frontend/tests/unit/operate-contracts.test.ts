@@ -7,6 +7,8 @@ import {
   argAllowedValues,
   checkAllowedValue,
   coerceParameterValue,
+  formatDuration,
+  summarizeStream,
   deriveOperateAvailability,
   extractAutomationStatus,
   extractAutomationTree,
@@ -931,5 +933,26 @@ describe("allowed_values on function args (wb#576)", () => {
   it("reads allowed_values through normalizeArgSpec", () => {
     const arg = normalizeArgSpec({ type: "string", allowed_values: ["a", "b"] }, "mode");
     expect(argAllowedValues(arg)).toEqual(["a", "b"]);
+  });
+});
+
+describe("formatDuration and summarizeStream (wb#748)", () => {
+  it.each([
+    [0, "0 s"],
+    [59, "59 s"],
+    [60, "1 min"],
+    [3725, "1 h 2 min"],
+    [53720, "14 h 55 min"],
+    [90000, "1 d 1 h"],
+    [86400 + 59, "1 d"],
+  ])("%i s reads %s", (seconds, text) => {
+    expect(formatDuration(seconds)).toBe(text);
+  });
+
+  it("names each stream state", () => {
+    expect(summarizeStream({ state: "connected", attempts: 0 })).toEqual({ label: "Connected", cls: "ok", detail: "" });
+    expect(summarizeStream({ state: "reconnecting", attempts: 3, delay_ms: 1500 }).detail).toBe("attempt 3, retry in 2 s");
+    expect(summarizeStream({ state: "stale", attempts: 0, idle_ms: 75000 }).detail).toBe("no events for 1 min 15 s");
+    expect(summarizeStream({ state: "disconnected", attempts: 0 }).label).toBe("Disconnected");
   });
 });
