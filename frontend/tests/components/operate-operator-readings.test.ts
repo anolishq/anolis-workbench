@@ -36,7 +36,7 @@ const OPERATOR = {
     },
     { group: "Limits", items: [{ parameter: "temp_max_c", label: "Max", unit: "°C" }] },
   ],
-  experiment: {
+  run: {
     start: { enable: ["impeller_enable", "dose1_enable"], mode: "AUTO" },
     stop: { disable: ["impeller_enable", "dose1_enable"], mode: "IDLE" },
   },
@@ -189,7 +189,7 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
     const now = await screen.findByTestId("operator-now");
     await waitFor(() => expect(now).toHaveTextContent("Dose 1: on, Every 20 s, For 3 s"));
     expect(now).toHaveTextContent("Stirring: off, Speed 80");
-    // A group with no enable among experiment.start.enable has no on or off.
+    // A group with no enable among run.start.enable has no on or off.
     expect(now).toHaveTextContent("Limits: Max 37.5 °C");
     expect(now).not.toHaveTextContent(/Limits: (on|off)/);
     expect(now.closest("details")).toBeNull();

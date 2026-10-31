@@ -34,7 +34,7 @@ const OPERATOR: OperatorBlock = {
     },
     { group: "Missing", items: [{ parameter: "nope", label: "Value" }] },
   ],
-  experiment: { start: { enable: ["dose_enable"], mode: "AUTO" } },
+  run: { start: { enable: ["dose_enable"], mode: "AUTO" } },
 };
 
 describe("operatorReadings", () => {
@@ -95,7 +95,7 @@ describe("operatorSettingsLines", () => {
   });
 });
 
-// anolis#686: experiment.start.require, compared by the value's type.
+// anolis#686: run.start.require, compared by the value's type.
 describe("unmetStartRequirements", () => {
   const REQUIRE = [
     { signal: "bread0/dcmt1/motor1_brake", equals: false, message: "Release the brake" },

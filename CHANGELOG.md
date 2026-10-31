@@ -13,6 +13,21 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **The operator panel's Start and Stop open and close a run** (anolishq/anolis#696).
+  Settings and Start/Stop are one section, headed by the profile's
+  `operator.run.label` ("Run" by default), with a line saying the settings
+  apply while the automation runs (AUTO). Start run opens a run in the
+  runtime's journal (`POST /v0/runs`) with the settings' current values
+  before it sets anything, so the run records them and every change after;
+  Stop run closes the open run (`operator_stop`) after it sets the mode.
+  Start refuses, naming the run, while one is already open. Without a run
+  journal (no `runtime.data_dir`) both still run and say the run is not
+  recorded. The profile's `operator.run` is read, and the deprecated
+  `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
+  profile schema knows `operator.run`.
+
 ### Fixed
 
 - **Operate's settings** (#745). A box ticked and saved no longer flickers
