@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
   import InfoToggle from "../lib/InfoToggle.svelte";
+  import ConnectionSection from "../lib/ConnectionSection.svelte";
   import type {
     AutomationCallFailure,
     AutomationStatus,
@@ -63,6 +64,7 @@
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
+    summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
   } from "../lib/operate-contracts";
@@ -220,6 +222,13 @@
     Array<{ type: string; timestamp_ms: number; details: string; seq: number }>
   >([]);
   let traceSeq = 0;
+
+  // wb#748 spike: ?connection=a|b|c shows Runtime Status and Event Stream as
+  // one section in that layout; without it, Operate is unchanged.
+  const connectionLayout = (() => {
+    const v = new URLSearchParams(window.location.search).get("connection");
+    return v === "a" || v === "b" || v === "c" ? v : null;
+  })();
 
   let streamStatus = $state<{
     state: string;
@@ -1907,82 +1916,93 @@
       {/if}
     </div>
 
-    <!-- Runtime status -->
-    <div class="operate-section" data-testid="runtime-status">
-      <h3>Runtime Status</h3>
-      {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(
-          runtimeStatusData,
-          estop,
-          startupSafeState,
-          stopChain,
-        )}
-        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
-        {#if health.reasons.length > 0}
-          <span class="operate-meta">{health.reasons.join("; ")}.</span>
-        {/if}
-        <span class="operate-meta">
-          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
-          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime
-          {runtimeStatusData.uptime_seconds}s
-        </span>
-        {#if startupSafeState}
-          {@const startup = summarizeStartupSafeState(startupSafeState)}
-          <span
-            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
-            data-testid="startup-safe-state"
-          >
-            {startup.text}
+    {#if connectionLayout && runtimeStatusData}
+      <ConnectionSection
+        layout={connectionLayout}
+        status={runtimeStatusData}
+        health={summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState, stopChain)}
+        startup={startupSafeState ? summarizeStartupSafeState(startupSafeState) : null}
+        stream={summarizeStream(streamStatus)}
+      />
+    {:else}
+      <!-- Runtime status -->
+      <div class="operate-section" data-testid="runtime-status">
+        <h3>Runtime Status</h3>
+        {#if runtimeStatusData}
+          {@const health = summarizeRuntimeHealth(
+            runtimeStatusData,
+            estop,
+            startupSafeState,
+            stopChain,
+          )}
+          <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
+          {#if health.reasons.length > 0}
+            <span class="operate-meta">{health.reasons.join("; ")}.</span>
+          {/if}
+          <span class="operate-meta">
+            {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
+            | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
+            | Uptime
+            {runtimeStatusData.uptime_seconds}s
           </span>
-          {#if startup.calls.length}
-            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-              {#each startup.calls as call (call)}
-                <li>{call}</li>
-              {/each}
-            </ul>
+          {#if startupSafeState}
+            {@const startup = summarizeStartupSafeState(startupSafeState)}
+            <span
+              class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
+              data-testid="startup-safe-state"
+            >
+              {startup.text}
+            </span>
+            {#if startup.calls.length}
+              <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
+                {#each startup.calls as call (call)}
+                  <li>{call}</li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
+        {:else if !statusSettled}
+          <!-- Until the first status reply settles, a missing status is not a
+             fault (wb#623). A failed reply settles too, and falls through. -->
+          <span class="badge unknown">--</span>
+          <span class="operate-meta">Loading runtime status…</span>
+        {:else}
+          <span class="badge unavailable">UNAVAILABLE</span>
+          {#if statusRefusal}
+            <span class="operate-meta field-error" data-testid="runtime-refusal"
+              >{statusRefusal}</span
+            >
+          {:else}
+            <span class="operate-meta">Runtime status unavailable.</span>
           {/if}
         {/if}
-      {:else if !statusSettled}
-        <!-- Until the first status reply settles, a missing status is not a
-             fault (wb#623). A failed reply settles too, and falls through. -->
-        <span class="badge unknown">--</span>
-        <span class="operate-meta">Loading runtime status…</span>
-      {:else}
-        <span class="badge unavailable">UNAVAILABLE</span>
-        {#if statusRefusal}
-          <span class="operate-meta field-error" data-testid="runtime-refusal">{statusRefusal}</span
+      </div>
+
+      <!-- Event stream status -->
+      <div class="operate-section">
+        <h3>Event Stream</h3>
+        {#if streamStatus.state === "connected"}
+          <span class="badge ok">CONNECTED</span>
+          <span class="operate-meta">SSE stream active.</span>
+        {:else if streamStatus.state === "reconnecting"}
+          <span class="badge unavailable">RECONNECTING</span>
+          <span class="operate-meta"
+            >Attempt {streamStatus.attempts}, retry in {Math.max(
+              1,
+              Math.ceil((streamStatus.delay_ms || 0) / 1000),
+            )}s.</span
+          >
+        {:else if streamStatus.state === "stale"}
+          <span class="badge stale">STALE</span>
+          <span class="operate-meta"
+            >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
           >
         {:else}
-          <span class="operate-meta">Runtime status unavailable.</span>
+          <span class="badge unavailable">DISCONNECTED</span>
+          <span class="operate-meta">Stream disconnected.</span>
         {/if}
-      {/if}
-    </div>
-
-    <!-- Event stream status -->
-    <div class="operate-section">
-      <h3>Event Stream</h3>
-      {#if streamStatus.state === "connected"}
-        <span class="badge ok">CONNECTED</span>
-        <span class="operate-meta">SSE stream active.</span>
-      {:else if streamStatus.state === "reconnecting"}
-        <span class="badge unavailable">RECONNECTING</span>
-        <span class="operate-meta"
-          >Attempt {streamStatus.attempts}, retry in {Math.max(
-            1,
-            Math.ceil((streamStatus.delay_ms || 0) / 1000),
-          )}s.</span
-        >
-      {:else if streamStatus.state === "stale"}
-        <span class="badge stale">STALE</span>
-        <span class="operate-meta"
-          >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
-        >
-      {:else}
-        <span class="badge unavailable">DISCONNECTED</span>
-        <span class="operate-meta">Stream disconnected.</span>
-      {/if}
-    </div>
+      </div>
+    {/if}
 
     <!-- Provider health -->
     <div class="operate-section" data-testid="provider-health">
