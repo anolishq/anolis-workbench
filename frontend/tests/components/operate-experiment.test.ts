@@ -195,7 +195,9 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
       ),
     );
     expect(row("Dose 1", "Every")).toHaveTextContent("s");
-    expect(row("Dose 1", "Every")).toHaveTextContent("set");
+    // An operator's value reads "changed", a default "default" (#232).
+    expect(within(row("Dose 1", "Every")).getByText("changed", { selector: ".badge" })).toBeInTheDocument();
+    expect(within(row("Dose 1", "Every")).queryByText("set", { selector: ".badge" })).toBeNull();
     expect(row("Dose 1", "For")).toHaveTextContent("default");
     expect(within(row("Dose 1", "On")).getByRole("checkbox")).not.toBeChecked();
     expect(row("Stirring", "Speed")).toHaveTextContent("%");
