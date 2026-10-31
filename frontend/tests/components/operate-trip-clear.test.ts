@@ -201,7 +201,7 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     // 1. The release takes two clicks, as the stop card's clear does.
     await press(1, "Release the software stop…");
     expect(actionPosts(rt)).toEqual([]);
-    await press(1, "Confirm release — re-enables actuation");
+    await press(1, "Confirm release: re-enables actuation");
     await waitFor(() => expect(step(1)).toHaveTextContent("Done"));
 
     // 2. MANUAL.
@@ -215,7 +215,7 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     // 4. The brakes: an actuating call, so it takes two clicks too.
     await press(4, "Release both brakes…");
     expect(actionPosts(rt)).toHaveLength(3);
-    await press(4, "Confirm — releases both brakes");
+    await press(4, "Confirm: releases both brakes");
     await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
 
     expect(actionPosts(rt)).toEqual([
@@ -274,7 +274,7 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     expect(await within(step(3)).findByRole("button", { name: "Clear the trip" })).toBeDisabled();
 
     await press(1, "Release the software stop…");
-    await press(1, "Confirm release — re-enables actuation");
+    await press(1, "Confirm release: re-enables actuation");
     await press(3, "Clear the trip");
     await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
     expect(rt.posts.some((p) => p.path === "/v0/mode")).toBe(false);

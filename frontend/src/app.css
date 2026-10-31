@@ -24,7 +24,7 @@
   --state-nominal: #374151;
   --state-nominal-bg: #f3f4f6;
 
-  /* UI feedback colors (user action results — intentionally muted) */
+  /* UI feedback colors (user action results, intentionally muted) */
   --feedback-ok: #1a6b3d;
   --feedback-error: #9f1239;
 }

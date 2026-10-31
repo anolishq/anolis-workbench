@@ -162,7 +162,7 @@
   let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
-  // Boards whose command watchdog tripped, and the one being cleared (wb#572).
+  // Devices whose command watchdog tripped, and the one being cleared (wb#572).
   // Each step of the clear is the operator's click; nothing runs on its own.
   const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
   let tripKey = $state<string>("");
@@ -214,7 +214,7 @@
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
-  // not an execution_status — the next status poll reflects the engine's truth).
+  // not an execution_status; the next status poll reflects the engine's truth).
   let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
   // From status on each poll, and from automation_call_failed between polls.
   let callFailures = $state<AutomationCallFailure[]>([]);
@@ -586,7 +586,7 @@
     }
   }
 
-  // ── Software e-stop (wb#236) — thin trigger over POST /v0/estop ─────────────
+  // ── Software e-stop (wb#236): thin trigger over POST /v0/estop ──────────────
   async function refreshEstopOnly(): Promise<void> {
     const epoch = estopEpoch;
     try {
@@ -728,7 +728,7 @@
     await setMode();
   }
 
-  /** POSTs one call for the board being cleared; false, with the error shown, if refused. */
+  /** POSTs one call for the device being cleared; false, with the error shown, if refused. */
   async function callForTrip(stepNumber: number, func: FunctionSpec): Promise<boolean> {
     const [providerId, deviceId] = tripKey.split("/");
     tripError = null;
@@ -1203,7 +1203,7 @@
 
   function consumeAutomationFaultEvent(payload: UnknownRecord): void {
     // A fault is an event, not a status. Record it for display but never
-    // fabricate an execution_status — the polled /v0/automation/status is the
+    // fabricate an execution_status: the polled /v0/automation/status is the
     // single source of truth for the engine's state.
     const errorText =
       typeof payload.error === "string" && payload.error.trim() !== ""
@@ -1328,7 +1328,7 @@
              runtime is harmless, and a stale read must never hide it (wb#553). -->
         {#if estop?.latched}
           <div class="estop-latched-banner" data-testid="other-project-latch">
-            <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+            <span class="estop-latched-title">SAFE-STATE ENGAGED: actuation latched</span>
             <span class="estop-latched-meta">
               Latched at {formatEpochMs(estop.latched_at_epoch_ms)} on the runtime running "{runningProject}".
               Clear it from
@@ -1383,7 +1383,7 @@
       {/if}
     </div>
   {:else}
-    <!-- Software stop (wb#236) — thin trigger over POST /v0/estop. NOT an
+    <!-- Software stop (wb#236): thin trigger over POST /v0/estop. NOT an
          emergency stop: it commands devices that stay powered. One row at
          button height (wb#613): the detail sits behind click-open notes, and
          what needs attention stays in the row. -->
@@ -1423,7 +1423,7 @@
               disabled={clearRunning}
               onclick={clearEstop}
             >
-              {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
+              {clearRunning ? "Clearing…" : "Confirm clear: re-enables actuation"}
             </button>
             <button
               type="button"
@@ -1445,7 +1445,7 @@
             </span>
           {:else}
             <!-- The stop is armed either way; "Ready" claims the machine is,
-                 so not while a board is tripped (wb#692). Current conditions
+                 so not while a device is tripped (wb#692). Current conditions
                  only: startup_safe_state is a past event, reported until the
                  runtime restarts, and has its own warning below. -->
             {#if trippedKeys.length}
@@ -1561,7 +1561,7 @@
         <span class="estop-disclaimer">
           Not an emergency stop: use the hardware E-stop
           <InfoToggle label="Why this is not an emergency stop">
-            Not an emergency stop — it commands devices that stay powered, and needs the runtime,
+            Not an emergency stop: it commands devices that stay powered, and needs the runtime,
             providers and bus all working. For any physical hazard use the hardware emergency stop.
             If in doubt, isolate power to the machine.
           </InfoToggle>
@@ -1583,13 +1583,13 @@
     </div>
 
     {#if trippedKeys.length || tripKey}
-      <!-- Boards whose command watchdog tripped refuse every SET until cleared
+      <!-- Devices whose command watchdog tripped refuse every SET until cleared
            (wb#572). The clear is a sequence the operator confirms step by step. -->
       <div class="operate-section" data-testid="watchdog-trips">
         <h3>Watchdog trips</h3>
         {#if trippedKeys.length}
           <p class="field-note">
-            These boards' command watchdogs tripped, so they refuse every command until cleared.
+            These devices' command watchdogs tripped, so they refuse every command until cleared.
           </p>
           <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
@@ -1623,7 +1623,7 @@
                     disabled={clearRunning}
                     onclick={releaseForTrip}
                   >
-                    Confirm release — re-enables actuation
+                    Confirm release: re-enables actuation
                   </button>
                   <button
                     type="button"
@@ -1668,9 +1668,10 @@
               <li data-testid="trip-step-3">
                 Clear the trip with <code>clear_watchdog_trip</code>.
                 {#if !tripCaps}
-                  <span class="field-note">Loading the board's functions…</span>
+                  <span class="field-note">Loading the device's functions…</span>
                 {:else if !tripClearFn}
-                  <span class="field-error">This board offers no clear_watchdog_trip function.</span
+                  <span class="field-error"
+                    >This device offers no clear_watchdog_trip function.</span
                   >
                 {:else if tripCleared}
                   <span class="field-note">Done: the trip is cleared.</span>
@@ -1701,7 +1702,7 @@
                       disabled={tripRunning}
                       onclick={releaseBrakes}
                     >
-                      Confirm — releases both brakes
+                      Confirm: releases both brakes
                     </button>
                     <button
                       type="button"

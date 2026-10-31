@@ -1,5 +1,5 @@
 /**
- * schema.ts — pure JSON-Schema interpreter for provider --config-schema envelopes (#270).
+ * schema.ts: pure JSON-Schema interpreter for provider --config-schema envelopes (#270).
  *
  * Understands the subset of Draft 2020-12 the anolis provider SDK emits
  * (see anolis-provider-sdk docs/config-schema.md): object/array/scalar types,
@@ -101,7 +101,7 @@ export function isI2cField(schema: SchemaNode): boolean {
   return schema["x-anolis-type"] === "i2c_address";
 }
 
-/** oneOf where every branch is {const, title?} — the SDK's titled enum idiom. */
+/** oneOf where every branch is {const, title?}: the SDK's titled enum idiom. */
 export function enumOptions(schema: SchemaNode): EnumOption[] | null {
   const oneOf = schema.oneOf;
   if (!Array.isArray(oneOf) || oneOf.length === 0) return null;
@@ -119,7 +119,7 @@ export function enumOptions(schema: SchemaNode): EnumOption[] | null {
 
 /**
  * The title of a titled enum's default option, or null: what an absent key
- * means to the provider, shown in place of "— select —" (bread#195).
+ * means to the provider, shown in place of "Select…" (bread#195).
  */
 export function enumDefaultTitle(schema: SchemaNode): string | null {
   const options = enumOptions(schema);
@@ -218,7 +218,7 @@ function ifMatches(condition: UnknownRecord, record: UnknownRecord): boolean {
 /**
  * Seed value for an object schema: declared defaults and consts, required
  * sub-objects (recursively), and empty arrays for object-item arrays.
- * Never invents values — a field without a default stays absent
+ * Never invents values: a field without a default stays absent
  * (x-anolis-placeholder is a hint, not a value).
  */
 export function defaultsFor(schema: SchemaNode): UnknownRecord {
@@ -280,7 +280,7 @@ const I2C_MIN = 0x08;
 const I2C_MAX = 0x77;
 
 /**
- * Inline validation hint for one scalar field. Deliberately shallow —
+ * Inline validation hint for one scalar field. Deliberately shallow:
  * required/enum/pattern/bounds only; the backend envelope pass is
  * authoritative and reports everything else on save.
  */
@@ -411,7 +411,7 @@ export function uniqueViolations(
       for (const dup of duplicatesAsEntered(value, normalized)) {
         violations.push({
           path,
-          message: `Duplicate value ${JSON.stringify(dup)} — values must be unique`,
+          message: `Duplicate value ${JSON.stringify(dup)}: values must be unique`,
         });
       }
     }
@@ -423,7 +423,7 @@ export function uniqueViolations(
         for (const dup of duplicatesAsEntered(present, normalized)) {
           violations.push({
             path,
-            message: `Duplicate ${key} ${JSON.stringify(dup)} — ${key} must be unique`,
+            message: `Duplicate ${key} ${JSON.stringify(dup)}: ${key} must be unique`,
           });
         }
       }
