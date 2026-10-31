@@ -84,6 +84,51 @@ def import_project(handler) -> None:
         handler._json(500, {"error": str(exc)})
 
 
+# A base64 upload of projects.UPLOAD_MAX_BYTES, with its JSON around it.
+UPLOAD_BODY_MAX_BYTES = 4 * 1024 * 1024
+
+
+def import_uploaded_project(handler) -> None:
+    """POST /api/projects/import-upload: import a project folder the browser
+    uploaded (#749). Every path and limit is checked in
+    `projects.import_uploaded_project` before anything is written."""
+    body = handler._body_json(max_bytes=UPLOAD_BODY_MAX_BYTES)
+    if body is None:
+        return
+    requested_name = body.get("name")
+    if requested_name is not None and not isinstance(requested_name, str):
+        handler._json(400, {"error": "name must be a string"})
+        return
+    try:
+        meta, warnings = projects_module.import_uploaded_project(
+            body.get("folder"), body.get("files"), requested_name or None
+        )
+        handler._json(
+            201,
+            {
+                "name": meta["name"],
+                "format": projects_module.FORMAT_MACHINE_PROFILE,
+                "meta": meta,
+                "warnings": warnings,
+            },
+        )
+    except projects_module.ImportValidationError as exc:
+        handler._json(
+            400,
+            {
+                "error": "Machine-profile directory failed import validation",
+                "code": "import_validation_failed",
+                "errors": [
+                    {"source": "import", "code": "import.validation", "path": "$", "message": m} for m in exc.errors
+                ],
+            },
+        )
+    except ValueError as exc:
+        handler._json(409, {"error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 - HTTP boundary
+        handler._json(500, {"error": str(exc)})
+
+
 def get_project(handler, name: str) -> None:
     err = projects_module.validate_name(name)
     if err:
