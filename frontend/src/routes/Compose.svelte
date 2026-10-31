@@ -59,7 +59,7 @@
   // A systemd install runs its own copy, not this workspace's (#730).
   const installedPrefix = $derived(installedFrom(system?.meta));
 
-  // Persisted notes — import checks, and the migrator's record of what it could
+  // Persisted notes: import checks, and the migrator's record of what it could
   // NOT carry over (a dropped provider, an automation variant left behind).
   // These describe data the user lost, so they are shown for every project, not
   // just imported ones.
@@ -88,7 +88,7 @@
    *
    * The behaviour tree itself is authored outside the workbench, so this asks
    * for its path. If the file is not in the project the SAVE is rejected with
-   * a message naming it — better than a profile that quietly references a
+   * a message naming it, better than a profile that quietly references a
    * missing file, which blocks every deploy of the project, manual included.
    */
   let behaviorPath = $state<string>("behaviors/main.xml");
@@ -116,7 +116,7 @@
     markDirty();
   }
 
-  /** Remove it again — without this an automation variant is a one-way door. */
+  /** Remove it again: without this an automation variant is a one-way door. */
   function removeAutomationVariant(): void {
     const doc = editable;
     if (!doc || !doc.variants[AUTOMATION_VARIANT]) return;
@@ -148,7 +148,7 @@
     if (typeof behaviorRef === "string") {
       // Strip the token prefix rather than counting segments: a relpath is not
       // always two deep, and getting it wrong leaves the behaviour declared in
-      // the profile with no variant using it — which blocks the save AND every
+      // the profile with no variant using it, which blocks the save AND every
       // deploy of the project, with no UI able to clear it.
       const prefix = projectPathToken(doc.profile.machine_id, "");
       const rel = behaviorRef.startsWith(prefix) ? behaviorRef.slice(prefix.length) : behaviorRef;
@@ -190,7 +190,7 @@
   <div class="workspace-header">
     <h2>Compose</h2>
     <p>
-      Author the machine profile and its runtime configs. These are the files that get deployed —
+      Author the machine profile and its runtime configs. These are the files that get deployed;
       nothing is generated at deploy time.
     </p>
   </div>
@@ -273,8 +273,8 @@
       </div>
       {#if showAutomationForm && !editable.variants[AUTOMATION_VARIANT]}
         <p class="field-note">
-          The behaviour tree is authored outside the workbench — put the XML in the project
-          directory first, then give its path here. Saving is refused while the file is missing.
+          The behaviour tree is authored outside the workbench. Put the XML in the project directory
+          first, then give its path here. Saving is refused while the file is missing.
         </p>
       {/if}
 

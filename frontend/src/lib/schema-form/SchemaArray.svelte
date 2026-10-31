@@ -21,7 +21,7 @@
   } from "./schema";
 
   /**
-   * SchemaArray.svelte — an array property. Object items render as rows of
+   * SchemaArray.svelte: an array property. Object items render as rows of
    * SchemaFields (device lists); scalar items render as a simple value list
    * (e.g. discovery.addresses). Item keys the schema does not describe are
    * preserved and shown read-only.
@@ -171,7 +171,7 @@
   </div>
   {#if description}<span class="field-note">{description}</span>{/if}
   {#if required && (!value || value.length === 0)}
-    <span class="field-error">Required — add at least one entry.</span>
+    <span class="field-error">Required: add at least one entry.</span>
     {#if requiredReason}<span class="field-note">{requiredReason}</span>{/if}
   {/if}
 

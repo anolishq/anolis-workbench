@@ -280,7 +280,7 @@
             showOnboarding = true;
           }
         } catch {
-          // Non-fatal — just show normal home
+          // Non-fatal: show the normal home
         }
       }
 

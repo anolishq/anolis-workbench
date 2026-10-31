@@ -21,7 +21,7 @@
   } from "./schema";
 
   /**
-   * SchemaField.svelte — one property of a provider config, rendered from its
+   * SchemaField.svelte: one property of a provider config, rendered from its
    * schema node: scalar controls, nested object sections (recursive), and
    * arrays (delegated to SchemaArray). Mutates `parent[key]` in place.
    */
@@ -78,7 +78,7 @@
 
   // Nested object sections whose container doesn't exist yet render into a
   // local draft; the draft is committed to the document on the first child
-  // write. Rendering must never mutate the document — materializing an empty
+  // write. Rendering must never mutate the document: materializing an empty
   // required-members object (e.g. sim's optional provider{name}) would turn a
   // valid config invalid without the user touching anything.
   const draft: UnknownRecord = $state({});
@@ -183,7 +183,7 @@
       onchange={(e: Event) => commit(selectTarget(e).value || undefined)}
     >
       {#if typeof value !== "string" || value === ""}
-        <option value="">{defaultTitle ? `— default: ${defaultTitle} —` : "— select —"}</option>
+        <option value="">{defaultTitle ? `Default: ${defaultTitle}` : "Select…"}</option>
       {/if}
       {#each control.options as option (option.value)}
         <option value={option.value}>{option.title}</option>

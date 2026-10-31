@@ -394,6 +394,6 @@ describe("Commission: the running port (#339)", () => {
         saved: savedOf(savedDoc),
       },
     });
-    expect(screen.getByText(/Running — demo on port/)).toHaveTextContent("port 9090");
+    expect(screen.getByText(/Running demo on port/)).toHaveTextContent("port 9090");
   });
 });

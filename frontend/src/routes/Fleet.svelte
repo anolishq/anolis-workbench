@@ -70,7 +70,7 @@
             <td>{target.name}</td>
             <td>{target.host}</td>
             <td>{target.project}</td>
-            <td>{target.template ?? "—"}</td>
+            <td>{target.template ?? "none"}</td>
           </tr>
         {/each}
       </tbody>

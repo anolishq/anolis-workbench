@@ -226,7 +226,7 @@ describe("ProviderList.svelte", () => {
     const group = (await screen.findByText("Manual addresses")).closest(
       ".schema-array",
     ) as HTMLElement;
-    expect(within(group).getByText("Required — add at least one entry.")).toBeInTheDocument();
+    expect(within(group).getByText("Required: add at least one entry.")).toBeInTheDocument();
     expect(
       within(group).getByText("Required because Discovery mode is 'Manual address list'"),
     ).toBeInTheDocument();

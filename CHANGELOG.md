@@ -13,6 +13,17 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **Plain wording in the UI** (#746). The UI's text has no em dashes: each
+  is a colon, a full stop or a comma now. The machine line and the trip
+  clear say "device", not "board" ("Device tripped: clear the trip on …").
+  Home's import box suggests `/path/to/projects/my-machine`. A schema
+  select's empty option reads "Select…" or "Default: <title>". Empty cells
+  read "none" (Fleet's template) or "not set" (an imported profile's
+  identity), and Commission's version table leaves a missing version blank
+  beside its note. Text only.
+
 ## [0.28.0] - 2026-10-30
 
 Upgrade notes:

@@ -48,7 +48,7 @@ describe('App: the Fleet Dashboard route (#555)', () => {
     await waitFor(() => expect(fleetRequests(fetchMock)).toBe(1));
   });
 
-  it('shows a dash for a target whose project was not made from a template (#621)', async () => {
+  it('shows none for a target whose project was not made from a template (#621)', async () => {
     stubApi([
       { name: 'rig-a', host: 'pi@rig-a', project: 'demo', template: 'sim-quickstart' },
       { name: 'rig-b', host: 'pi@rig-b', project: 'bioreactor-v1-b3' },
@@ -57,7 +57,7 @@ describe('App: the Fleet Dashboard route (#555)', () => {
     render(App);
 
     const imported = (await screen.findByRole('cell', { name: 'bioreactor-v1-b3' })).closest('tr');
-    expect(imported?.lastElementChild).toHaveTextContent('—');
+    expect(imported?.lastElementChild).toHaveTextContent('none');
     const seeded = screen.getByRole('cell', { name: 'demo' }).closest('tr');
     expect(seeded?.lastElementChild).toHaveTextContent('sim-quickstart');
   });
