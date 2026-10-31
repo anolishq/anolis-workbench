@@ -207,4 +207,18 @@ describe("Operate.svelte — the operator panel (#727)", () => {
 
     await waitFor(() => expect(scrolled).toContain(screen.getByTestId("mode-section")));
   });
+
+  it("lands Mode below the sticky software stop, however tall the stop row is (#745)", async () => {
+    scrollSpy();
+    fakeRuntime({ mode: "FAULT" });
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).toHaveTextContent("set MANUAL to recover"),
+    );
+    const stop = document.querySelector(".operate-estop-section") as HTMLElement;
+    vi.spyOn(stop, "getBoundingClientRect").mockReturnValue({ height: 120 } as DOMRect);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Go to Mode" }));
+
+    expect(screen.getByTestId("mode-section").style.scrollMarginTop).toBe("128px");
+  });
 });

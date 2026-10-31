@@ -193,9 +193,15 @@
   };
 
   function goToSection(target: MachineLineTarget) {
-    document
-      .querySelector(`[data-testid="${MACHINE_LINE_SECTIONS[target]}"]`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const section = document.querySelector<HTMLElement>(
+      `[data-testid="${MACHINE_LINE_SECTIONS[target]}"]`,
+    );
+    if (!section) return;
+    // Land below the sticky stop row, measured now: it wraps and grows when
+    // latched (wb#745).
+    const stop = document.querySelector(".operate-estop-section");
+    section.style.scrollMarginTop = `${(stop?.getBoundingClientRect().height ?? 0) + 8}px`;
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   // The profile's operator block (wb#728): absent, the panel shows neither part.
   const operator = $derived(system?.profile?.operator);
@@ -910,7 +916,7 @@
   // What the operator has typed per parameter, until the group is saved.
   let settingsDraft = $state<Record<string, string>>({});
   let settingsErrors = $state<Record<string, string>>({});
-  let settingsFeedback = $state<Record<string, { text: string; cls: string }>>({});
+  let settingsFeedback = $state<Record<string, { text: string; cls: string; title?: string }>>({});
   // Settings reset to the project's defaults on every runtime restart
   // (anolis#681): a falling uptime is a restart, said once until dismissed.
   // Kept across Operate stopping, so a restart from Commission counts too.
@@ -977,11 +983,28 @@
         return;
       }
     }
+    // Refresh before dropping the drafts, or a ticked box shows the old
+    // value until the refresh lands (wb#745).
+    await refreshParametersOnly();
     const drafts = { ...settingsDraft };
     for (const item of group.items) delete drafts[item.parameter];
     settingsDraft = drafts;
-    settingsFeedback = { ...settingsFeedback, [group.group]: { text: "Saved", cls: "field-note" } };
-    await refreshParametersOnly();
+    settingsFeedback = {
+      ...settingsFeedback,
+      [group.group]:
+        mode === "AUTO"
+          ? {
+              text: "Applied",
+              cls: "field-note",
+              title: "The automation is running and uses the new values now.",
+            }
+          : {
+              text: "Saved",
+              cls: "field-note",
+              title:
+                "Saved in the runtime. The settings take effect when the automation runs (AUTO).",
+            },
+    };
   }
 
   async function postMode(target: string): Promise<void> {
@@ -1455,7 +1478,7 @@
               </span>
               <InfoToggle label="About uncovered functions">
                 {estop.uncovered_actuating_functions} actuating function(s) the software stop will not
-                drive.
+                drive: a software stop leaves those outputs as they were.
               </InfoToggle>
             {/if}
           {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
@@ -1856,7 +1879,9 @@
             {/each}
             <button type="submit" class="btn-secondary btn-sm">Save</button>
             {#if settingsFeedback[group.group]}
-              <span class={settingsFeedback[group.group].cls}
+              <span
+                class={settingsFeedback[group.group].cls}
+                title={settingsFeedback[group.group].title}
                 >{settingsFeedback[group.group].text}</span
               >
             {/if}
