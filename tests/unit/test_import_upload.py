@@ -131,6 +131,22 @@ def test_the_same_path_twice_is_refused(systems_root: pathlib.Path) -> None:
     assert _staged(systems_root) == []
 
 
+@pytest.mark.parametrize("order", ["file first", "dir first"])
+def test_a_path_that_is_both_a_file_and_a_directory_is_refused(systems_root: pathlib.Path, order: str) -> None:
+    pair = [
+        {"path": "extra", "content": base64.b64encode(b"x").decode()},
+        {"path": "extra/inner.txt", "content": base64.b64encode(b"y").decode()},
+    ]
+    files = _files(FIXTURE) + (pair if order == "file first" else pair[::-1])
+
+    with pytest.raises(projects.ImportValidationError) as exc:
+        projects.import_uploaded_project("imported-profile", files, "rig-a")
+
+    assert "extra" in exc.value.errors[0]
+    assert not (systems_root / "rig-a").exists()
+    assert _staged(systems_root) == []
+
+
 def test_a_folder_that_fails_validation_is_not_imported_and_leaves_no_staging(systems_root: pathlib.Path) -> None:
     files = [f for f in _files(FIXTURE) if not f["path"].startswith("behaviors/")]
 

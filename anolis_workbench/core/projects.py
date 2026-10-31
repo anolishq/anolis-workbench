@@ -555,8 +555,8 @@ def import_uploaded_project(folder: object, files: object, name: str | None = No
 
     `files` holds `{"path", "content"}` entries: a path relative to the folder
     and the file's bytes in base64. Every entry is checked, and the limits
-    applied, before anything is written. The files go to a fresh private
-    directory under the data dir, which is validated and imported as a path
+    applied, before anything is written. The files go to `project/` in a fresh
+    private directory under the data dir, which is validated and imported as a path
     import is, then removed whatever happened. The staging directory is the
     workbench's own, not a caller-supplied path, so the import-root
     allowlist does not apply to it (as for sync_installed_project).
@@ -591,29 +591,41 @@ def import_uploaded_project(folder: object, files: object, name: str | None = No
         if total > UPLOAD_MAX_BYTES:
             raise ImportValidationError([f"The upload is over {UPLOAD_MAX_BYTES} bytes, the limit"])
         decoded[parts] = data
+    for parts in decoded:
+        for depth in range(1, len(parts)):
+            if parts[:depth] in decoded:
+                raise ImportValidationError(
+                    [f"Refused upload path {'/'.join(parts[:depth])!r}: both a file and a directory"]
+                )
 
     staging_root = SYSTEMS_ROOT.parent / "upload-staging"
     staging_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     staging = pathlib.Path(tempfile.mkdtemp(dir=staging_root))
     try:
-        source = staging / folder
+        # A fixed, server-chosen name: the folder's name is only metadata, the
+        # deploy directory name and the default project name.
+        source = staging / "project"
         base = os.path.realpath(source)
         for parts, data in decoded.items():
-            target = source.joinpath(*parts)
-            if os.path.commonpath([os.path.realpath(target), base]) != base:
+            target = os.path.normpath(os.path.join(base, *parts))
+            if not target.startswith(base + os.sep):
                 raise ImportValidationError([f"Refused upload path {'/'.join(parts)!r}: outside the folder"])
-            target.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "xb") as fh:
                 fh.write(data)
-        return _import_verbatim(source, name, {"imported_from": f"browser upload ({folder})"})
+        return _import_verbatim(source, name, {"imported_from": f"browser upload ({folder})"}, profile_dir_name=folder)
     finally:
         paths_module.rmtree_within(staging, staging_root, ignore_errors=True)
 
 
-def _import_verbatim(source: pathlib.Path, name: str, extra_meta: dict) -> tuple[dict, list[str]]:
+def _import_verbatim(
+    source: pathlib.Path, name: str, extra_meta: dict, profile_dir_name: str | None = None
+) -> tuple[dict, list[str]]:
     """Copy a validated machine-profile directory into project `name`, which
-    must not exist yet; `extra_meta` is added to the sidecar's meta."""
-    profile_dir_name = source.name
+    must not exist yet; `extra_meta` is added to the sidecar's meta.
+    `profile_dir_name`, the deploy directory's name, defaults to the source
+    directory's."""
+    profile_dir_name = profile_dir_name or source.name
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:
         raise ImportValidationError(report.errors)
