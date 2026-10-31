@@ -66,7 +66,7 @@ projects and holds **Create Project** (from a template) and
   them at the installed binaries under `/opt/anolis/bin`. Imported projects can
   be deployed but not run locally or exported.
 - **Operate** drives a running runtime through its HTTP API: an operator panel
-  with the machine's readings and Start/Stop experiment, and under
+  with the machine's readings and Start/Stop run, and under
   Engineering, device state, function calls, mode and the software stop. It
   finds a runtime the workbench started, or the installed one on this machine.
   For a runtime on another machine, start the workbench with

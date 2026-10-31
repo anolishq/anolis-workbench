@@ -12,6 +12,7 @@ import type {
   FunctionArgSpec,
   FunctionSpec,
   OperatorBlock,
+  OperatorRun,
   ParameterDefinition,
   StartRequirement,
   ProviderHealth,
@@ -797,13 +798,18 @@ export function deviceLosses(
   return { latched, lost: latched.filter((handle) => !reachable.has(handle)) };
 }
 
+/** The profile's run block, or its deprecated alias experiment (anolis#696). */
+export function operatorRun(operator: OperatorBlock | undefined): OperatorRun | undefined {
+  return operator?.run ?? operator?.experiment;
+}
+
 /**
- * Why Start experiment would not work, with the fix, or "" (wb#729). Only
+ * Why Start run would not work, with the fix, or "" (wb#729). Only
  * what Operate reads exactly: a brake has no declaration yet (anolis#686).
  * FAULT is refused rather than left by way of MANUAL, which would clear the
  * fault before the operator saw its cause.
  */
-export function experimentStartRefusal(
+export function runStartRefusal(
   status: RuntimeApiStatus | null,
   estop: EstopStatus | null,
   stopChain: StopChainStatus | null,
@@ -962,14 +968,14 @@ export function operatorReadings(
 /**
  * A line per settings group on what is set now (wb#728), from the declared
  * settings and the parameters' values only. A group whose items include one
- * of experiment.start's enable parameters reads on or off from it: on means
+ * of run.start's enable parameters reads on or off from it: on means
  * scheduled, not that its actuator is running now.
  */
 export function operatorSettingsLines(
   operator: OperatorBlock | undefined,
   parameters: ParameterDefinition[],
 ): string[] {
-  const enables = new Set(operator?.experiment?.start?.enable ?? []);
+  const enables = new Set(operatorRun(operator)?.start?.enable ?? []);
   const byName = new Map(parameters.map((p) => [p.name, p]));
   return (operator?.settings ?? []).map((group) => {
     const parts: string[] = [];
@@ -992,7 +998,7 @@ export function signalDevice(signal: string): string {
 }
 
 /**
- * The messages of experiment.start.require entries that do not hold
+ * The messages of run.start.require entries that do not hold
  * (anolis#686), from the state Operate holds per device. A reading that is
  * missing or not OK cannot show the condition holds, so it does not, and the
  * message says which.
