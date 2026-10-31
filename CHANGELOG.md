@@ -52,6 +52,12 @@ Historical note:
 
 ### Fixed
 
+- **The header's status poll is cheaper** (#754). `/api/status` looked for
+  a runtime the workbench did not start by loading each project and the
+  installed config to learn its port, on every 2 s poll: 0.1 to 0.3 s on the
+  rig. The ports are now kept until a file they were read from changes; the
+  probe of each still runs on every poll, so a runtime that stops or starts
+  shows at once.
 - **Operate's settings** (#745). A box ticked and saved no longer flickers
   back to its old value while the values refresh. Save now says "Applied"
   while the runtime is in AUTO, where the automation uses the values at once,
