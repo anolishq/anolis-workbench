@@ -196,6 +196,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/projects/import":
             # Must match before _parse_project_path, or "import" parses as a name.
             compose.import_project(self)
+        elif path == "/api/projects/import-upload":
+            compose.import_uploaded_project(self)
         elif path.startswith("/api/projects/"):
             name, sub = self._parse_project_path(path)
             if sub == "rename":
@@ -302,12 +304,12 @@ class _Handler(BaseHTTPRequestHandler):
         sub = parts[1] if len(parts) > 1 else None
         return name, sub
 
-    def _body_json(self):
+    def _body_json(self, max_bytes: int = 1_048_576):
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             self._json(400, {"error": "Empty body"})
             return None
-        if length > 1_048_576:  # 1 MiB max
+        if length > max_bytes:  # 1 MiB unless the route allows more
             self._json(400, {"error": "Request body too large"})
             return None
         raw = self.rfile.read(length)
