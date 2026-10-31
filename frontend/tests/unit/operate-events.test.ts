@@ -71,6 +71,7 @@ describe("operate-events helpers", () => {
       "mode_change",
       "parameter_change",
       "automation_fault",
+      "automation_call_failed",
       "device_removed",
       "stop_chain_change",
       "stop_chain_mismatch",
@@ -98,6 +99,14 @@ describe("operate-events helpers", () => {
       }),
     ).toBe("target_temp: 20 -> 21");
     expect(describeEvent("automation_fault", { locus: "tick", error: "boom" })).toBe("tick: boom");
+    expect(
+      describeEvent("automation_call_failed", {
+        device_handle: "bread0/dcmt1",
+        function: "pulse_motor",
+        error: "motor1 brake engaged",
+        consecutive_failures: 2,
+      }),
+    ).toBe("bread0/dcmt1 pulse_motor failed 2 times in a row: motor1 brake engaged");
     expect(describeEvent("device_removed", { provider_id: "sim0", device_id: "dev0" })).toBe(
       "sim0/dev0 removed",
     );
@@ -132,7 +141,9 @@ describe("operate-events helpers", () => {
         raised: false,
         reason: "the stop is no longer in force",
       }),
-    ).toBe("stop reaching bread0/dcmt1 again (expect reports_estop): the stop is no longer in force");
+    ).toBe(
+      "stop reaching bread0/dcmt1 again (expect reports_estop): the stop is no longer in force",
+    );
     expect(
       describeEvent("quality_change", {
         provider_id: "sim0",

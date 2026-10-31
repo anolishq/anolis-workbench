@@ -60,6 +60,14 @@ Historical note:
   Profiles carry the list once the workbench vendors the machine-profile
   schema from the anolis release that adds it.
 
+- **Now names failing automation calls** (#728, anolishq/anolis#678). With
+  anolis 0.8.0, Now lists each device call automation keeps failing, such as
+  "bread0/dcmt1 pulse_motor: failed 2 times in a row; last error: motor1
+  brake engaged", from `call_failures` in the automation status and from each
+  `automation_call_failed` event between polls. A call that has succeeded
+  since is not listed. Now shows with a failing call even when the profile
+  declares no settings. The event trace describes the event.
+
 - **The workbench opens on the machine** (#730, part of #232). With an
   installed project (#724), opening the workbench goes straight to its
   Operate; the Home button still shows the project list. Home lists the

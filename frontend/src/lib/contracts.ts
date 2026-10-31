@@ -479,6 +479,18 @@ export interface AutomationStatus extends UnknownRecord {
   last_evaluation_at_epoch_ms: number | null;
   run_id: string | null;
   last_error: string | null;
+  /** Empty from a runtime before anolis 0.8.0, which does not send it. */
+  call_failures: AutomationCallFailure[];
+}
+
+/** A device call automation made that was refused or failed this run (anolis#678). */
+export interface AutomationCallFailure {
+  device_handle: string;
+  function: string;
+  /** In a row; 0 once a call has succeeded since. */
+  consecutive_failures: number;
+  last_error: string;
+  last_failure_at_epoch_ms: number;
 }
 
 export interface ProviderSupervision extends UnknownRecord {

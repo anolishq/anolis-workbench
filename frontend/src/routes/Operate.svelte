@@ -3,6 +3,7 @@
   import { ApiResponseError, fetchJson } from "../lib/api";
   import InfoToggle from "../lib/InfoToggle.svelte";
   import type {
+    AutomationCallFailure,
     AutomationStatus,
     Device,
     DeviceCapabilities,
@@ -29,8 +30,10 @@
     type SavedLaunch,
   } from "../lib/canonical";
   import {
+    applyCallFailedEvent,
     argAllowedValues,
     callErrorText,
+    callFailureLines,
     checkAllowedValue,
     coerceParameterValue,
     deriveOperateAvailability,
@@ -207,6 +210,9 @@
   // Transient automation fault surfaced from an SSE event (a fault is an event,
   // not an execution_status — the next status poll reflects the engine's truth).
   let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
+  // From status on each poll, and from automation_call_failed between polls.
+  let callFailures = $state<AutomationCallFailure[]>([]);
+  const failingCalls = $derived(callFailureLines(callFailures));
   let behaviorTree = $state<string>("");
   // `seq` keys the trace's rows: timestamp_ms comes from the runtime, and
   // events from one poll share it.
@@ -317,6 +323,7 @@
     runtimeStatusData = null;
     automationStatus = null;
     automationFault = null;
+    callFailures = [];
     behaviorTree = "";
     modeSelectorDirty = false;
     modeFixedReason = "";
@@ -422,6 +429,7 @@
     stopChain = rtRes.status === "fulfilled" ? extractStopChain(rtRes.value) : stopChain;
     parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
+    callFailures = automationStatus?.call_failures ?? [];
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
   }
 
@@ -1101,6 +1109,8 @@
     else if (eventType === "mode_change") consumeModeChangeEvent(payload);
     else if (eventType === "parameter_change") void refreshParametersOnly();
     else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
+    else if (eventType === "automation_call_failed")
+      callFailures = applyCallFailedEvent(callFailures, payload);
     else if (eventType === "device_removed") consumeDeviceRemovedEvent(payload);
     else if (eventType === "stop_chain_change" || eventType === "stop_chain_mismatch")
       void refreshEstopOnly();
@@ -1729,14 +1739,21 @@
       </div>
     {/if}
 
-    {#if operator?.settings?.length}
+    {#if operator?.settings?.length || (operator && failingCalls.length)}
       <!-- What is set now, per settings group (wb#728): on is scheduled, not
-           running. Nothing here says whether an actuator is moving. -->
+           running. Nothing here says whether an actuator is moving. Below
+           them, each automation call failing now (anolis#678). -->
       <div class="operate-section" data-testid="operator-now">
         <h3>Now</h3>
         <ul class="operator-now">
           {#each operatorSettingsLines(operator, parameters) as line, i (i)}
             <li>{line}</li>
+          {/each}
+          <!-- Keyed by the line: with an index key the text stayed stale
+               when a second event changed it in place. Lines are unique, as
+               the runtime keeps one entry per device and function. -->
+          {#each failingCalls as line (line)}
+            <li class="field-error" data-testid="call-failure">{line}</li>
           {/each}
         </ul>
       </div>

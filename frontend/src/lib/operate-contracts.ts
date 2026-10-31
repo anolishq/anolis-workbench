@@ -1,6 +1,7 @@
 // operate-contracts.ts — data extraction / normalization for the Operate workspace
 
 import type {
+  AutomationCallFailure,
   AutomationStatus,
   AutomationVersion,
   Device,
@@ -271,7 +272,54 @@ export function extractAutomationStatus(payload: unknown): AutomationStatus {
     last_evaluation_at_epoch_ms: toFinite(r.last_evaluation_at_epoch_ms) ?? null,
     run_id: typeof r.run_id === "string" && r.run_id.trim() ? r.run_id : null,
     last_error: typeof r.last_error === "string" && r.last_error.trim() ? r.last_error : null,
+    call_failures: asArray(r.call_failures).map((f) => {
+      const c = asObject(f);
+      return {
+        device_handle: String(c.device_handle ?? ""),
+        function: String(c.function ?? ""),
+        consecutive_failures: toFinite(c.consecutive_failures) ?? 0,
+        last_error: String(c.last_error ?? ""),
+        last_failure_at_epoch_ms: toFinite(c.last_failure_at_epoch_ms) ?? 0,
+      };
+    }),
   };
+}
+
+/**
+ * `call_failures` with an `automation_call_failed` event applied, so a
+ * failure shows between status polls. The event replaces the entry for its
+ * device and function, or adds one. A success sends no event; the next poll
+ * shows it.
+ */
+export function applyCallFailedEvent(
+  failures: AutomationCallFailure[],
+  payload: UnknownRecord,
+): AutomationCallFailure[] {
+  const entry: AutomationCallFailure = {
+    device_handle: String(payload.device_handle ?? ""),
+    function: String(payload.function ?? ""),
+    consecutive_failures: toFinite(payload.consecutive_failures) ?? 0,
+    last_error: String(payload.error ?? ""),
+    last_failure_at_epoch_ms: toFinite(payload.timestamp_ms) ?? 0,
+  };
+  const same = (f: AutomationCallFailure) =>
+    f.device_handle === entry.device_handle && f.function === entry.function;
+  return failures.some(same) ? failures.map((f) => (same(f) ? entry : f)) : [...failures, entry];
+}
+
+/**
+ * A line per automation call failing now (anolis#678): which call, its
+ * failures in a row, and its last error. A call that has succeeded since its
+ * last failure is not failing.
+ */
+export function callFailureLines(failures: AutomationCallFailure[]): string[] {
+  return failures
+    .filter((f) => f.consecutive_failures > 0)
+    .map((f) => {
+      const times =
+        f.consecutive_failures === 1 ? "once" : `${f.consecutive_failures} times in a row`;
+      return `${f.device_handle} ${f.function}: failed ${times}; last error: ${f.last_error}`;
+    });
 }
 
 export function extractAutomationTree(payload: unknown): string {
