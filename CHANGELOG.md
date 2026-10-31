@@ -20,7 +20,10 @@ Historical note:
   already gets, drawn as plain SVG. It starts empty when the page loads (no
   backfill; long history stays in Grafana), adds a point only when the
   reading's own timestamp moves, and leaves a gap where the reading was
-  stale, faulted or unavailable.
+  stale, faulted or unavailable. The line spans at least ten steps of the
+  reading's declared decimals (0.1 without them), so a reading moving by its
+  last digit draws near flat, and the window's high and low are labelled
+  beside it.
 
 ### Changed
 

@@ -4,7 +4,9 @@ import {
   pushSample,
   readingSamples,
   SPARKLINE_WINDOW_MS,
+  sparklineMinSpan,
   sparklinePath,
+  sparklineRange,
 } from "../../src/lib/sparkline";
 
 // wb#747: each declared reading keeps its last ten minutes in the browser,
@@ -74,6 +76,42 @@ describe("sparklinePath", () => {
         20,
       ),
     ).toBe("M0 10 L10 10");
+  });
+});
+
+describe("sparklinePath's minimum span (wb#747)", () => {
+  it("draws a flat-but-noisy series near flat, not as full-height swings", () => {
+    const noisy = [5.43, 5.44, 5.43, 5.44, 5.43].map((v, t) => ({ t, v }));
+    const d = sparklinePath(noisy, 100, 20, sparklineMinSpan(2));
+    const ys = [...d.matchAll(/[ML]\S+ (\S+)/g)].map((m) => Number(m[1]));
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(2);
+    expect(Math.min(...ys)).toBeGreaterThan(8);
+    expect(Math.max(...ys)).toBeLessThan(12);
+  });
+
+  it("uses the values' own span once it is wider than the minimum", () => {
+    const wide = [0, 10].map((v, t) => ({ t, v }));
+    expect(sparklinePath(wide, 10, 20, sparklineMinSpan(2))).toBe("M0 20 L10 0");
+  });
+
+  it("is ten steps of the declared decimals, or 0.1 without them", () => {
+    expect(sparklineMinSpan(2)).toBeCloseTo(0.1);
+    expect(sparklineMinSpan(1)).toBeCloseTo(1);
+    expect(sparklineMinSpan(0)).toBe(10);
+    expect(sparklineMinSpan(undefined)).toBeCloseTo(0.1);
+  });
+});
+
+describe("sparklineRange", () => {
+  it("is the window's lowest and highest value, gaps left out", () => {
+    expect(
+      sparklineRange([
+        { t: 0, v: 5.43 },
+        { t: 1, v: null },
+        { t: 2, v: 5.47 },
+      ]),
+    ).toEqual({ lo: 5.43, hi: 5.47 });
+    expect(sparklineRange([{ t: 0, v: null }])).toBeNull();
   });
 });
 

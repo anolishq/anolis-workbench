@@ -2,7 +2,14 @@
   import { onDestroy, untrack } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
   import InfoToggle from "../lib/InfoToggle.svelte";
-  import { pushSample, readingSamples, type Sample, sparklinePath } from "../lib/sparkline";
+  import {
+    pushSample,
+    readingSamples,
+    type Sample,
+    sparklineMinSpan,
+    sparklinePath,
+    sparklineRange,
+  } from "../lib/sparkline";
   import type {
     AutomationCallFailure,
     AutomationStatus,
@@ -1775,18 +1782,32 @@
         <h3>Readings</h3>
         <ul class="operator-readings">
           {#each readings as r, i (i)}
-            {@const signal = operator?.readings?.[i]?.signal ?? ""}
+            {@const declared = operator?.readings?.[i]}
+            {@const signal = declared?.signal ?? ""}
+            {@const history = readingHistory[signal] ?? []}
+            {@const range = history.length > 1 ? sparklineRange(history) : null}
             <li class="operator-reading" data-testid="operator-reading">
               <span class="operator-reading-label">{r.label}</span>
               <span class="operator-reading-value">{r.text}</span>
-              <svg
-                class="operator-sparkline"
-                data-testid="sparkline"
-                viewBox="0 0 120 24"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-                ><path d={sparklinePath(readingHistory[signal] ?? [], 120, 24)} /></svg
-              >
+              <span class="operator-sparkline-row">
+                <svg
+                  class="operator-sparkline"
+                  data-testid="sparkline"
+                  viewBox="0 0 120 24"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                  ><path
+                    d={sparklinePath(history, 120, 24, sparklineMinSpan(declared?.decimals))}
+                  /></svg
+                >
+                {#if range}
+                  <!-- The window's high over its low (wb#747). -->
+                  <span class="operator-sparkline-range" data-testid="sparkline-range">
+                    <span>{range.hi.toFixed(declared?.decimals ?? 2)}</span>
+                    <span>{range.lo.toFixed(declared?.decimals ?? 2)}</span>
+                  </span>
+                {/if}
+              </span>
               {#if r.note}<span class="field-error operator-reading-note">{r.note}</span>{/if}
             </li>
           {/each}

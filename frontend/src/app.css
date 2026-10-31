@@ -1553,6 +1553,21 @@ body {
   width: 120px;
   height: 24px;
 }
+.operator-sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.operator-sparkline-range {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 24px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 .operator-sparkline path {
   fill: none;
   stroke: currentColor;

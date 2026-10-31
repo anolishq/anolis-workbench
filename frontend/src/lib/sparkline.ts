@@ -21,17 +21,40 @@ export function pushSample(history: Sample[], sample: Sample): Sample[] {
 }
 
 /**
- * SVG path data over a `width` x `height` box: time across, value up. A null
- * point ends a segment, so a stale or faulted stretch is a gap. Under two
- * points there is no line.
+ * The least value span a sparkline is drawn over: ten steps of the reading's
+ * declared decimals, or 0.1 without them. A reading that moves by its last
+ * digit then draws near flat instead of as full-height swings.
  */
-export function sparklinePath(history: Sample[], width: number, height: number): string {
-  if (history.length < 2) return "";
+export function sparklineMinSpan(decimals: number | undefined): number {
+  return 10 * 10 ** -(decimals ?? 2);
+}
+
+/** The window's lowest and highest value, gaps left out, or null with none. */
+export function sparklineRange(history: Sample[]): { lo: number; hi: number } | null {
+  const values = history.map((s) => s.v).filter((v): v is number => v !== null);
+  return values.length ? { lo: Math.min(...values), hi: Math.max(...values) } : null;
+}
+
+/**
+ * SVG path data over a `width` x `height` box: time across, value up, over
+ * the values' span or `minSpan`, whichever is wider, centred on the values.
+ * A null point ends a segment, so a stale or faulted stretch is a gap. Under
+ * two points there is no line.
+ */
+export function sparklinePath(
+  history: Sample[],
+  width: number,
+  height: number,
+  minSpan = 0,
+): string {
+  const range = sparklineRange(history);
+  if (history.length < 2 || !range) return "";
   const t0 = history[0].t;
   const span = history[history.length - 1].t - t0 || 1;
-  const values = history.map((s) => s.v).filter((v): v is number => v !== null);
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
+  const mid = (range.lo + range.hi) / 2;
+  const half = Math.max(range.hi - range.lo, minSpan) / 2;
+  const lo = mid - half;
+  const hi = mid + half;
   const round = (n: number) => Math.round(n * 100) / 100;
   const parts: string[] = [];
   let pen = "M";

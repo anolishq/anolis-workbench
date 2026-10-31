@@ -91,6 +91,27 @@ describe("Operate.svelte — a sparkline beside each reading (wb#747)", () => {
     await waitFor(() => expect(line().getAttribute("d")).toMatch(/^M\S+ \S+ L\S+ \S+$/));
   });
 
+  it("labels the line with the window's low and high, at the reading's decimals", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const reads = [
+      { value: 6.5, quality: "OK", stamp: 1000 },
+      { value: 6.7, quality: "OK", stamp: 6000 },
+    ];
+    let i = 0;
+    fakeRuntime(() => reads[Math.min(i++, reads.length - 1)]);
+
+    await waitFor(() => expect(screen.getByTestId("operator-reading")).toHaveTextContent("6.50"));
+    expect(screen.queryByTestId("sparkline-range")).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    const range = await screen.findByTestId("sparkline-range");
+    expect(range).toHaveTextContent("6.70");
+    expect(range).toHaveTextContent("6.50");
+    expect(range.textContent?.indexOf("6.70")).toBeLessThan(
+      range.textContent?.indexOf("6.50") ?? 0,
+    );
+  });
+
   it("adds no point while the reading's own timestamp stands still", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fakeRuntime(() => ({ value: 6.5, quality: "OK", stamp: 1000 }));
