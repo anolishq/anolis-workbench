@@ -67,10 +67,10 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
     ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
     ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
     ['zero', /latches actuation, then tries to drive every actuating function to zero/],
-  ])('under %s: Ready in the row, the rung behind its ⓘ', async (rung, note) => {
+  ])('under %s: Stop ready in the row, the rung behind its ⓘ', async (rung, note) => {
     renderOperate(() => jsonResponse(200, status({ software_safe_state: rung })));
 
-    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Ready'));
+    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
     expect(screen.queryByText(note)).not.toBeInTheDocument();
     await fireEvent.click(info('About the software stop'));
     expect(within(row()).getByText(note)).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
       () => jsonResponse(200, status({ software_safe_state: 'hooks' })),
       () => jsonResponse(503, { status: { code: 'UNAVAILABLE', message: 'Runtime is not running' } }),
     );
-    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Ready'));
+    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
 
     await fireEvent.click(within(row()).getByRole('button', { name: 'SOFTWARE STOP' }));
 
@@ -140,7 +140,7 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
     // startup_safe_state records one past event, reported until the runtime
     // restarts: the chip follows current conditions, and the warning beside
     // it carries the startup failure (wb#692).
-    expect(screen.getByTestId('estop-state').textContent?.trim()).toBe('Ready');
+    expect(screen.getByTestId('estop-state').textContent?.trim()).toBe('Stop ready');
   });
 
   it('keeps an achieved startup safe state out of the row, in Runtime Status', async () => {
@@ -169,7 +169,7 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
   it('opens a detail from the keyboard and closes it with Escape', async () => {
     renderOperate(() => jsonResponse(200, status({ software_safe_state: 'hooks' })));
-    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Ready'));
+    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
     const toggle = info('Why this is not an emergency stop');
 
     // A native button: in the tab order, and a browser activates it with

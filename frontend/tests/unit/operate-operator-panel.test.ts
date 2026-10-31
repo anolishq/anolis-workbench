@@ -78,16 +78,19 @@ describe("operatorSettingsLines", () => {
     { name: "dose_interval_s", type: "int64", value: 20 },
   ];
 
-  it("puts the enable's on or off first, then each value with its unit", () => {
-    expect(operatorSettingsLines(OPERATOR, params(true))).toEqual([
-      "Dose: on, Every 20 s",
-      "Missing: Value --",
-    ]);
-    expect(operatorSettingsLines(OPERATOR, params(false))[0]).toBe("Dose: off, Every 20 s");
+  // wb#748: Now says what is happening, not the schedule Settings holds:
+  // each group with an enable on or off, and its main value only while on.
+  it("says on with the group's main value, or off alone", () => {
+    expect(operatorSettingsLines(OPERATOR, params(true))).toEqual(["Dose: on, Every 20 s"]);
+    expect(operatorSettingsLines(OPERATOR, params(false))).toEqual(["Dose: off"]);
+  });
+
+  it("leaves out a group with no enable, which says nothing about what is happening", () => {
+    expect(operatorSettingsLines(OPERATOR, params(true)).join("\n")).not.toContain("Missing");
   });
 
   it("reads an enable the runtime does not report as unknown", () => {
-    expect(operatorSettingsLines(OPERATOR, [])[0]).toBe("Dose: --, Every -- s");
+    expect(operatorSettingsLines(OPERATOR, [])).toEqual(["Dose: --"]);
   });
 
   it("is empty without settings", () => {
