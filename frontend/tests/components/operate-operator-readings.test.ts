@@ -205,7 +205,7 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
   it("shows neither without an operator block", async () => {
     fakeRuntime({ operator: null });
 
-    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("running"));
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Running."));
     expect(screen.queryByTestId("operator-readings")).toBeNull();
     expect(screen.queryByTestId("operator-now")).toBeNull();
   });

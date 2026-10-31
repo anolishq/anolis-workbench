@@ -70,10 +70,10 @@ describe("machineLine (wb#727)", () => {
     expect(machineLine(status("MANUAL"), null, null, []).state).toBe("ready");
   });
 
-  it("says the experiment is running in AUTO", () => {
+  it("says the machine is running in AUTO", () => {
     expect(machineLine(status("AUTO"), null, null, [])).toMatchObject({
       state: "running",
-      text: "Experiment running.",
+      text: "Running.",
     });
   });
 

@@ -911,7 +911,7 @@ export function machineLine(
       "Go to Mode",
     );
   }
-  if (status.mode === "AUTO") return line("running", "Experiment running.");
+  if (status.mode === "AUTO") return line("running", "Running.");
   return line("ready", "Ready.");
 }
 

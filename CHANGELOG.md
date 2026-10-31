@@ -46,7 +46,8 @@ Historical note:
   journal (no `runtime.data_dir`) both still run and say the run is not
   recorded. The profile's `operator.run` is read, and the deprecated
   `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
-  profile schema knows `operator.run`.
+  profile schema knows `operator.run`. The machine line reads "Running." in
+  AUTO, where it read "Experiment running.".
 - **Start respects the On switches** (anolishq/anolis#701). Start run no
   longer sets the profile's `start.enable` parameters true: it runs with the
   groups the operator ticked On, and refuses ("Refused: nothing is switched
