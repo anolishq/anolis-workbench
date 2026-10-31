@@ -26,6 +26,7 @@ export const DEFAULT_SSE_EVENT_TYPES = [
   "mode_change",
   "parameter_change",
   "automation_fault",
+  "automation_call_failed",
   "device_removed",
   "stop_chain_change",
   "stop_chain_mismatch",
@@ -83,6 +84,11 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     const locusRaw = payload.locus ?? payload.node;
     const locus = typeof locusRaw === "string" && locusRaw !== "" ? `${locusRaw}: ` : "";
     return `${locus}${payload.error ?? "Unknown automation fault"}`;
+  }
+  if (eventType === "automation_call_failed") {
+    const n = Number(payload.consecutive_failures) || 0;
+    const times = n === 1 ? "once" : `${n} times in a row`;
+    return `${payload.device_handle ?? "device"} ${payload.function ?? "function"} failed ${times}: ${payload.error ?? "Unknown error"}`;
   }
   if (eventType === "stop_chain_change") {
     const reason =

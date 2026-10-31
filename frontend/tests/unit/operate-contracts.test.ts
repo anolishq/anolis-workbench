@@ -201,6 +201,7 @@ describe("operate-contracts extractors", () => {
       last_evaluation_at_epoch_ms: 1234,
       run_id: "01J0RUN",
       last_error: null,
+      call_failures: [],
     });
 
     // Unknown / missing fields normalize to neutral defaults; a null
@@ -217,6 +218,7 @@ describe("operate-contracts extractors", () => {
       last_evaluation_at_epoch_ms: null,
       run_id: null,
       last_error: null,
+      call_failures: [],
     });
 
     expect(extractAutomationTree({ tree: "<BehaviorTree/>" })).toBe("<BehaviorTree/>");
@@ -442,6 +444,34 @@ describe("RUNTIME_MODES contract", () => {
 
     const contractModes = (match as RegExpMatchArray)[1].split(",").map((m) => m.trim());
     expect([...RUNTIME_MODES]).toEqual(contractModes);
+  });
+});
+
+describe("call_failures (anolis#678)", () => {
+  const failure = {
+    device_handle: "bread0/dcmt1",
+    function: "pulse_motor",
+    consecutive_failures: 2,
+    last_error: "motor1 brake engaged",
+    last_failure_at_epoch_ms: 1_700_000_000_000,
+  };
+
+  it("extractAutomationStatus reads each entry of call_failures", () => {
+    expect(extractAutomationStatus({ call_failures: [failure] }).call_failures).toEqual([failure]);
+  });
+
+  it("reads every field AutomationCallFailure requires in the vendored contract", () => {
+    const contract = readFileSync(
+      fileURLToPath(new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url)),
+      "utf8",
+    );
+    const match = contract.match(
+      /AutomationCallFailure:\s*\n(?:.*\n)*?\s*required:\s*\[([^\]]+)\]/,
+    );
+    expect(match, "AutomationCallFailure not found in contract").not.toBeNull();
+    const required = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
+    const [read] = extractAutomationStatus({ call_failures: [failure] }).call_failures;
+    expect(Object.keys(read).sort()).toEqual([...required].sort());
   });
 });
 
@@ -712,7 +742,11 @@ describe("extractStopChain (wb#631)", () => {
     const read = extractStopChain({
       stop_chain: {
         ...chain,
-        expectations: { "bread0/dcmt0": "power_loss", "bread0/dcmt1": "sometimes", "bread0/rlht0": 3 },
+        expectations: {
+          "bread0/dcmt0": "power_loss",
+          "bread0/dcmt1": "sometimes",
+          "bread0/rlht0": 3,
+        },
         mismatches: [{ reason: "no device" }, { device: "bread0/dcmt0", expect: "power_loss" }],
       },
     });
@@ -737,12 +771,25 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
         safe_state_achieved: achieved,
         failed_actions: achieved
           ? []
-          : [{ device_handle: "bread0/dcmt0", function: "set_mode", success: false, error: "WATCHDOG_TRIP" }],
+          : [
+              {
+                device_handle: "bread0/dcmt0",
+                function: "set_mode",
+                success: false,
+                error: "WATCHDOG_TRIP",
+              },
+            ],
       },
     });
 
   it("is OK only when nothing in the machine state needs attention", () => {
-    expect(summarizeRuntimeHealth(loaded([{ provider_id: "bread0", state: "AVAILABLE" }]), estop(false), startup(true))).toEqual({
+    expect(
+      summarizeRuntimeHealth(
+        loaded([{ provider_id: "bread0", state: "AVAILABLE" }]),
+        estop(false),
+        startup(true),
+      ),
+    ).toEqual({
       label: "OK",
       cls: "ok",
       reasons: [],
@@ -807,7 +854,12 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
         expectations: { "bread0/dcmt1": "reports_estop" },
         expected_losses: [],
         mismatches: [
-          { device: "bread0/dcmt1", expect: "reports_estop", reason: "estop reads false", since_epoch_ms: 1 },
+          {
+            device: "bread0/dcmt1",
+            expect: "reports_estop",
+            reason: "estop reads false",
+            since_epoch_ms: 1,
+          },
         ],
         since_epoch_ms: null,
       },
@@ -853,7 +905,12 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
 });
 
 describe("allowed_values on function args (wb#576)", () => {
-  const mode = { name: "mode", type: "string", required: true, allowed_values: ["open_loop", "closed_speed"] };
+  const mode = {
+    name: "mode",
+    type: "string",
+    required: true,
+    allowed_values: ["open_loop", "closed_speed"],
+  };
 
   it("accepts a value in the set and refuses one outside it, case included", () => {
     expect(() => checkAllowedValue(mode, "closed_speed")).not.toThrow();
@@ -863,7 +920,9 @@ describe("allowed_values on function args (wb#576)", () => {
   });
 
   it("leaves an unconstrained string, and a non-string arg, unchecked", () => {
-    expect(() => checkAllowedValue({ name: "label", type: "string", required: false }, "x")).not.toThrow();
+    expect(() =>
+      checkAllowedValue({ name: "label", type: "string", required: false }, "x"),
+    ).not.toThrow();
     const count = { name: "n", type: "int64", required: true, allowed_values: ["1"] };
     expect(argAllowedValues(count)).toEqual([]);
     expect(() => checkAllowedValue(count, "2")).not.toThrow();

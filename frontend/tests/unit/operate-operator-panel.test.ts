@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { DeviceStateValue, OperatorBlock, ParameterDefinition } from "../../src/lib/contracts";
+import type {
+  AutomationCallFailure,
+  DeviceStateValue,
+  OperatorBlock,
+  ParameterDefinition,
+} from "../../src/lib/contracts";
 import {
+  applyCallFailedEvent,
+  callFailureLines,
   operatorReadings,
   operatorSettingsLines,
   signalDevice,
@@ -144,5 +151,63 @@ describe("unmetStartRequirements", () => {
 
   it("reads the device from provider/device/signal", () => {
     expect(signalDevice("bread0/dcmt1/motor1_brake")).toBe("bread0/dcmt1");
+  });
+});
+
+// anolis#678: the automation calls failing now, from status and events.
+describe("callFailureLines", () => {
+  const failure = (n: number, fn = "pulse_motor"): AutomationCallFailure => ({
+    device_handle: "bread0/dcmt1",
+    function: fn,
+    consecutive_failures: n,
+    last_error: "motor1 brake engaged",
+    last_failure_at_epoch_ms: 1,
+  });
+
+  it("names the call, its failures in a row and its last error", () => {
+    expect(callFailureLines([failure(1), failure(3, "set_pwm")])).toEqual([
+      "bread0/dcmt1 pulse_motor: failed once; last error: motor1 brake engaged",
+      "bread0/dcmt1 set_pwm: failed 3 times in a row; last error: motor1 brake engaged",
+    ]);
+  });
+
+  it("leaves out a call that has succeeded since", () => {
+    expect(callFailureLines([failure(0)])).toEqual([]);
+  });
+});
+
+describe("applyCallFailedEvent", () => {
+  const event = {
+    device_handle: "bread0/dcmt1",
+    function: "pulse_motor",
+    error: "Provider not found: bread0",
+    consecutive_failures: 2,
+    timestamp_ms: 1_700_000_000_000,
+  };
+  const prior: AutomationCallFailure = {
+    device_handle: "bread0/dcmt1",
+    function: "pulse_motor",
+    consecutive_failures: 1,
+    last_error: "motor1 brake engaged",
+    last_failure_at_epoch_ms: 1,
+  };
+  const other: AutomationCallFailure = { ...prior, function: "set_pwm" };
+
+  it("replaces the entry for the same device and function", () => {
+    expect(applyCallFailedEvent([prior, other], event)).toEqual([
+      {
+        device_handle: "bread0/dcmt1",
+        function: "pulse_motor",
+        consecutive_failures: 2,
+        last_error: "Provider not found: bread0",
+        last_failure_at_epoch_ms: 1_700_000_000_000,
+      },
+      other,
+    ]);
+  });
+
+  it("adds an entry for a call not failing before", () => {
+    expect(applyCallFailedEvent([other], event)).toHaveLength(2);
+    expect(applyCallFailedEvent([], event)[0].function).toBe("pulse_motor");
   });
 });
