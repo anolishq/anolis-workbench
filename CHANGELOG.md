@@ -15,6 +15,8 @@ Historical note:
 
 ### Changed
 
+- **A setting an operator changed reads "changed"** (#232), where it read
+  "set"; one at the project's value still reads "default".
 - **Plain wording in the UI** (#746). The UI's text has no em dashes: each
   is a colon, a full stop or a comma now. The machine line and the trip
   clear say "device", not "board" ("Device tripped: clear the trip on …").

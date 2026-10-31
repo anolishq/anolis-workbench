@@ -1864,7 +1864,7 @@
                 {/if}
                 {#if item.unit}<span>{item.unit}</span>{/if}
                 {#if param?.source === "operator"}
-                  <span class="badge ok">set</span>
+                  <span class="badge ok">changed</span>
                 {:else if param?.source === "default"}
                   <span class="badge unknown">default</span>
                 {/if}
