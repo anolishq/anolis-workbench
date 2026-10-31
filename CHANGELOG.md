@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- **A sparkline beside each operator reading** (#747): the reading's last ten
+  minutes, kept in the browser from the state updates and polls Operate
+  already gets, drawn as plain SVG. It starts empty when the page loads (no
+  backfill; long history stays in Grafana), adds a point only when the
+  reading's own timestamp moves, and leaves a gap where the reading was
+  stale, faulted or unavailable.
+
 ### Changed
 
 - **Plain wording in the UI** (#746). The UI's text has no em dashes: each

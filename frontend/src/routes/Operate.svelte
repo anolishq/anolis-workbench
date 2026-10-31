@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
   import InfoToggle from "../lib/InfoToggle.svelte";
+  import { pushSample, readingSamples, type Sample, sparklinePath } from "../lib/sparkline";
   import type {
     AutomationCallFailure,
     AutomationStatus,
@@ -206,6 +207,25 @@
   // The profile's operator block (wb#728): absent, the panel shows neither part.
   const operator = $derived(system?.profile?.operator);
   const readings = $derived(operatorReadings(operator, deviceStates));
+  // Each declared reading's last ten minutes, by signal (wb#747): a point
+  // when the reading's own timestamp moves, null while it is not OK. Empty
+  // on load, with no backfill.
+  let readingHistory = $state<Record<string, Sample[]>>({});
+  let readingStamps: Record<string, string> = {};
+  $effect(() => {
+    const samples = readingSamples(operator, deviceStates);
+    untrack(() => {
+      const next = { ...readingHistory };
+      let moved = false;
+      for (const s of samples) {
+        if (readingStamps[s.signal] === s.stamp) continue;
+        readingStamps[s.signal] = s.stamp;
+        next[s.signal] = pushSample(next[s.signal] ?? [], { t: Date.now(), v: s.value });
+        moved = true;
+      }
+      if (moved) readingHistory = next;
+    });
+  });
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
   const dispatchableCoverage = $derived(
@@ -344,6 +364,8 @@
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
+    readingHistory = {};
+    readingStamps = {};
   }
 
   async function loadWorkbenchConfig(): Promise<void> {
@@ -1753,9 +1775,18 @@
         <h3>Readings</h3>
         <ul class="operator-readings">
           {#each readings as r, i (i)}
+            {@const signal = operator?.readings?.[i]?.signal ?? ""}
             <li class="operator-reading" data-testid="operator-reading">
               <span class="operator-reading-label">{r.label}</span>
               <span class="operator-reading-value">{r.text}</span>
+              <svg
+                class="operator-sparkline"
+                data-testid="sparkline"
+                viewBox="0 0 120 24"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+                ><path d={sparklinePath(readingHistory[signal] ?? [], 120, 24)} /></svg
+              >
               {#if r.note}<span class="field-error operator-reading-note">{r.note}</span>{/if}
             </li>
           {/each}

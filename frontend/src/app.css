@@ -1548,6 +1548,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* The reading's last ten minutes (wb#747). */
+.operator-sparkline {
+  width: 120px;
+  height: 24px;
+}
+.operator-sparkline path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .operator-now {
   margin: 0;
   padding-left: 18px;
