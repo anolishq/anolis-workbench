@@ -208,7 +208,12 @@
   // not an execution_status — the next status poll reflects the engine's truth).
   let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
   let behaviorTree = $state<string>("");
-  let eventTrace = $state<Array<{ type: string; timestamp_ms: number; details: string }>>([]);
+  // `seq` keys the trace's rows: timestamp_ms comes from the runtime, and
+  // events from one poll share it.
+  let eventTrace = $state<
+    Array<{ type: string; timestamp_ms: number; details: string; seq: number }>
+  >([]);
+  let traceSeq = 0;
 
   let streamStatus = $state<{
     state: string;
@@ -1107,7 +1112,7 @@
     payload: UnknownRecord,
     detailsOverride: string | null = null,
   ): void {
-    const ev = buildTraceEvent(type, payload, Date.now());
+    const ev = { ...buildTraceEvent(type, payload, Date.now()), seq: ++traceSeq };
     if (detailsOverride) ev.details = detailsOverride;
     const buf = [...eventTrace];
     appendEventTrace(buf, ev, EVENT_TRACE_LIMIT);
@@ -2289,7 +2294,7 @@
         <p class="placeholder">No events yet.</p>
       {:else}
         <div class="event-items">
-          {#each [...eventTrace].reverse() as ev (ev.timestamp_ms)}
+          {#each [...eventTrace].reverse() as ev (ev.seq)}
             {@const ts = Number.isFinite(Number(ev.timestamp_ms))
               ? new Date(Number(ev.timestamp_ms)).toLocaleTimeString()
               : "--"}
