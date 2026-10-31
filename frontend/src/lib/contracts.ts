@@ -237,6 +237,8 @@ export interface OperatorBlock {
   readings?: { signal: string; label: string; unit?: string; decimals?: number }[];
   settings?: { group: string; items: { parameter: string; label: string; unit?: string }[] }[];
   run?: OperatorRun;
+  /** Buttons, each increasing an int64 counter parameter by one (anolis#697). */
+  actions?: { label: string; parameter: string }[];
   /** Deprecated alias of run (anolis 0.7.0 and 0.8.0), read when run is absent. */
   experiment?: OperatorRun;
 }

@@ -15,6 +15,14 @@ Historical note:
 
 ### Added
 
+- **Action buttons in the Run section** (anolishq/anolis#697), from the
+  profile's `operator.actions`, such as "Sample now". A press reads the
+  button's int64 counter parameter from the runtime and writes it plus one;
+  a tree turns each increase into one run, for example with
+  `RequestedPulseWindow`. A press refuses, sending nothing, outside AUTO
+  (the tree counts presses only while it runs), or when the runtime does not
+  report the parameter or it is not int64. Needs anolis 0.9.0, whose profile
+  schema knows `operator.actions`.
 - **A sparkline beside each operator reading** (#747): the reading's last ten
   minutes, kept in the browser from the state updates and polls Operate
   already gets, drawn as plain SVG. It starts empty when the page loads (no

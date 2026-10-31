@@ -964,6 +964,55 @@
   let lastUptime: number | null = null;
   let runBusy = $state<boolean>(false);
   let runFeedback = $state<{ text: string; cls: string } | null>(null);
+  let actionBusy = $state<boolean>(false);
+  let actionFeedback = $state<{ text: string; cls: string } | null>(null);
+
+  /**
+   * An operator.actions button (anolis#697): its counter parameter, read
+   * fresh, plus one. A tree reads the increase, for example in
+   * RequestedPulseWindow, and only while the automation runs, so a press
+   * outside AUTO is refused rather than counted toward a later start.
+   */
+  async function pressAction(action: { label: string; parameter: string }): Promise<void> {
+    actionFeedback = null;
+    if (mode !== "AUTO") {
+      actionFeedback = {
+        text: `Refused: ${action.label} runs only in AUTO. Start the run first.`,
+        cls: "field-error",
+      };
+      return;
+    }
+    actionBusy = true;
+    try {
+      await refreshParametersOnly();
+      const param = parameters.find((p) => p.name === action.parameter);
+      if (!param) {
+        actionFeedback = {
+          text: `Refused: the runtime does not report ${action.parameter}.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      if (param.type !== "int64") {
+        actionFeedback = {
+          text: `Refused: ${action.parameter} is not an int64 counter.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      await fetchJson<UnknownRecord>("/v0/parameters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: param.name, value: Number(param.value) + 1 }),
+      });
+      actionFeedback = { text: `${action.label}: requested.`, cls: "field-note" };
+      await refreshParametersOnly();
+    } catch (err) {
+      actionFeedback = { text: `${action.label}: ${callErrorText(err)}`, cls: "field-error" };
+    } finally {
+      actionBusy = false;
+    }
+  }
 
   function noteRestart(status: RuntimeApiStatus | null): void {
     if (!status) return;
@@ -1920,10 +1969,11 @@
       </div>
     {/if}
 
-    {#if run?.start || run?.stop || operator?.settings?.length}
-      <!-- The profile's run and settings, one section (wb#729, anolis#696):
-           Start run and Stop run, then the declared settings, one Save per
-           group. Headed by run.label, "Run" by default. -->
+    {#if run?.start || run?.stop || operator?.actions?.length || operator?.settings?.length}
+      <!-- The profile's run, actions and settings, one section (wb#729,
+           anolis#696, anolis#697): Start run and Stop run, the action
+           buttons, then the declared settings, one Save per group. Headed by
+           run.label, "Run" by default. -->
       <div class="operate-section" data-testid="operator-run">
         <h3>{run?.label ?? "Run"}</h3>
         {#if run?.start || run?.stop}
@@ -1951,6 +2001,23 @@
           <p class="field-note">
             Stop run ends the run; the software stop above stays the emergency control.
           </p>
+        {/if}
+        {#if operator?.actions?.length}
+          <div class="mode-row" data-testid="operator-actions">
+            {#each operator.actions as action, i (i)}
+              <button
+                type="button"
+                class="btn-secondary"
+                disabled={actionBusy}
+                onclick={() => pressAction(action)}>{action.label}</button
+              >
+            {/each}
+            {#if actionFeedback}
+              <span class={actionFeedback.cls} data-testid="action-feedback"
+                >{actionFeedback.text}</span
+              >
+            {/if}
+          </div>
         {/if}
         {#if operator?.settings?.length}
           <div data-testid="operator-settings">

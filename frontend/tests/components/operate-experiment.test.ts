@@ -74,6 +74,8 @@ function fakeRuntime(
     // On, so a plain Start has something switched on (anolis#701).
     { name: "impeller_enable", type: "bool", value: true, source: "default" },
     { name: "impeller_pwm", type: "int64", value: 80, source: "default", min: 0, max: 100 },
+    // A counter an action button increases (anolis#697).
+    { name: "sample_requests", type: "int64", value: 4, source: "default", min: 0, max: 1000000 },
   ];
   for (const [name, value] of Object.entries(opts.switches ?? {})) {
     const p = params.find((x) => x.name === name);
@@ -669,5 +671,90 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     expect(feedback).toHaveTextContent("software stop is latched");
     expect(feedback).not.toHaveTextContent("brake");
     expect(rt.posts).toEqual([]);
+  });
+});
+
+describe("Operate.svelte — the operator's action buttons (anolis#697)", () => {
+  const WITH_ACTIONS = {
+    ...OPERATOR,
+    actions: [{ label: "Sample now", parameter: "sample_requests" }],
+  };
+  const paramPosts = (rt: { posts: Post[] }) =>
+    rt.posts.filter((p) => p.path === "/v0/parameters").map((p) => p.body);
+  const press = async (label: string) => {
+    const actions = await screen.findByTestId("operator-actions");
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).not.toHaveTextContent("--"));
+    await fireEvent.click(within(actions).getByRole("button", { name: label }));
+  };
+
+  it("shows a button per action in the run section", async () => {
+    fakeRuntime({ mode: "AUTO", operator: WITH_ACTIONS });
+
+    const actions = await screen.findByTestId("operator-actions");
+    expect(screen.getByTestId("operator-run")).toContainElement(actions);
+    expect(within(actions).getByRole("button", { name: "Sample now" })).toBeInTheDocument();
+  });
+
+  it("increases the counter by one per press, from the runtime's value", async () => {
+    const rt = fakeRuntime({ mode: "AUTO", operator: WITH_ACTIONS });
+    await press("Sample now");
+    await waitFor(() => expect(paramPosts(rt)).toEqual([{ name: "sample_requests", value: 5 }]));
+    expect(await screen.findByTestId("action-feedback")).toHaveTextContent("Sample now: requested.");
+
+    const button = screen.getByRole("button", { name: "Sample now" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await fireEvent.click(button);
+    await waitFor(() =>
+      expect(paramPosts(rt)).toEqual([
+        { name: "sample_requests", value: 5 },
+        { name: "sample_requests", value: 6 },
+      ]),
+    );
+  });
+
+  it("refuses outside AUTO, sending nothing", async () => {
+    const rt = fakeRuntime({ mode: "MANUAL", operator: WITH_ACTIONS });
+    await press("Sample now");
+
+    expect(await screen.findByTestId("action-feedback")).toHaveTextContent(
+      "Refused: Sample now runs only in AUTO. Start the run first.",
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("refuses a counter the runtime does not report, or one that is not int64", async () => {
+    const rt = fakeRuntime({
+      mode: "AUTO",
+      operator: {
+        ...OPERATOR,
+        actions: [
+          { label: "Missing", parameter: "nope_requests" },
+          { label: "Wrong type", parameter: "dose1_enable" },
+        ],
+      },
+    });
+    await press("Missing");
+    expect(await screen.findByTestId("action-feedback")).toHaveTextContent(
+      "Refused: the runtime does not report nope_requests.",
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Wrong type" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent(
+        "Refused: dose1_enable is not an int64 counter.",
+      ),
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("shows the section for actions alone", async () => {
+    fakeRuntime({ mode: "AUTO", operator: { actions: WITH_ACTIONS.actions } });
+    expect(await screen.findByTestId("operator-actions")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Run" })).toBeInTheDocument();
+  });
+
+  it("shows no actions row without operator.actions", async () => {
+    fakeRuntime({ mode: "AUTO" });
+    await screen.findByTestId("operator-run");
+    expect(screen.queryByTestId("operator-actions")).toBeNull();
   });
 });
