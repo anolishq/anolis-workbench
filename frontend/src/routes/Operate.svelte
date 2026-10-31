@@ -58,6 +58,7 @@
     operatorRun,
     operatorSettingsLines,
     signalDevice,
+    applicableRequirements,
     unmetStartRequirements,
     renderBtOutline,
     runStartRefusal,
@@ -1061,7 +1062,7 @@
       }
       // The profile's own conditions (anolis#686), on signals read now, not
       // up to a poll old.
-      const require = start?.require ?? [];
+      const require = applicableRequirements(start, parameters);
       if (require.length) {
         await loadDeviceStates(require.map((r) => signalDevice(r.signal)));
         const unmet = unmetStartRequirements(require, deviceStates);

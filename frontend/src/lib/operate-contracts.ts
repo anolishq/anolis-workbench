@@ -998,6 +998,26 @@ export function signalDevice(signal: string): string {
 }
 
 /**
+ * The run.start.require entries that apply to this Start (anolis#701): those
+ * without `when`, and those whose `when` parameter reads true at Start. Start
+ * sets every start.enable parameter true, so one of those always applies;
+ * any other must read true now. A parameter the runtime does not report is
+ * not true.
+ */
+export function applicableRequirements(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): StartRequirement[] {
+  const enabled = new Set(start?.enable ?? []);
+  return (start?.require ?? []).filter(
+    (r) =>
+      r.when === undefined ||
+      enabled.has(r.when) ||
+      parameters.find((p) => p.name === r.when)?.value === true,
+  );
+}
+
+/**
  * The messages of run.start.require entries that do not hold
  * (anolis#686), from the state Operate holds per device. A reading that is
  * missing or not OK cannot show the condition holds, so it does not, and the

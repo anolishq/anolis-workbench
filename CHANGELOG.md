@@ -27,6 +27,10 @@ Historical note:
   recorded. The profile's `operator.run` is read, and the deprecated
   `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
   profile schema knows `operator.run`.
+- **Start checks only the conditions that apply** (anolishq/anolis#701). A
+  `require` entry with `when` applies only while that bool parameter is true
+  at Start: when it is one of `start.enable`, which Start sets true, or when
+  it already reads true.
 
 ### Fixed
 

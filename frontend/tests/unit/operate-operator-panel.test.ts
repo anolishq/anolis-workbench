@@ -8,6 +8,7 @@ import type {
 } from "../../src/lib/contracts";
 import {
   applyCallFailedEvent,
+  applicableRequirements,
   callFailureLines,
   operatorReadings,
   operatorSettingsLines,
@@ -92,6 +93,34 @@ describe("operatorSettingsLines", () => {
 
   it("is empty without settings", () => {
     expect(operatorSettingsLines(undefined, params(true))).toEqual([]);
+  });
+});
+
+// anolis#701: a require entry with `when` applies only when that bool
+// parameter reads true at Start. Start sets every start.enable true, so an
+// entry whose `when` is one of them always applies.
+describe("applicableRequirements", () => {
+  const brake = { signal: "bread0/dcmt0/motor1_brake", equals: false, message: "Release the sampler's brake" };
+  const params = (value: boolean): ParameterDefinition[] => [
+    { name: "sample_enable", type: "bool", value },
+  ];
+
+  it("keeps an entry without when", () => {
+    expect(applicableRequirements({ mode: "AUTO", require: [brake] }, params(false))).toEqual([brake]);
+  });
+
+  it("drops an entry whose when parameter is off and Start leaves it off", () => {
+    const entry = { ...brake, when: "sample_enable" };
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, params(false))).toEqual([]);
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, [])).toEqual([]);
+  });
+
+  it("keeps it while the parameter is on, or when Start turns it on", () => {
+    const entry = { ...brake, when: "sample_enable" };
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, params(true))).toEqual([entry]);
+    expect(
+      applicableRequirements({ mode: "AUTO", enable: ["sample_enable"], require: [entry] }, params(false)),
+    ).toEqual([entry]);
   });
 });
 

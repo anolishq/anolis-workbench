@@ -593,6 +593,27 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     expect(rt.posts).toEqual([]);
   });
 
+  it("skips a requirement whose when parameter is off and Start leaves off (anolis#701)", async () => {
+    const operator = {
+      ...REQUIRING,
+      run: {
+        ...REQUIRING.run,
+        start: {
+          ...REQUIRING.run.start,
+          require: [
+            REQUIRING.run.start.require[0],
+            { ...REQUIRING.run.start.require[1], when: "dose2_enable" },
+          ],
+        },
+      },
+    };
+    // Pump 2's brake is on, but dose 2 is off and not among start.enable.
+    const rt = fakeRuntime({ mode: "IDLE", operator, states: brakes(false, true) });
+    await start("Ready");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+  });
+
   it("gives a generic refusal first", async () => {
     const rt = fakeRuntime({
       mode: "IDLE",

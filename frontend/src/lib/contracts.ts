@@ -215,6 +215,8 @@ export interface StartRequirement {
   signal: string;
   equals: boolean | number | string;
   message: string;
+  /** A bool parameter: the condition applies only while it is true at Start (anolis#701). */
+  when?: string;
 }
 
 /** What Start run and Stop run do (anolis#696). */
