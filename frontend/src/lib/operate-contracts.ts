@@ -918,7 +918,7 @@ export interface OperatorReading {
   note: "" | "stale" | "faulted" | "unavailable" | "no reading" | "loading";
 }
 
-function typedNumber(value: unknown): number | null {
+export function typedNumber(value: unknown): number | null {
   if (typeof value === "number") return value;
   const v = asObject(value);
   const n =
