@@ -258,29 +258,85 @@ def _discover_external_runtime() -> dict | None:
     started its runtime. Such a runtime is reported managed=False/external=True,
     so stop()/restart() (which only act on workbench-launched processes) leave
     it untouched — it is owned by systemd, not the workbench.
+
+    The probe runs on every call, so a runtime that stops or starts shows at
+    once; only the ports to probe are kept between calls (wb#754).
     """
+    for project, bind, port in _external_candidates():
+        if _runtime_alive(bind, port):
+            return {
+                "running": True,
+                "project": project,
+                "pid": None,
+                "managed": False,
+                "external": True,
+            }
+    return None
+
+
+# The ports _discover_external_runtime probes, with the key they were read
+# under (wb#754): (key, prefixes, candidates). Finding them loads every
+# project's document and the installed config, which on a Pi made each
+# /api/status poll 0.1-0.3 s.
+_candidates: tuple[tuple, tuple[str, ...], list[tuple[str, str, int]]] | None = None
+
+
+def _stat(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _candidates_key(prefixes: tuple[str, ...]) -> tuple:
+    """Stats of what the candidates were read from: each project's top-level
+    files and config/, and each installed prefix's runtime config."""
+    files: list[tuple] = []
+    try:
+        projects = sorted((e for e in os.scandir(paths_module.SYSTEMS_ROOT) if e.is_dir()), key=lambda e: e.name)
+    except OSError:
+        projects = []
+    for project in projects:
+        for directory in (project.path, os.path.join(project.path, "config")):
+            try:
+                entries = sorted((e for e in os.scandir(directory) if e.is_file()), key=lambda e: e.name)
+            except OSError:
+                continue
+            files.extend((e.path, _stat(e.path)) for e in entries)
+    for prefix in prefixes:
+        path = os.path.join(prefix, "config", "runtime.yaml")
+        files.append((path, _stat(path)))
+    return tuple(files)
+
+
+def _external_candidates() -> list[tuple[str, str, int]]:
+    """(project, bind, port) for each project whose runtime would be on
+    loopback, in project order: the installed project where install.sh's
+    health probe looks (#722), any other at its active variant's http port."""
+    global _candidates
+    cached = _candidates
+    if cached is not None and cached[0] == _candidates_key(cached[1]):
+        return cached[2]
+
     systems_dir = paths_module.SYSTEMS_ROOT
     if not systems_dir.exists():
-        return None
+        _candidates = None
+        return []
 
     from anolis_workbench.core import projects as projects_module
 
+    candidates: list[tuple[str, str, int]] = []
+    prefixes: list[str] = []
     for project_dir in sorted(systems_dir.iterdir()):
         if not project_dir.is_dir():
             continue
+        prefix = projects_module.installed_from(project_dir.name)
+        if prefix is not None:
+            prefixes.append(prefix)
         installed = installed_runtime_target(project_dir.name)
         if installed is not None:
-            # The installed machine's project: the runtime runs install.sh's
-            # copy of the config, so probe it where install.sh's health probe
-            # does (#722).
-            if _runtime_alive(*installed):
-                return {
-                    "running": True,
-                    "project": project_dir.name,
-                    "pid": None,
-                    "managed": False,
-                    "external": True,
-                }
+            candidates.append((project_dir.name, *installed))
             continue
         try:
             document = projects_module.get_project(project_dir.name)
@@ -303,15 +359,9 @@ def _discover_external_runtime() -> dict | None:
         port = http.get("port")
         if not isinstance(port, int):
             continue
-        if _runtime_alive(bind, port):
-            return {
-                "running": True,
-                "project": project_dir.name,
-                "pid": None,
-                "managed": False,
-                "external": True,
-            }
-    return None
+        candidates.append((project_dir.name, bind, port))
+    _candidates = (_candidates_key(tuple(prefixes)), tuple(prefixes), candidates)
+    return candidates
 
 
 def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
