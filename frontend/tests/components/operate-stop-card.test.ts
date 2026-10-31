@@ -97,6 +97,34 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
       ),
     ).toBeInTheDocument();
     expect(row().textContent).not.toMatch(/e-stop/);
+    expect(screen.queryByTestId('estop-uncovered-names')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fault-uncovered-names')).not.toBeInTheDocument();
+  });
+
+  it('names each function the stop and a fault in AUTO leave, behind the ⓘ (anolis 0.9.0)', async () => {
+    renderOperate(() =>
+      jsonResponse(
+        200,
+        status(
+          {
+            software_safe_state: 'hooks',
+            uncovered_actuating_functions: 2,
+            uncovered_functions: ['bread0/dcmt0/motor1_value', 'bread0/dcmt1/motor2_value'],
+          },
+          { fault_uncovered_functions: ['bread0/dcmt0/motor1_value'] },
+        ),
+      ),
+    );
+
+    expect(await screen.findByTestId('estop-coverage')).toHaveTextContent('⚠ 2 not covered');
+    expect(screen.queryByTestId('estop-uncovered-names')).not.toBeInTheDocument();
+    await fireEvent.click(info('About uncovered functions'));
+    expect(within(row()).getByTestId('estop-uncovered-names')).toHaveTextContent(
+      'Not driven by the stop: bread0/dcmt0/motor1_value, bread0/dcmt1/motor2_value',
+    );
+    expect(within(row()).getByTestId('fault-uncovered-names')).toHaveTextContent(
+      'Not driven by a fault in AUTO: bread0/dcmt0/motor1_value',
+    );
   });
 
   it('latched: the same row turns red, keeps the stop, and offers the clear', async () => {
