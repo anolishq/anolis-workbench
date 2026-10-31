@@ -757,6 +757,7 @@ export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | 
 /** The operator panel's one line on what the machine is doing (wb#727). */
 export interface MachineLine {
   state:
+    | "connecting"
     | "unavailable"
     | "emergency_stop"
     | "stopped"
@@ -840,6 +841,14 @@ export function experimentStartRefusal(
  * than the rest of the page. The first state that holds wins, in this order:
  * what blocks every action comes before what one device needs.
  */
+/** The machine line before the first runtime status has settled (wb#754). */
+export const CONNECTING_LINE: MachineLine = {
+  state: "connecting",
+  text: "Connecting to the runtime…",
+  target: null,
+  linkLabel: "",
+};
+
 export function machineLine(
   status: RuntimeApiStatus | null,
   estop: EstopStatus | null,
@@ -906,7 +915,7 @@ export interface OperatorReading {
   /** The value with its unit, or "--" when there is none. */
   text: string;
   /** Empty while the reading is good, else what is wrong with it. */
-  note: "" | "stale" | "faulted" | "unavailable" | "no reading";
+  note: "" | "stale" | "faulted" | "unavailable" | "no reading" | "loading";
 }
 
 function typedNumber(value: unknown): number | null {
@@ -933,11 +942,13 @@ function typedText(value: unknown): string {
 export function operatorReadings(
   operator: OperatorBlock | undefined,
   deviceStates: Record<string, DeviceStateValue[]>,
+  /** Before the first runtime status: a missing reading is loading (wb#754). */
+  loading = false,
 ): OperatorReading[] {
   return (operator?.readings ?? []).map((r) => {
     const [providerId, deviceId, signalId] = r.signal.split("/");
     const sig = deviceStates[`${providerId}/${deviceId}`]?.find((v) => v.signal_id === signalId);
-    if (!sig) return { label: r.label, text: "--", note: "no reading" };
+    if (!sig) return { label: r.label, text: "--", note: loading ? "loading" : "no reading" };
     const n = typedNumber(sig.value);
     const value =
       n !== null && r.decimals !== undefined ? n.toFixed(r.decimals) : typedText(sig.value);

@@ -13,6 +13,16 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Operate says it is connecting until the first status arrives** (#754).
+  The machine line said "The runtime is not answering." while the first
+  runtime status was still on its way; it now says "Connecting to the
+  runtime…", and keeps "not answering" for a status request that failed.
+  Until then Readings say "loading", Now says "Loading…", Settings say
+  "loading…", and Start refuses with "still connecting". A reload of a page
+  keeps its query string, which the first navigation used to drop.
+
 ### Changed
 
 - **Plain wording in the UI** (#746). The UI's text has no em dashes: each

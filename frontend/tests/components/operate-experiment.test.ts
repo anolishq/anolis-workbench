@@ -320,7 +320,9 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
 describe("Operate.svelte — Start and Stop experiment (#729)", () => {
   async function click(name: string) {
     await waitFor(() =>
-      expect(screen.getByTestId("machine-line")).not.toHaveTextContent("not answering"),
+      expect(screen.getByTestId("machine-line")).not.toHaveTextContent(
+        /not answering|Connecting/,
+      ),
     );
     await fireEvent.click(
       within(screen.getByTestId("operator-experiment")).getByRole("button", { name }),
