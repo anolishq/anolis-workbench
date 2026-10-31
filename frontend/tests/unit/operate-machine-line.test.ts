@@ -91,10 +91,10 @@ describe("machineLine (wb#727)", () => {
     expect(line.text).toContain("AUTO is not offered from FAULT");
   });
 
-  it("names a tripped board and links to the trip clear", () => {
+  it("names a tripped device and links to the trip clear", () => {
     expect(machineLine(status("MANUAL"), null, null, ["bread0/dcmt0"])).toMatchObject({
       state: "tripped",
-      text: "Board tripped: clear the trip on bread0/dcmt0.",
+      text: "Device tripped: clear the trip on bread0/dcmt0.",
       target: "watchdog-trips",
     });
   });

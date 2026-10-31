@@ -81,7 +81,7 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
     await fireEvent.click(await within(row()).findByRole("button", { name: "Clear latch…" }));
     await fireEvent.click(
-      within(row()).getByRole("button", { name: "Confirm clear — re-enables actuation" }),
+      within(row()).getByRole("button", { name: "Confirm clear: re-enables actuation" }),
     );
 
     const feedback = await within(row()).findByTestId("estop-feedback");

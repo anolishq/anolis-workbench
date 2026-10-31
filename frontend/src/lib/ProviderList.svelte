@@ -16,7 +16,7 @@
   import { asObject, defaultsFor, properties, type SchemaNode } from "./schema-form/schema";
 
   /**
-   * ProviderList.svelte — provider list with add/remove/kind-switch.
+   * ProviderList.svelte: provider list with add/remove/kind-switch.
    *
    * Provider config is rendered schema-driven from the vendored
    * --config-schema envelopes (#270); this component has no per-kind knowledge.
@@ -24,7 +24,7 @@
    * A provider exists in THREE places that must agree (#255): the machine
    * profile declares it and names its config file, each runtime variant lists
    * it under `providers[]`, and the document carries its config. Add/remove/
-   * rename here keep all three in step — a save that breaks the agreement is
+   * rename here keep all three in step: a save that breaks the agreement is
    * rejected by the backend, and would be rejected by install.sh after that.
    */
   let {
@@ -194,7 +194,7 @@
       const provider = asObject(instance.config?.provider);
       if (provider && provider.name === oldId) provider.name = newId;
     }
-    // The compatibility entry is AUTHORED data with no other editor in the UI —
+    // The compatibility entry is AUTHORED data with no other editor in the UI;
     // re-keying an id must carry it, not reset it to local-build/unspecified.
     const carried = compatEntries()[oldId];
     undeclare(oldId);
@@ -220,7 +220,7 @@
     // The old kind's compatibility entry describes a provider this instance no
     // longer is. Component PINS are left alone: they are authored data (a fork
     // or an air-gapped mirror lives in `repo`), and install.sh only warns about
-    // one nothing runs — whereas dropping it silently re-points a later
+    // one nothing runs, whereas dropping it silently re-points a later
     // re-pin at the upstream repo.
     compatEntries()[id] = { strategy: "local-build", version: "unspecified" };
     declare(id, newKind, compatEntries()[id]);
@@ -260,7 +260,7 @@
 
   {#if providerSchemas === null}
     <p class="muted">
-      Provider schemas are unavailable — provider configuration cannot be edited right now.
+      Provider schemas are unavailable, so provider configuration cannot be edited right now.
     </p>
   {/if}
 

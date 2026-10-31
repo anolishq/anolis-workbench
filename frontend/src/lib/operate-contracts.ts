@@ -1,4 +1,4 @@
-// operate-contracts.ts — data extraction / normalization for the Operate workspace
+// operate-contracts.ts: data extraction / normalization for the Operate workspace
 
 import type {
   AutomationCallFailure,
@@ -27,7 +27,7 @@ import type {
 /**
  * Runtime modes accepted by `POST /v0/mode` and reported by `GET /v0/mode`.
  * MUST stay in sync with the `RuntimeMode` enum in the vendored runtime-http
- * OpenAPI contract — a unit test guards against drift.
+ * OpenAPI contract; a unit test guards against drift.
  */
 export const RUNTIME_MODES = ["MANUAL", "AUTO", "IDLE", "FAULT"] as const;
 
@@ -391,7 +391,7 @@ export function versionAtLeast(version: string | null | undefined, min: string):
 
 /**
  * Normalize a software-safe-state value. An unrecognized value degrades to the
- * *weakest* claim ("none") — the UI must never advertise a stop rung the runtime
+ * *weakest* claim ("none"): the UI must never advertise a stop rung the runtime
  * did not declare.
  */
 export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
@@ -403,7 +403,7 @@ export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
 
 /**
  * Extract the `estop` block from a `GET /v0/runtime/status` body. Returns null
- * when the block is absent or not an object (the contract keeps it optional) —
+ * when the block is absent or not an object (the contract keeps it optional);
  * the UI must not render a stop control it cannot describe.
  */
 export function extractEstopStatus(payload: unknown): EstopStatus | null {
@@ -612,12 +612,12 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
   const parts: string[] = [];
   let ok = true;
 
-  // Never assert "engaged"/"latched" when the latch did not actually engage —
+  // Never assert "engaged"/"latched" when the latch did not actually engage:
   // this defensive branch exists precisely to be honest about a failed stop.
   if (latched) {
     parts.push(`Software stop engaged (${rung}).`);
   } else {
-    parts.push("WARNING: the latch did not engage — the machine may not be safe.");
+    parts.push("WARNING: the latch did not engage. The machine may not be safe.");
     ok = false;
   }
 
@@ -626,7 +626,7 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
       const warning = typeof r.warning === "string" && r.warning.trim() ? r.warning.trim() : "";
       parts.push(
         warning ||
-          "Actuation is latched, but no software safe-state is declared — outputs were NOT driven.",
+          "Actuation is latched, but no software safe-state is declared, so outputs were NOT driven.",
       );
     }
     // When the latch failed, the leading warning already conveys nothing is safe.
@@ -874,7 +874,7 @@ export function machineLine(
   if (trippedDevices.length) {
     return line(
       "tripped",
-      `Board tripped: clear the trip on ${trippedDevices.join(", ")}.`,
+      `Device tripped: clear the trip on ${trippedDevices.join(", ")}.`,
       "watchdog-trips",
       "Clear the trip",
     );

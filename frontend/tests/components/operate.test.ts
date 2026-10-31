@@ -642,7 +642,7 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
     });
 
     const latch = await screen.findByTestId('other-project-latch');
-    expect(latch).toHaveTextContent('SAFE-STATE ENGAGED — actuation latched');
+    expect(latch).toHaveTextContent('SAFE-STATE ENGAGED: actuation latched');
     expect(screen.queryByRole('button', { name: /Clear latch/ })).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole('link', { name: "demo's Operate view" }));

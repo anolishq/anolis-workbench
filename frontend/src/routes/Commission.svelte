@@ -958,7 +958,7 @@
     {/if}
     {#if imported}
       <div class="workspace-advisory">
-        Imported machine profile — carried verbatim; dev-launch and preflight are not available.
+        Imported machine profile, carried verbatim. Dev-launch and preflight are not available.
         Deploy it with install.sh (Deploy to device or Export Bundle below, or the provision CLI).
       </div>
     {:else if !commissionRunningForCurrent}
@@ -1025,7 +1025,7 @@
       <!-- Running state -->
       <div class="launch-running-bar">
         <span class="running-label">
-          Running — {projectName} on port {launchPort ?? "?"}
+          Running {projectName} on port {launchPort ?? "?"}
         </span>
         <span class="health-badge {healthStatus}">
           {healthStatus === "healthy"
@@ -1337,8 +1337,8 @@
           {#each targetRows(check) as row, i (i)}
             <tr class:target-version-warning={row.verdict !== "ok" && row.verdict !== "fresh"}>
               <td>{row.name}</td>
-              <td>{row.pinned ?? "—"}</td>
-              <td>{row.installed ?? "—"}</td>
+              <td>{row.pinned ?? ""}</td>
+              <td>{row.installed ?? ""}</td>
               <td>{VERDICT_TEXT[row.verdict] ?? row.verdict}</td>
             </tr>
           {/each}

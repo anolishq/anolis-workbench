@@ -2,7 +2,7 @@
   import type { ProjectDocument, UnknownRecord } from "./contracts";
 
   /**
-   * ProfileView.svelte — read-only view of an imported machine-profile
+   * ProfileView.svelte: read-only view of an imported machine-profile
    * project (#226). The workbench carries the profile verbatim; the source
    * repository is the place to edit it.
    */
@@ -43,8 +43,8 @@
     </div>
   {:else}
     <div class="workspace-advisory">
-      This project was imported from a machine profile and is carried <strong>verbatim</strong> —
-      the workbench never rewrites it. Edit it in its source repository and re-import.
+      This project was imported from a machine profile and is carried <strong>verbatim</strong>: the
+      workbench never rewrites it. Edit it in its source repository and re-import.
       {#if importedFrom}
         <div><code>{importedFrom}</code></div>
       {/if}
@@ -55,9 +55,9 @@
     <h3>Machine</h3>
     <dl class="profile-facts">
       <dt>machine_id</dt>
-      <dd><code>{profile.machine_id ?? "—"}</code></dd>
+      <dd><code>{profile.machine_id ?? "not set"}</code></dd>
       <dt>Display name</dt>
-      <dd>{profile.display_name ?? "—"}</dd>
+      <dd>{profile.display_name ?? "not set"}</dd>
       {#if safety.estop_topology}
         <dt>E-stop topology</dt>
         <dd><code>{safety.estop_topology}</code></dd>
@@ -72,7 +72,7 @@
     {:else}
       <ul class="profile-list">
         {#each runtimeProfiles as [variant, path] (variant)}
-          <li><strong>{variant}</strong> — <code>{path}</code></li>
+          <li><strong>{variant}</strong>: <code>{path}</code></li>
         {/each}
       </ul>
     {/if}
@@ -84,9 +84,8 @@
       {#each providers as [pid, entry] (pid)}
         {@const record = asRecord(entry)}
         <li>
-          <strong>{pid}</strong>
-          {#if record.config}
-            — <code>{record.config}</code>{/if}
+          <strong>{pid}</strong>{#if record.config}:
+            <code>{record.config}</code>{/if}
           {#if record.notes}
             <div class="field-note">{record.notes}</div>
           {/if}
@@ -112,13 +111,13 @@
       <ul class="profile-list">
         {#if componentRuntime.version}
           <li>
-            <strong>runtime</strong> — <code>{componentRuntime.repo}</code>
+            <strong>runtime</strong>: <code>{componentRuntime.repo}</code>
             v{componentRuntime.version}
           </li>
         {/if}
         {#each componentProviders as [kind, entry] (kind)}
           {@const record = asRecord(entry)}
-          <li><strong>{kind}</strong> — <code>{record.repo}</code> v{record.version}</li>
+          <li><strong>{kind}</strong>: <code>{record.repo}</code> v{record.version}</li>
         {/each}
       </ul>
     </section>

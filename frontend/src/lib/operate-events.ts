@@ -1,4 +1,4 @@
-// operate-events.ts — SSE stream manager and event utilities for Operate workspace
+// operate-events.ts: SSE stream manager and event utilities for Operate workspace
 
 import type { UnknownRecord } from "./contracts";
 

@@ -1110,7 +1110,7 @@ describe("Commission.svelte — the target check (#567)", () => {
       within(last)
         .getAllByRole("cell")
         .map((cell) => cell.textContent),
-    ).toEqual(["telemetry_export (optional)", "0.1.1", "—", "not recorded on the target"]);
+    ).toEqual(["telemetry_export (optional)", "0.1.1", "", "not recorded on the target"]);
   });
 
   it("reports a target it could not read", async () => {

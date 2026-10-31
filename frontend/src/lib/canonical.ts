@@ -2,7 +2,7 @@
  * Canonical-project helpers, mirroring `anolis_workbench/core/canonical.py`.
  *
  * The one idea to keep in mind: inside a runtime config a provider `command`
- * is NOT a host path — it is a deploy TOKEN that install.sh rewrites to
+ * is NOT a host path: it is a deploy TOKEN that install.sh rewrites to
  * `{prefix}/bin/anolis-provider-<kind>`. The real host binary path lives only
  * in the project's `host_paths` and is used for dev-launch. Authoring the
  * wrong shape here means install.sh silently ships dev-relative paths, so
@@ -49,7 +49,7 @@ export function variantRelpath(variant: string): string {
  *
  * install.sh rewrites using the SECOND capture group and re-derives the kind
  * from the rendered path, so a token whose two kind captures disagree resolves
- * to something other than what the filename implies — treat that as unusable.
+ * to something other than what the filename implies; treat that as unusable.
  */
 export function commandKind(command: unknown): string | null {
   if (typeof command !== "string") return null;
@@ -137,7 +137,7 @@ export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigD
  * structural reading: `automation:` present but empty dies, and the scan is not
  * depth-anchored (a hook or flag nested at any depth counts).
  *
- * ADVISORY ONLY — this runs on the parsed document, so it cannot see an
+ * ADVISORY ONLY: this runs on the parsed document, so it cannot see an
  * `enabled:` that appears as a wrapped line of a multi-line string. The
  * authoritative gate runs server-side over the serialized text.
  */
@@ -158,7 +158,7 @@ export function inertnessViolation(doc: RuntimeConfigDoc | null | undefined): st
 
 /**
  * install.sh un-quotes and lowercases the field, then compares it against a
- * false-ish set — so `'false'` and `no` are inert to it while `0` is not.
+ * false-ish set, so `'false'` and `no` are inert to it while `0` is not.
  * Mirrored from the awk in tools/install.sh.
  */
 const FALSEY_ENABLED = ["", "false", "no", "off", "n"];
@@ -192,7 +192,7 @@ function nestedAutomationViolation(node: unknown, path: string): string | null {
   return null;
 }
 
-/** Kinds the profile pins — install.sh fetches provider binaries by these keys. */
+/** Kinds the profile pins: install.sh fetches provider binaries by these keys. */
 export function pinnedKinds(doc: ProjectDocument | null): string[] {
   const providers = doc?.profile?.components?.providers;
   return providers ? Object.keys(providers).sort() : [];

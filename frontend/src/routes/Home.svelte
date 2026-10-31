@@ -307,7 +307,7 @@
                   <span class="badge" title="The project installed on this machine"
                     >this machine</span
                   >{:else if project.authored === false}
-                  <span class="badge" title="Imported machine profile — carried verbatim"
+                  <span class="badge" title="Imported machine profile, carried verbatim"
                     >imported</span
                   >{/if}</span
               >
@@ -387,7 +387,7 @@
             type="text"
             spellcheck="false"
             style="font-family:monospace"
-            placeholder="/path/to/anolis-projects/projects/bioreactor-v1"
+            placeholder="/path/to/projects/my-machine"
             bind:value={importPath}
           />
         </div>
