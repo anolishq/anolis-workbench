@@ -13,6 +13,49 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-30
+
+Upgrade notes:
+
+- **Operate opens on an operator panel** (#731, #732). A line on what the
+  machine is doing and what to do next comes first, under the software-stop
+  row, which is unchanged. Mode, Runtime Status, Event Stream and Provider
+  Health follow, always shown. Devices, Parameters, Automation and Event
+  Trace are now each collapsed by default: open one to see it. Nothing was
+  removed.
+- **Opening the workbench goes to the installed machine's Operate** (#733).
+  With an installed project, the first load of `/` redirects to
+  `/projects/<installed>/operate`. The Home button still shows the project
+  list, a direct link to another page stays where it is, and onboarding still
+  comes first. On Home, the installed project is listed first as "this
+  machine"; Create, Import, Check for Updates, Rollback and the Fleet
+  Dashboard move under "Setup", closed when a project is installed. Open on
+  an imported project goes to Operate, not Compose.
+- **Home's heading** (#734) is the installed machine's display name, with "Go
+  to Operate". With no installed project it is "Projects", where it was
+  "Commissioning Workbench".
+- **The operator panel reads the profile's `operator` block** (#736, #737,
+  #738). With the block, Operate shows Readings and Now (a line per settings
+  group), Settings, whose Save writes the group's automation parameters to
+  the runtime, and Start/Stop experiment, which set the declared enable
+  parameters and mode. Start refuses, sending nothing, while the runtime is
+  not answering, the emergency stop is in force, the software stop is
+  latched, the runtime is in FAULT, a board is tripped, a device is lost, or
+  one of the profile's `start.require` conditions does not hold. Without the
+  block, Operate shows none of these.
+- **Now names automation calls that keep failing** (#740), with anolis 0.8.0:
+  each call, its failures in a row and its last error. An older runtime sends
+  no `call_failures`, and Now lists none.
+- **The Event Trace shows every event** (#741). Two events the runtime
+  stamped in the same millisecond broke the trace's rows; both now show.
+- **The pins:** the sim quickstart template pins runtime 0.8.0, and the
+  contract locks move to anolis 0.7.0 (#735), then 0.8.0 (#739). The vendored
+  machine-profile schema accepts the `operator` block and
+  `operator.experiment.start.require`, the runtime-config schema accepts
+  `automation.max_consecutive_call_failures`, and the runtime-http contract
+  describes the `automation_call_failed` event and `call_failures` in
+  `GET /v0/automation/status`.
+
 ### Added
 
 - **Operate opens on an operator panel** (#727, part of #232). Its first
@@ -84,6 +127,10 @@ Historical note:
   to save edits it cannot make, and for the installed project says the
   runtime runs the installed copy instead of "running from this project"
   (#730).
+- **The Event Trace keeps events stamped in the same millisecond** (#741).
+  Its rows were keyed by the event's `timestamp_ms`, which the runtime sets,
+  so two events from one poll collided: Svelte threw `each_key_duplicate` and
+  the trace dropped the second. Rows are now keyed by arrival.
 
 ## [0.27.0] - 2026-10-30
 
