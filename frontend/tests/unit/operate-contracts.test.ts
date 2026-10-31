@@ -175,6 +175,7 @@ describe("operate-contracts extractors", () => {
       device_count: 0,
       providers: [],
       device_loss_latched: [],
+      fault_uncovered_functions: [],
     });
 
     expect(
@@ -525,7 +526,31 @@ describe("extractEstopStatus", () => {
       software_safe_state: "setpoints",
       latched_at_epoch_ms: 1234,
       uncovered_actuating_functions: 2,
+      uncovered_functions: [],
     });
+  });
+
+  it("reads uncovered_functions, keeping strings only (anolis 0.9.0)", () => {
+    const out = extractEstopStatus({
+      estop: {
+        latched: false,
+        software_safe_state: "hooks",
+        latched_at_epoch_ms: null,
+        uncovered_actuating_functions: 2,
+        uncovered_functions: ["bread0/dcmt0/motor1_value", 7, "bread0/dcmt1/motor2_value"],
+      },
+    });
+    expect(out?.uncovered_functions).toEqual([
+      "bread0/dcmt0/motor1_value",
+      "bread0/dcmt1/motor2_value",
+    ]);
+  });
+
+  it("extractRuntimeStatus reads fault_uncovered_functions, keeping strings only (anolis 0.9.0)", () => {
+    const status = extractRuntimeStatus({
+      fault_uncovered_functions: ["bread0/dcmt0/motor1_value", null],
+    });
+    expect(status.fault_uncovered_functions).toEqual(["bread0/dcmt0/motor1_value"]);
   });
 
   it("returns null when the block is absent or not an object", () => {
@@ -544,6 +569,7 @@ describe("extractEstopStatus", () => {
       software_safe_state: "none",
       latched_at_epoch_ms: null,
       uncovered_actuating_functions: 0,
+      uncovered_functions: [],
     });
   });
 

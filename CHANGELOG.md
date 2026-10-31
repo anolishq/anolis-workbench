@@ -15,6 +15,10 @@ Historical note:
 
 ### Added
 
+- **The not-covered chip names the functions** (anolishq/anolis#698), with
+  anolis 0.9.0: its ⓘ lists each function the software stop won't drive, as
+  provider/device/function, and each one a fault in AUTO won't drive. An
+  older runtime sends no names, and the ⓘ shows the count alone, as before.
 - **A sparkline beside each operator reading** (#747): the reading's last ten
   minutes, kept in the browser from the state updates and polls Operate
   already gets, drawn as plain SVG. It starts empty when the page loads (no

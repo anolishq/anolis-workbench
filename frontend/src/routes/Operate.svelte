@@ -1516,6 +1516,18 @@
               <InfoToggle label="About uncovered functions">
                 {estop.uncovered_actuating_functions} actuating function(s) the software stop will not
                 drive: a software stop leaves those outputs as they were.
+                {#if estop.uncovered_functions.length}
+                  <span data-testid="estop-uncovered-names">
+                    Not driven by the stop: {estop.uncovered_functions.join(", ")}.
+                  </span>
+                {/if}
+                {#if runtimeStatusData?.fault_uncovered_functions.length}
+                  <span data-testid="fault-uncovered-names">
+                    Not driven by a fault in AUTO: {runtimeStatusData.fault_uncovered_functions.join(
+                      ", ",
+                    )}.
+                  </span>
+                {/if}
               </InfoToggle>
             {/if}
           {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
