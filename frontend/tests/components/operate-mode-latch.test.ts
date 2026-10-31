@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 
 import Operate from "../../src/routes/Operate.svelte";
@@ -58,12 +58,16 @@ const row = () =>
   screen.getByRole("button", { name: /^SOFTWARE STOP/ }).closest(".estop-row") as HTMLElement;
 
 describe("Operate.svelte — mode and latch wording (#692)", () => {
-  it("in FAULT offers only the way out the runtime accepts, MANUAL, and says why", async () => {
+  it("in FAULT offers only the way out the runtime accepts, MANUAL, and the machine line says why", async () => {
     renderOperate("FAULT");
     expect(await modeOptions("FAULT")).toEqual(["MANUAL", "FAULT"]);
-    expect(screen.getByTestId("mode-fault-note")).toHaveTextContent(
-      "FAULT refuses every device call. Set the mode to MANUAL to recover.",
+    // Said once, on the machine line (wb#748): Mode carries no note of its own.
+    await waitFor(() =>
+      expect(screen.getByTestId("machine-line")).toHaveTextContent(
+        "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
+      ),
     );
+    expect(screen.queryByTestId("mode-fault-note")).toBeNull();
   });
 
   it("in MANUAL offers every mode, and no FAULT note", async () => {

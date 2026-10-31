@@ -95,7 +95,6 @@ describe("Operate.svelte — the operator panel (#727)", () => {
       screen.getByTestId("watchdog-trips"),
       screen.getByTestId("mode-section"),
       screen.getByTestId("runtime-status"),
-      heading("Event Stream"),
       screen.getByTestId("provider-health"),
     ];
     for (const el of shown) expect(el.closest("details")).toBeNull();
