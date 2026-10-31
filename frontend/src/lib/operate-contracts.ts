@@ -866,7 +866,7 @@ export function machineLine(
   if (status.mode === "FAULT") {
     return line(
       "fault",
-      "In FAULT: set MANUAL to recover. AUTO is not offered from FAULT, which accepts only MANUAL.",
+      "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
       "mode",
       "Go to Mode",
     );
@@ -955,10 +955,12 @@ export function operatorReadings(
 }
 
 /**
- * A line per settings group on what is set now (wb#728), from the declared
- * settings and the parameters' values only. A group whose items include one
- * of experiment.start's enable parameters reads on or off from it: on means
- * scheduled, not that its actuator is running now.
+ * What is happening per settings group (wb#728, wb#748): a group whose items
+ * include one of experiment.start's enable parameters reads on or off from
+ * it, and while on, its first other item, its main value. On means
+ * scheduled, not that its actuator is running now. The rest of the schedule
+ * is in Settings, so it is not repeated here, and a group with no enable is
+ * left out.
  */
 export function operatorSettingsLines(
   operator: OperatorBlock | undefined,
@@ -966,19 +968,28 @@ export function operatorSettingsLines(
 ): string[] {
   const enables = new Set(operator?.experiment?.start?.enable ?? []);
   const byName = new Map(parameters.map((p) => [p.name, p]));
-  return (operator?.settings ?? []).map((group) => {
-    const parts: string[] = [];
-    for (const item of group.items) {
-      const param = byName.get(item.parameter);
-      if (enables.has(item.parameter)) {
-        parts.unshift(param ? (param.value === true ? "on" : "off") : "--");
-        continue;
-      }
-      const value = param ? String(param.value) : "--";
-      parts.push(`${item.label} ${value}${item.unit ? ` ${item.unit}` : ""}`);
+  const lines: string[] = [];
+  for (const group of operator?.settings ?? []) {
+    const enable = group.items.find((item) => enables.has(item.parameter));
+    if (!enable) continue;
+    const param = byName.get(enable.parameter);
+    if (!param) {
+      lines.push(`${group.group}: --`);
+      continue;
     }
-    return `${group.group}: ${parts.join(", ")}`;
-  });
+    if (param.value !== true) {
+      lines.push(`${group.group}: off`);
+      continue;
+    }
+    const main = group.items.find((item) => item !== enable);
+    const value = main ? byName.get(main.parameter) : undefined;
+    lines.push(
+      main
+        ? `${group.group}: on, ${main.label} ${value ? String(value.value) : "--"}${main.unit ? ` ${main.unit}` : ""}`
+        : `${group.group}: on`,
+    );
+  }
+  return lines;
 }
 
 /** The "provider/device" a "provider/device/signal" reads from. */

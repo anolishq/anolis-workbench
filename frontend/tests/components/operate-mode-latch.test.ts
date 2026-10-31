@@ -64,7 +64,7 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     // Said once, on the machine line (wb#748): Mode carries no note of its own.
     await waitFor(() =>
       expect(screen.getByTestId("machine-line")).toHaveTextContent(
-        "AUTO is not offered from FAULT, which accepts only MANUAL.",
+        "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
       ),
     );
     expect(screen.queryByTestId("mode-fault-note")).toBeNull();

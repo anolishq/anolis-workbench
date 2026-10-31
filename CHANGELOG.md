@@ -32,7 +32,11 @@ Historical note:
   note: the machine line says what to do. The software-stop row's chip says
   "Stop ready", about the stop only, where it said "Ready", or "Not ready"
   while a device was tripped; the machine line says whether the machine is
-  ready, and why not.
+  ready, and why not. In FAULT it says MANUAL once: "In FAULT: set MANUAL to
+  recover (AUTO isn't available from FAULT)." Now says what is happening:
+  each settings group with an enable on or off, and its main value while on
+  ("Stirring: on, Speed 110 / 255"). The rest of the schedule stays in
+  Settings, and a group with no enable is no longer listed in Now.
 
 ### Fixed
 
