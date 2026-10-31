@@ -27,10 +27,13 @@ Historical note:
   recorded. The profile's `operator.run` is read, and the deprecated
   `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
   profile schema knows `operator.run`.
-- **Start checks only the conditions that apply** (anolishq/anolis#701). A
-  `require` entry with `when` applies only while that bool parameter is true
-  at Start: when it is one of `start.enable`, which Start sets true, or when
-  it already reads true.
+- **Start respects the On switches** (anolishq/anolis#701). Start run no
+  longer sets the profile's `start.enable` parameters true: it runs with the
+  groups the operator ticked On, and refuses ("Refused: nothing is switched
+  on. Tick On for at least one group.") when every one is off. Stop run still
+  switches its `stop.disable` parameters off. A `require` entry with `when`
+  applies only while that parameter is on, so a group left off is not held
+  to its conditions.
 
 ### Fixed
 

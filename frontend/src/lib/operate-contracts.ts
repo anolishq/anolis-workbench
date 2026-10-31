@@ -997,24 +997,34 @@ export function signalDevice(signal: string): string {
   return signal.split("/").slice(0, 2).join("/");
 }
 
+/** The parameter's value is true; one the runtime does not report is not. */
+function isOn(parameters: ParameterDefinition[], name: string): boolean {
+  return parameters.find((p) => p.name === name)?.value === true;
+}
+
 /**
  * The run.start.require entries that apply to this Start (anolis#701): those
- * without `when`, and those whose `when` parameter reads true at Start. Start
- * sets every start.enable parameter true, so one of those always applies;
- * any other must read true now. A parameter the runtime does not report is
- * not true.
+ * without `when`, and those whose `when` parameter is on now. Start leaves
+ * the switches as the operator set them.
  */
 export function applicableRequirements(
   start: OperatorRun["start"],
   parameters: ParameterDefinition[],
 ): StartRequirement[] {
-  const enabled = new Set(start?.enable ?? []);
-  return (start?.require ?? []).filter(
-    (r) =>
-      r.when === undefined ||
-      enabled.has(r.when) ||
-      parameters.find((p) => p.name === r.when)?.value === true,
-  );
+  return (start?.require ?? []).filter((r) => r.when === undefined || isOn(parameters, r.when));
+}
+
+/**
+ * Start has nothing to run (anolis#701): the profile lists groups' on
+ * switches in start.enable and every one of them is off. A profile that
+ * lists none can always start.
+ */
+export function nothingSwitchedOn(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): boolean {
+  const switches = start?.enable ?? [];
+  return switches.length > 0 && !switches.some((name) => isOn(parameters, name));
 }
 
 /**

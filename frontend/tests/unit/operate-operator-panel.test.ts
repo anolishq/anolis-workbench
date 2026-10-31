@@ -96,9 +96,8 @@ describe("operatorSettingsLines", () => {
   });
 });
 
-// anolis#701: a require entry with `when` applies only when that bool
-// parameter reads true at Start. Start sets every start.enable true, so an
-// entry whose `when` is one of them always applies.
+// anolis#701: a require entry with `when` applies only while that bool
+// parameter reads true now. Start no longer turns the switches on.
 describe("applicableRequirements", () => {
   const brake = { signal: "bread0/dcmt0/motor1_brake", equals: false, message: "Release the sampler's brake" };
   const params = (value: boolean): ParameterDefinition[] => [
@@ -115,12 +114,12 @@ describe("applicableRequirements", () => {
     expect(applicableRequirements({ mode: "AUTO", require: [entry] }, [])).toEqual([]);
   });
 
-  it("keeps it while the parameter is on, or when Start turns it on", () => {
+  it("keeps it while the parameter is on, and only then, start.enable or not", () => {
     const entry = { ...brake, when: "sample_enable" };
     expect(applicableRequirements({ mode: "AUTO", require: [entry] }, params(true))).toEqual([entry]);
     expect(
       applicableRequirements({ mode: "AUTO", enable: ["sample_enable"], require: [entry] }, params(false)),
-    ).toEqual([entry]);
+    ).toEqual([]);
   });
 });
 

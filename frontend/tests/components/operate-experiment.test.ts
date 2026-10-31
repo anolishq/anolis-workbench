@@ -61,6 +61,8 @@ function fakeRuntime(
     openRun?: boolean;
     /** The runtime has no run journal: every /v0/runs answers 503. */
     noJournal?: boolean;
+    /** Bool parameters to start at these values instead of the defaults. */
+    switches?: Record<string, boolean>;
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
@@ -69,9 +71,14 @@ function fakeRuntime(
     { name: "dose1_enable", type: "bool", value: false, source: "default" },
     { name: "dose1_interval_s", type: "int64", value: 20, source: "operator", min: 1, max: 86400 },
     { name: "dose1_pulse_s", type: "int64", value: 3, source: "default", min: 1, max: 60 },
-    { name: "impeller_enable", type: "bool", value: false, source: "default" },
+    // On, so a plain Start has something switched on (anolis#701).
+    { name: "impeller_enable", type: "bool", value: true, source: "default" },
     { name: "impeller_pwm", type: "int64", value: 80, source: "default", min: 0, max: 100 },
   ];
+  for (const [name, value] of Object.entries(opts.switches ?? {})) {
+    const p = params.find((x) => x.name === name);
+    if (p) p.value = value;
+  }
   const posts: Post[] = [];
   const runs: { run_id: string; state: string }[] = opts.openRun
     ? [{ run_id: "demo-0", state: "open" }]
@@ -371,7 +378,8 @@ describe("Operate.svelte — Start and Stop run (#729, anolis#696)", () => {
     await fireEvent.click(within(screen.getByTestId("operator-run")).getByRole("button", { name }));
   }
 
-  it("Start opens a run with the settings, sets each enable, then goes to AUTO by way of MANUAL", async () => {
+  // anolis#701: Start leaves the On switches as the operator set them.
+  it("Start opens a run with the settings, leaves the On switches as they are, then goes to AUTO by way of MANUAL", async () => {
     const rt = fakeRuntime({ mode: "IDLE" });
     await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
     await click("Start run");
@@ -379,8 +387,6 @@ describe("Operate.svelte — Start and Stop run (#729, anolis#696)", () => {
     await waitFor(() => expect(rt.mode()).toBe("AUTO"));
     expect(sent(rt.posts)).toEqual([
       ["/v0/runs", { params: SETTINGS }],
-      ["/v0/parameters", { name: "impeller_enable", value: true }],
-      ["/v0/parameters", { name: "dose1_enable", value: true }],
       ["/v0/mode", { mode: "MANUAL" }],
       ["/v0/mode", { mode: "AUTO" }],
     ]);
@@ -403,6 +409,20 @@ describe("Operate.svelte — Start and Stop run (#729, anolis#696)", () => {
       ["/v0/runs/demo-0/close", { close_reason: "operator_stop" }],
     ]);
     expect(await screen.findByTestId("run-feedback")).toHaveTextContent("Run stopped: IDLE.");
+  });
+
+  it("Start refuses when nothing is switched on, and sends nothing (anolis#701)", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      switches: { impeller_enable: false, dose1_enable: false },
+    });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
+      "Refused: nothing is switched on. Tick On for at least one group.",
+    );
+    expect(rt.posts).toEqual([]);
   });
 
   it("Start reports a run already open, names it, and changes nothing", async () => {
@@ -593,22 +613,40 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     expect(rt.posts).toEqual([]);
   });
 
-  it("skips a requirement whose when parameter is off and Start leaves off (anolis#701)", async () => {
-    const operator = {
-      ...REQUIRING,
-      run: {
-        ...REQUIRING.run,
-        start: {
-          ...REQUIRING.run.start,
-          require: [
-            REQUIRING.run.start.require[0],
-            { ...REQUIRING.run.start.require[1], when: "dose2_enable" },
-          ],
-        },
+  // anolis#701: a requirement with when follows that group's On switch.
+  const SAMPLER_STYLE = {
+    ...REQUIRING,
+    run: {
+      ...REQUIRING.run,
+      start: {
+        ...REQUIRING.run.start,
+        require: [{ ...REQUIRING.run.start.require[0], when: "dose1_enable" }],
       },
-    };
-    // Pump 2's brake is on, but dose 2 is off and not among start.enable.
-    const rt = fakeRuntime({ mode: "IDLE", operator, states: brakes(false, true) });
+    },
+  };
+
+  it("refuses a ticked group whose condition does not hold", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      operator: SAMPLER_STYLE,
+      states: brakes(true, false),
+      switches: { dose1_enable: true },
+    });
+    await start("Ready");
+
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
+      "Release dose pump 1's brake",
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("runs with an unticked group whose condition does not hold", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      operator: SAMPLER_STYLE,
+      states: brakes(true, false),
+      switches: { dose1_enable: false },
+    });
     await start("Ready");
 
     await waitFor(() => expect(rt.mode()).toBe("AUTO"));

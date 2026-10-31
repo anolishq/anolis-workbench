@@ -59,6 +59,7 @@
     operatorSettingsLines,
     signalDevice,
     applicableRequirements,
+    nothingSwitchedOn,
     unmetStartRequirements,
     renderBtOutline,
     runStartRefusal,
@@ -1060,6 +1061,15 @@
         runFeedback = { text: refusal, cls: "field-error" };
         return;
       }
+      // Start runs the groups the operator switched on, and leaves the
+      // switches as they are (anolis#701).
+      if (nothingSwitchedOn(start, parameters)) {
+        runFeedback = {
+          text: "Refused: nothing is switched on. Tick On for at least one group.",
+          cls: "field-error",
+        };
+        return;
+      }
       // The profile's own conditions (anolis#686), on signals read now, not
       // up to a poll old.
       const require = applicableRequirements(start, parameters);
@@ -1072,7 +1082,8 @@
         }
       }
     }
-    const names = (kind === "start" ? start?.enable : stop?.disable) ?? [];
+    // Stop switches its groups off; Start leaves the switches alone.
+    const names = kind === "stop" ? (stop?.disable ?? []) : [];
     const verb = kind === "start" ? "Start" : "Stop";
     runBusy = true;
     let at = "reading the run journal";
