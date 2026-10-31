@@ -85,7 +85,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
       await openStopDetails();
 
       expect(
-        await screen.findByText(`${n} actuating function(s) the software stop will not drive.`),
+        await screen.findByText(`${n} actuating function(s) the software stop will not drive: a software stop leaves those outputs as they were.`),
       ).toBeInTheDocument();
     });
 

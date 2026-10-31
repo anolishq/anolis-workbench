@@ -91,7 +91,11 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
     expect(await screen.findByTestId('estop-coverage')).toHaveTextContent('⚠ 2 not covered');
     await fireEvent.click(info('About uncovered functions'));
-    expect(within(row()).getByText('2 actuating function(s) the software stop will not drive.')).toBeInTheDocument();
+    expect(
+      within(row()).getByText(
+        '2 actuating function(s) the software stop will not drive: a software stop leaves those outputs as they were.',
+      ),
+    ).toBeInTheDocument();
     expect(row().textContent).not.toMatch(/e-stop/);
   });
 
