@@ -11,8 +11,8 @@ validation remain explicit and test-backed.
 
 1. Export core: `anolis_workbench/core/exporter.py`
 2. Package validator: `anolis_workbench/core/package_validator.py`
-3. Validation command: `contracts/validate-handoff-packages.py`
-4. CLI wrapper: `anolis_workbench/cli/package_cli.py`
+3. Validation command: `anolis-validate` (`contracts/validate-handoff-packages.py` in a checkout)
+4. CLI wrapper: `anolis-package` (`anolis_workbench/cli/package_cli.py`)
 5. Workbench HTTP export route: `POST /api/projects/{name}/export`
 6. Unit/route tests:
    - `tests/unit/test_exporter.py`
@@ -44,8 +44,8 @@ validation remain explicit and test-backed.
 
 ## Validation Gates
 
-1. `python3 contracts/validate-handoff-packages.py <package.anpkg>`
-2. `python3 contracts/validate-handoff-packages.py <package.anpkg> --runtime-bin <runtime-binary>` (optional replay hardening)
+1. `anolis-validate <package.anpkg>`
+2. `anolis-validate <package.anpkg> --runtime-bin <runtime-binary>` (optional replay hardening)
 3. `python3 -m pytest tests -q`
 
 ## Drift Notes and Change Rule

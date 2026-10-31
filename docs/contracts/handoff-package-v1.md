@@ -36,7 +36,7 @@ Path rewrite contract at export:
 ## Determinism Lock
 
 For identical project input state, exported bytes are identical across wrappers
-(Workbench HTTP export and `anolis_workbench/cli/package_cli.py` CLI):
+(Workbench HTTP export and the `anolis-package` CLI):
 
 1. Stable file ordering in archive.
 2. Stable zip metadata.
@@ -63,13 +63,13 @@ Use, where `<package-path>` is an `.anpkg` archive or an extracted package
 directory:
 
 ```bash
-python3 contracts/validate-handoff-packages.py <package-path>
+anolis-validate <package-path>
 ```
 
 Optional runtime replay hardening:
 
 ```bash
-python3 contracts/validate-handoff-packages.py <package-path> --runtime-bin <runtime-binary>
+anolis-validate <package-path> --runtime-bin <runtime-binary>
 ```
 
 Validation includes:
