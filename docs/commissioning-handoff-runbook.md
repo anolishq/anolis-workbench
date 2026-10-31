@@ -6,9 +6,10 @@ machine off for deployment with the runtime's `install.sh`.
 
 ## 1) Preconditions
 
-1. Project validates and launches cleanly in Commission workspace.
+1. The project validates. A project authored in the workbench also launches
+   cleanly in Commission; an imported project cannot run locally, so check it
+   on the target after deploying.
 2. Operate checks are complete for target behavior.
-3. Runtime contracts and Workbench tests are green locally.
 
 ## 2) Three Artifacts, Three Roles
 
@@ -94,7 +95,8 @@ The installed runtime is the `anolis-runtime` systemd service, which the
 workbench did not launch, so Commission's own Stop and Restart cannot reach
 it. Under **Deploy to device**, **Stop the installed runtime…** and
 **Restart the installed runtime…** run `systemctl stop` or `restart` on the
-deploy target, over SSH or here with the sudo password above. Each asks for a
+deploy target: over SSH, which needs passwordless `sudo` there, or on this
+machine with the sudo password above. Each asks for a
 confirm naming the machine, then shows what `systemctl is-active` reports.
 Without the workbench, run `sudo systemctl stop anolis-runtime` on the
 target.
@@ -109,13 +111,15 @@ offered for one that enables automation, such as `automation` or `full`.
 
 ## 4) Export Package (Provenance Record)
 
-Workbench path:
+Workbench path, for a project authored in the workbench (imported projects
+are not offered it):
 
 1. Open project in `Commission`.
 2. Click `Export .anpkg`.
 3. Save generated `.anpkg` artifact.
 
-CLI path:
+CLI path, where `<project-name>` is a project under `~/.anolis/systems/` (or
+`ANOLIS_DATA_DIR`):
 
 ```bash
 anolis-package <project-name> [output.anpkg]
@@ -126,13 +130,13 @@ anolis-package <project-name> [output.anpkg]
 Static package validation:
 
 ```bash
-python3 contracts/validate-handoff-packages.py <path-to-package.anpkg>
+anolis-validate <path-to-package.anpkg>
 ```
 
 Replay hardening with runtime binary:
 
 ```bash
-python3 contracts/validate-handoff-packages.py \
+anolis-validate \
   <path-to-package.anpkg> \
   --runtime-bin <path-to-anolis-runtime>
 ```
@@ -165,7 +169,7 @@ Deliver all of:
 1. The staged bundle that was deployed
 2. `.anpkg` artifact, as the provenance record
 3. Runtime/provider binary provenance (build IDs/refs)
-4. Validation output (`validate-handoff-packages.py` logs)
+4. Validation output (`anolis-validate` logs)
 5. Mode/operation checklist used during commissioning
 6. Deployment env requirements (`INFLUXDB_TOKEN` policy)
 
