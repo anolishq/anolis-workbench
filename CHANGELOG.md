@@ -24,6 +24,14 @@ Historical note:
   reading's declared decimals (0.1 without them), so a reading moving by its
   last digit draws near flat, and the window's high and low are labelled
   beside it.
+- **Import a project folder from the browser's computer** (#749). Home's
+  Import Machine Profile has **Choose folder…**: the browser uploads the
+  folder (`POST /api/projects/import-upload`), and the server writes it to a
+  private staging directory under the data dir, validates and imports it as a
+  path import does, and removes the staging directory. A path that is not a
+  plain relative path, more than 200 files or more than 2 MiB is refused
+  before anything is written. The path field stays for a directory on the
+  workbench's machine.
 
 ### Changed
 

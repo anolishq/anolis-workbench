@@ -132,6 +132,79 @@ paths:
         "500":
           $ref: "#/components/responses/Error500"
 
+  /api/projects/import-upload:
+    post:
+      summary: Import a machine-profile project folder uploaded from the browser
+      description: >-
+        For a browser on another computer than the workbench server (#749).
+        The server writes the files to a private staging directory under the
+        data dir, validates and imports them as /api/projects/import does,
+        and removes the staging directory. Every path is checked before
+        anything is written: it must be relative to the folder, with no
+        empty, "." or ".." component, backslash or NUL. At most 200 files
+        and 2 MiB of content; the body may be up to 4 MiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [folder, files]
+              properties:
+                folder:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
+                  description: >-
+                    The uploaded folder's name: the project's directory name
+                    when deployed, and the default project name.
+                files:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path:
+                        type: string
+                        description: Relative to the folder, "/"-separated.
+                      content:
+                        type: string
+                        description: The file's bytes, base64.
+                    additionalProperties: false
+                name:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
+                  description: Workspace project name (defaults to the folder name)
+              additionalProperties: false
+      responses:
+        "201":
+          description: Project imported
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, format, warnings]
+                properties:
+                  name:
+                    type: string
+                  format:
+                    type: string
+                    enum: [machine-profile]
+                  meta:
+                    type: object
+                    additionalProperties: true
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/Error400"
+        "409":
+          $ref: "#/components/responses/Error409"
+        "500":
+          $ref: "#/components/responses/Error500"
+
   /api/projects/{name}:
     get:
       summary: Get project document
