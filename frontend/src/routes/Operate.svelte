@@ -244,6 +244,7 @@
   const dispatchableCoverage = $derived(
     versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE),
   );
+  const faultUncovered = $derived(runtimeStatusData?.fault_uncovered_functions ?? []);
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
@@ -1521,13 +1522,6 @@
                     Not driven by the stop: {estop.uncovered_functions.join(", ")}.
                   </span>
                 {/if}
-                {#if runtimeStatusData?.fault_uncovered_functions.length}
-                  <span data-testid="fault-uncovered-names">
-                    Not driven by a fault in AUTO: {runtimeStatusData.fault_uncovered_functions.join(
-                      ", ",
-                    )}.
-                  </span>
-                {/if}
               </InfoToggle>
             {/if}
           {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
@@ -1541,6 +1535,19 @@
               which is why setpoints are not used.
             </InfoToggle>
           {/if}
+        {/if}
+        {#if faultUncovered.length}
+          <!-- What a fault in AUTO leaves (anolis 0.9.0), whatever the stop covers. -->
+          <span class="estop-chip field-error" data-testid="fault-coverage">
+            ⚠ {faultUncovered.length} not covered by FAULT
+          </span>
+          <InfoToggle label="About functions a fault leaves">
+            {faultUncovered.length} actuating function(s) no AUTO → FAULT hook drives: a fault in AUTO
+            leaves those outputs as they were.
+            <span data-testid="fault-uncovered-names">
+              Not driven by a fault in AUTO: {faultUncovered.join(", ")}.
+            </span>
+          </InfoToggle>
         {/if}
         {#if stopChain}
           <!-- The observed emergency stop (wb#631): the runtime reads it from a
