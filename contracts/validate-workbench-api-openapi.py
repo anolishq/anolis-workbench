@@ -43,6 +43,7 @@ REQUIRED_OPERATIONS: list[tuple[str, str]] = [
     ("post", "/api/projects/{name}/rename"),
     ("post", "/api/projects/{name}/duplicate"),
     ("post", "/api/projects/import"),
+    ("post", "/api/projects/import-upload"),
     ("get", "/api/templates"),
     ("get", "/api/provider-schemas"),
     # Commission track
