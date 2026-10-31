@@ -13,6 +13,19 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **Operate's Runtime Status and Event Stream are one Connection section**
+  (#748). A grid of facts under the health badge: Runtime, Devices, Poll, Up
+  for (a duration, "14 h 55 min", not seconds) and Event stream (Connected,
+  Reconnecting, Quiet or Disconnected). The mode is no longer repeated there.
+  The machine line's "See Runtime Status" link is now "See Connection".
+- **Each thing is said once** (#748). Mode no longer carries its own FAULT
+  note: the machine line says what to do. The software-stop row's chip says
+  "Stop ready", about the stop only, where it said "Ready", or "Not ready"
+  while a device was tripped; the machine line says whether the machine is
+  ready, and why not.
+
 ### Fixed
 
 - **Operate's settings** (#745). A box ticked and saved no longer flickers

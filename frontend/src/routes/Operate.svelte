@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import ConnectionSection from "../lib/ConnectionSection.svelte";
   import InfoToggle from "../lib/InfoToggle.svelte";
   import type {
     AutomationCallFailure,
@@ -63,6 +64,7 @@
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
+    summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
   } from "../lib/operate-contracts";
@@ -1444,15 +1446,9 @@
               No safe state declared: latch only
             </span>
           {:else}
-            <!-- The stop is armed either way; "Ready" claims the machine is,
-                 so not while a board is tripped (wb#692). Current conditions
-                 only: startup_safe_state is a past event, reported until the
-                 runtime restarts, and has its own warning below. -->
-            {#if trippedKeys.length}
-              <span class="estop-chip field-error" data-testid="estop-state">Not ready</span>
-            {:else}
-              <span class="estop-chip" data-testid="estop-state">Ready</span>
-            {/if}
+            <!-- About the stop only (wb#748): the machine line says whether the
+                 machine is ready, and why not. The stop is armed either way. -->
+            <span class="estop-chip" data-testid="estop-state">Stop ready</span>
           {/if}
           <InfoToggle label="About the software stop">
             {#if estop.software_safe_state === "hooks"}
@@ -1925,89 +1921,17 @@
           {/if}
         {/if}
       </div>
-      {#if mode === "FAULT"}
-        <p class="field-note" data-testid="mode-fault-note">
-          FAULT refuses every device call. Set the mode to MANUAL to recover.
-        </p>
-      {/if}
     </div>
 
-    <!-- Runtime status -->
-    <div class="operate-section" data-testid="runtime-status">
-      <h3>Runtime Status</h3>
-      {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(
-          runtimeStatusData,
-          estop,
-          startupSafeState,
-          stopChain,
-        )}
-        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
-        {#if health.reasons.length > 0}
-          <span class="operate-meta">{health.reasons.join("; ")}.</span>
-        {/if}
-        <span class="operate-meta">
-          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
-          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime
-          {runtimeStatusData.uptime_seconds}s
-        </span>
-        {#if startupSafeState}
-          {@const startup = summarizeStartupSafeState(startupSafeState)}
-          <span
-            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
-            data-testid="startup-safe-state"
-          >
-            {startup.text}
-          </span>
-          {#if startup.calls.length}
-            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-              {#each startup.calls as call (call)}
-                <li>{call}</li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      {:else if !statusSettled}
-        <!-- Until the first status reply settles, a missing status is not a
-             fault (wb#623). A failed reply settles too, and falls through. -->
-        <span class="badge unknown">--</span>
-        <span class="operate-meta">Loading runtime status…</span>
-      {:else}
-        <span class="badge unavailable">UNAVAILABLE</span>
-        {#if statusRefusal}
-          <span class="operate-meta field-error" data-testid="runtime-refusal">{statusRefusal}</span
-          >
-        {:else}
-          <span class="operate-meta">Runtime status unavailable.</span>
-        {/if}
-      {/if}
-    </div>
-
-    <!-- Event stream status -->
-    <div class="operate-section">
-      <h3>Event Stream</h3>
-      {#if streamStatus.state === "connected"}
-        <span class="badge ok">CONNECTED</span>
-        <span class="operate-meta">SSE stream active.</span>
-      {:else if streamStatus.state === "reconnecting"}
-        <span class="badge unavailable">RECONNECTING</span>
-        <span class="operate-meta"
-          >Attempt {streamStatus.attempts}, retry in {Math.max(
-            1,
-            Math.ceil((streamStatus.delay_ms || 0) / 1000),
-          )}s.</span
-        >
-      {:else if streamStatus.state === "stale"}
-        <span class="badge stale">STALE</span>
-        <span class="operate-meta"
-          >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
-        >
-      {:else}
-        <span class="badge unavailable">DISCONNECTED</span>
-        <span class="operate-meta">Stream disconnected.</span>
-      {/if}
-    </div>
+    <!-- The runtime's status and the event stream, one section (wb#748). -->
+    <ConnectionSection
+      status={runtimeStatusData}
+      settled={statusSettled}
+      refusal={statusRefusal}
+      health={summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState, stopChain)}
+      startup={startupSafeState ? summarizeStartupSafeState(startupSafeState) : null}
+      stream={summarizeStream(streamStatus)}
+    />
 
     <!-- Provider health -->
     <div class="operate-section" data-testid="provider-health">

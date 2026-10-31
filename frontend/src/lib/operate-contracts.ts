@@ -855,12 +855,7 @@ export function machineLine(
   ): MachineLine => ({ state, text, target, linkLabel });
 
   if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
-    return line(
-      "unavailable",
-      "The runtime is not answering.",
-      "runtime-status",
-      "See Runtime Status",
-    );
+    return line("unavailable", "The runtime is not answering.", "runtime-status", "See Connection");
   }
   if (stopChain?.state === "in_force") {
     return line("emergency_stop", "Emergency stop in force: release it to continue.");
@@ -1024,4 +1019,45 @@ export function unmetStartRequirements(
     if (!holds) unmet.push(r.message);
   }
   return unmet;
+}
+
+/** Uptime for reading at a glance: the two largest units, "14 h 55 min" (wb#748). */
+export function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const units: [number, string][] = [
+    [Math.floor(s / 86400), "d"],
+    [Math.floor((s % 86400) / 3600), "h"],
+    [Math.floor((s % 3600) / 60), "min"],
+    [s % 60, "s"],
+  ];
+  const first = units.findIndex(([n]) => n > 0);
+  if (first === -1) return "0 s";
+  return units
+    .slice(first, first + 2)
+    .filter(([n]) => n > 0)
+    .map(([n, u]) => `${n} ${u}`)
+    .join(" ");
+}
+
+/** The event stream's state as a label, a badge class and a detail (wb#748). */
+export function summarizeStream(s: {
+  state: string;
+  attempts: number;
+  delay_ms?: number;
+  idle_ms?: number;
+}): { label: string; cls: string; detail: string } {
+  if (s.state === "connected") return { label: "Connected", cls: "ok", detail: "" };
+  if (s.state === "reconnecting")
+    return {
+      label: "Reconnecting",
+      cls: "unavailable",
+      detail: `attempt ${s.attempts}, retry in ${Math.max(1, Math.ceil((s.delay_ms || 0) / 1000))} s`,
+    };
+  if (s.state === "stale")
+    return {
+      label: "Quiet",
+      cls: "stale",
+      detail: `no events for ${formatDuration((s.idle_ms || 0) / 1000)}`,
+    };
+  return { label: "Disconnected", cls: "unavailable", detail: "" };
 }
