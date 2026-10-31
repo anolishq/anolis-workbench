@@ -82,6 +82,18 @@ describe("App: open on the machine (#730)", () => {
     expect(await screen.findByRole("heading", { name: "Operate" })).toBeInTheDocument();
   });
 
+  // wb#754: the first load used to replace the URL with the bare route,
+  // dropping any query string a page reads on load.
+  it("keeps a page's query string on the first load", async () => {
+    stubApi([AUTHORED, INSTALLED]);
+    history.replaceState({}, "", "/projects/bioreactor-v1/operate?connection=a");
+    render(App);
+
+    expect(await screen.findByRole("heading", { name: "Operate" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/projects/bioreactor-v1/operate");
+    expect(window.location.search).toBe("?connection=a");
+  });
+
   it("stays on Home when no project is installed", async () => {
     stubApi([AUTHORED, IMPORTED]);
     history.replaceState({}, "", "/");

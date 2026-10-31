@@ -60,6 +60,7 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    CONNECTING_LINE,
     machineLine,
     modeTargets,
     normalizeParameterType,
@@ -191,8 +192,11 @@
   const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
   // The operator panel's line on what the machine is doing (wb#727).
+  // Until the first status settles, it is connecting, not down (wb#754).
   const machine = $derived(
-    machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth),
+    statusSettled
+      ? machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth)
+      : CONNECTING_LINE,
   );
   // Where each machine-line link scrolls to; none is in a collapsed section.
   const MACHINE_LINE_SECTIONS: Record<MachineLineTarget, string> = {
@@ -215,7 +219,7 @@
   }
   // The profile's operator block (wb#728): absent, the panel shows neither part.
   const operator = $derived(system?.profile?.operator);
-  const readings = $derived(operatorReadings(operator, deviceStates));
+  const readings = $derived(operatorReadings(operator, deviceStates, !statusSettled));
   // Each declared reading's last ten minutes, by signal (wb#747): a point
   // when the reading's own timestamp moves, null while it is not OK. Empty
   // on load, with no backfill.
@@ -1056,6 +1060,14 @@
     const step = kind === "start" ? start : stop;
     if (!step) return;
     experimentFeedback = null;
+    if (kind === "start" && !statusSettled) {
+      // Not "not answering": the first status has not arrived yet (wb#754).
+      experimentFeedback = {
+        text: "Refused: still connecting to the runtime. Start again in a moment.",
+        cls: "field-error",
+      };
+      return;
+    }
     if (kind === "start") {
       const refusal = experimentStartRefusal(
         runtimeStatusData,
@@ -1804,7 +1816,11 @@
                   </span>
                 {/if}
               </span>
-              {#if r.note}<span class="field-error operator-reading-note">{r.note}</span>{/if}
+              {#if r.note}<span
+                  class="{r.note === 'loading'
+                    ? 'field-note'
+                    : 'field-error'} operator-reading-note">{r.note}</span
+                >{/if}
             </li>
           {/each}
         </ul>
@@ -1818,9 +1834,13 @@
       <div class="operate-section" data-testid="operator-now">
         <h3>Now</h3>
         <ul class="operator-now">
-          {#each operatorSettingsLines(operator, parameters) as line, i (i)}
-            <li>{line}</li>
-          {/each}
+          {#if !statusSettled}
+            <li class="field-note">Loading…</li>
+          {:else}
+            {#each operatorSettingsLines(operator, parameters) as line, i (i)}
+              <li>{line}</li>
+            {/each}
+          {/if}
           <!-- Keyed by the line: with an index key the text stayed stale
                when a second event changed it in place. Lines are unique, as
                the runtime keeps one entry per device and function. -->
@@ -1892,7 +1912,9 @@
               <div class="setting-row" data-testid="setting">
                 <label for={id}>{item.label}</label>
                 {#if !param}
-                  <span class="field-note">not reported by the runtime</span>
+                  <span class="field-note"
+                    >{statusSettled ? "not reported by the runtime" : "loading…"}</span
+                  >
                 {:else if param.type === "bool"}
                   <input
                     {id}

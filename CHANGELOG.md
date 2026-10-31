@@ -62,6 +62,13 @@ Historical note:
 
 ### Fixed
 
+- **Operate says it is connecting until the first status arrives** (#754).
+  The machine line said "The runtime is not answering." while the first
+  runtime status was still on its way; it now says "Connecting to the
+  runtime…", and keeps "not answering" for a status request that failed.
+  Until then Readings say "loading", Now says "Loading…", Settings say
+  "loading…", and Start refuses with "still connecting". A reload of a page
+  keeps its query string, which the first navigation used to drop.
 - **Operate's settings** (#745). A box ticked and saved no longer flickers
   back to its old value while the values refresh. Save now says "Applied"
   while the runtime is in AUTO, where the automation uses the values at once,
