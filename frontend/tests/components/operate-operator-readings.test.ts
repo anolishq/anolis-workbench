@@ -179,7 +179,9 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
     fakeRuntime({ failState: "ezo0/do0" });
 
     await waitFor(() => expect(reading("Temperature")).toHaveTextContent("30.0"));
-    expect(reading("Dissolved oxygen")).toHaveTextContent("no reading");
+    // Once the first status has settled; before it, a missing reading is
+    // loading (wb#754).
+    await waitFor(() => expect(reading("Dissolved oxygen")).toHaveTextContent("no reading"));
     expect(reading("Dissolved oxygen")).not.toHaveTextContent("7.25");
   });
 
