@@ -69,6 +69,14 @@ Historical note:
   Until then Readings say "loading", Now says "Loading…", Settings say
   "loading…", and Start refuses with "still connecting". A reload of a page
   keeps its query string, which the first navigation used to drop.
+- **Operate's requests through the workbench are faster** (#754). Each
+  proxied request resolved the runtime's address afresh: the launcher's
+  status (every project, and a probe of the installed runtime), the running
+  project, the installed config and the token file. On the rig that was
+  about 0.2 s a request, and Operate's parallel polls queued behind each
+  other. The address and token are now kept until a file they were read from
+  changes, the workbench's own runtime process changes, or the address
+  refuses a request.
 - **Operate's settings** (#745). A box ticked and saved no longer flickers
   back to its old value while the values refresh. Save now says "Applied"
   while the runtime is in AUTO, where the automation uses the values at once,
