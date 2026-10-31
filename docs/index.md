@@ -50,7 +50,9 @@ Anywhere else, the first start offers three ways in: **Set up this device**
 (runs the install here), **Set up a remote device** (over SSH), or
 **Import a project**; **Skip** goes to the project list. Home lists your
 projects and holds **Create Project** (from a template) and
-**Import Machine Profile**.
+**Import Machine Profile**. Import takes a directory on the machine running
+the workbench, or, with **Choose folder…**, a folder on the computer your
+browser runs on, which the browser uploads (at most 200 files and 2 MiB).
 
 ## Compose, Commission, Operate
 

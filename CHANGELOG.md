@@ -24,9 +24,19 @@ Historical note:
   reading's declared decimals (0.1 without them), so a reading moving by its
   last digit draws near flat, and the window's high and low are labelled
   beside it.
+- **Import a project folder from the browser's computer** (#749). Home's
+  Import Machine Profile has **Choose folder…**: the browser uploads the
+  folder (`POST /api/projects/import-upload`), and the server writes it to a
+  private staging directory under the data dir, validates and imports it as a
+  path import does, and removes the staging directory. A path that is not a
+  plain relative path, more than 200 files or more than 2 MiB is refused
+  before anything is written. The path field stays for a directory on the
+  workbench's machine.
 
 ### Changed
 
+- **A setting an operator changed reads "changed"** (#232), where it read
+  "set"; one at the project's value still reads "default".
 - **Plain wording in the UI** (#746). The UI's text has no em dashes: each
   is a colon, a full stop or a comma now. The machine line and the trip
   clear say "device", not "board" ("Device tripped: clear the trip on …").
@@ -52,6 +62,13 @@ Historical note:
 
 ### Fixed
 
+- **Operate says it is connecting until the first status arrives** (#754).
+  The machine line said "The runtime is not answering." while the first
+  runtime status was still on its way; it now says "Connecting to the
+  runtime…", and keeps "not answering" for a status request that failed.
+  Until then Readings say "loading", Now says "Loading…", Settings say
+  "loading…", and Start refuses with "still connecting". A reload of a page
+  keeps its query string, which the first navigation used to drop.
 - **Operate's requests through the workbench are faster** (#754). Each
   proxied request resolved the runtime's address afresh: the launcher's
   status (every project, and a probe of the installed runtime), the running
