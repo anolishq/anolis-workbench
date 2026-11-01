@@ -13,6 +13,20 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-31
+
+Upgrade notes:
+
+- **Start run no longer switches groups on.** It runs the groups an
+  operator ticked On, and refuses while none is (anolishq/anolis#701). A
+  profile that relied on Start to switch everything on needs the groups
+  ticked first. Stop run still switches them off.
+- **"Experiment" is now "Run"** in the operator panel (anolishq/anolis#696):
+  the section, Start run and Stop run, and each run is opened and closed in
+  the runtime's run journal. A profile's `operator.experiment` is still read.
+- Needs anolis 0.9.0 or later for `operator.run`, `require.when` and
+  `operator.actions`; older runtimes show the panel without them.
+
 ### Added
 
 - **Action buttons in the Run section** (anolishq/anolis#697), from the
