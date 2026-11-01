@@ -63,6 +63,8 @@ function fakeRuntime(
     noJournal?: boolean;
     /** Bool parameters to start at these values instead of the defaults. */
     switches?: Record<string, boolean>;
+    /** Provider ids the runtime status reports (wb#771). */
+    providers?: string[];
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
@@ -132,7 +134,7 @@ function fakeRuntime(
           mode,
           uptime_seconds: uptime,
           polling_interval_ms: 500,
-          providers: [],
+          providers: (opts.providers ?? []).map((provider_id) => ({ provider_id, state: "AVAILABLE" })),
           device_count: 2,
           device_loss_latched: opts.lost ? ["bread0/dcmt1"] : [],
           ...(opts.chainInForce
@@ -438,6 +440,24 @@ describe("Operate.svelte — Start and Stop run (#729, anolis#696)", () => {
     const feedback = await screen.findByTestId("run-feedback");
     expect(feedback).toHaveTextContent("Run started: AUTO.");
     expect(feedback).toHaveTextContent("demo-1");
+  });
+
+  // wb#771: telemetry-export seeds a run's flat signals only when the run has
+  // a tag_scope, and the scope also filters the export. Every provider the
+  // runtime reports, nothing narrower, keeps every series in the export.
+  it("Start scopes the run to every provider the runtime reports, and no narrower (wb#771)", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", providers: ["ezo0", "bread0", "ezo0"] });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+    expect(rt.posts[0]).toEqual({
+      path: "/v0/runs",
+      body: {
+        params: SETTINGS,
+        tag_scope: { provider_ids: ["bread0", "ezo0"], device_ids: [], signal_ids: [] },
+      },
+    });
   });
 
   it("Stop clears each enable, goes to IDLE by way of MANUAL, then closes the open run", async () => {

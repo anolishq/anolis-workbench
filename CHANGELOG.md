@@ -13,6 +13,14 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **Start run scopes the run to every provider the runtime reports**
+  (#771), with no device or signal narrower. telemetry-export seeds a run's
+  flat signals with their value at its start only when the run has a
+  `tag_scope`, and the scope also filters the export, so a run started from
+  Operate now exports seeded, and no series is left out.
+
 ### Fixed
 
 - **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
