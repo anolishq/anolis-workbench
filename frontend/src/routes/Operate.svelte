@@ -79,6 +79,7 @@
     summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
+    startupFailuresUntripped,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -1739,10 +1740,16 @@
                the row only when it was not achieved. -->
           {@const startup = summarizeStartupSafeState(startupSafeState)}
           {#if !startup.ok}
+            <!-- It describes the last start, not now (wb#769). -->
+            {@const untripped = startupFailuresUntripped(startupSafeState, providerHealth)}
             <span class="estop-chip field-error" data-testid="estop-startup">
-              ⚠ Startup safe state not achieved
+              ⚠ At startup, safe state not achieved{#if untripped}&nbsp;· no trip reported now{/if}
             </span>
-            <InfoToggle label="About the startup safe state">{startup.text}</InfoToggle>
+            <InfoToggle label="About the startup safe state">
+              {startup.text} This is from the runtime's last start and stays until it restarts; a restart
+              re-applies the safe state.{#if untripped}&nbsp;None of the devices whose calls failed
+                reports a watchdog trip now.{/if}
+            </InfoToggle>
           {/if}
         {/if}
         {#if estopFeedback}
