@@ -27,7 +27,8 @@ def _status(monkeypatch) -> dict:
     commission.status(handler, host="127.0.0.1", port=3010)
     code, payload = handler.sent[0]
     assert code == 200
-    return payload["workbench"]
+    workbench: dict = payload["workbench"]
+    return workbench
 
 
 def test_status_names_the_package_version_and_an_instance(monkeypatch) -> None:
