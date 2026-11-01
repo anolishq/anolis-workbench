@@ -918,7 +918,7 @@ describe("Operate.svelte — a page older than the workbench serving it (#777)",
     await vi.advanceTimersByTimeAsync(5000);
 
     const banner = await screen.findByTestId("workbench-stale");
-    expect(banner).toHaveTextContent("0.31.0");
+    expect(banner).toHaveTextContent("updated from 0.30.0 to 0.31.0");
     expect(within(banner).getByRole("button", { name: "Reload" })).toBeInTheDocument();
 
     await fireEvent.click(within(screen.getByTestId("operator-actions")).getByRole("button", { name: "Sample now" }));

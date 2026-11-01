@@ -89,7 +89,11 @@
     formatValue,
     removeDevice,
   } from "../lib/operate-events";
-  import { noteWorkbenchInstance } from "../lib/workbench-instance";
+  import {
+    describeWorkbenchChange,
+    noteWorkbenchInstance,
+    type WorkbenchChange,
+  } from "../lib/workbench-instance";
 
   let {
     projectName,
@@ -983,9 +987,9 @@
   // (anolis#681): a falling uptime is a restart, said once until dismissed.
   // Kept across Operate stopping, so a restart from Commission counts too.
   let restartNote = $state<boolean>(false);
-  // The workbench restarted or was upgraded after this page loaded (#777):
-  // the version serving it now, "" when unnamed, null while it's the same.
-  let staleWorkbench = $state<string | null>(null);
+  // The workbench restarted or was upgraded after this page loaded (#777);
+  // null while it's the one the page loaded from.
+  let staleWorkbench = $state<WorkbenchChange | null>(null);
   const STALE_REFUSAL =
     "Refused: the workbench was updated or restarted after this page loaded. Reload this page first.";
   let lastUptime: number | null = null;
@@ -1807,9 +1811,9 @@
     <div class="operate-section operator-panel">
       {#if staleWorkbench !== null}
         <div class="workspace-advisory" data-testid="workbench-stale">
-          The workbench was {staleWorkbench ? `updated to ${staleWorkbench}` : "restarted"} after this
-          page loaded, so the page still runs its older code and project. Reload it before starting a
-          run or pressing an action; Stop and the software stop still work.
+          The workbench was {describeWorkbenchChange(staleWorkbench)} after this page loaded, so the page
+          still runs its older code and project. Reload it before starting a run or pressing an action;
+          Stop run, the mode and the software stop still work.
           <button type="button" class="btn-secondary" onclick={() => location.reload()}
             >Reload</button
           >
