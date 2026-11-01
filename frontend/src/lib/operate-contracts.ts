@@ -12,6 +12,7 @@ import type {
   FunctionArgSpec,
   FunctionSpec,
   OperatorBlock,
+  OperatorRun,
   ParameterDefinition,
   StartRequirement,
   ProviderHealth,
@@ -804,13 +805,18 @@ export function deviceLosses(
   return { latched, lost: latched.filter((handle) => !reachable.has(handle)) };
 }
 
+/** The profile's run block, or its deprecated alias experiment (anolis#696). */
+export function operatorRun(operator: OperatorBlock | undefined): OperatorRun | undefined {
+  return operator?.run ?? operator?.experiment;
+}
+
 /**
- * Why Start experiment would not work, with the fix, or "" (wb#729). Only
+ * Why Start run would not work, with the fix, or "" (wb#729). Only
  * what Operate reads exactly: a brake has no declaration yet (anolis#686).
  * FAULT is refused rather than left by way of MANUAL, which would clear the
  * fault before the operator saw its cause.
  */
-export function experimentStartRefusal(
+export function runStartRefusal(
   status: RuntimeApiStatus | null,
   estop: EstopStatus | null,
   stopChain: StopChainStatus | null,
@@ -911,7 +917,7 @@ export function machineLine(
       "Go to Mode",
     );
   }
-  if (status.mode === "AUTO") return line("running", "Experiment running.");
+  if (status.mode === "AUTO") return line("running", "Running.");
   return line("ready", "Ready.");
 }
 
@@ -973,7 +979,7 @@ export function operatorReadings(
 
 /**
  * What is happening per settings group (wb#728, wb#748): a group whose items
- * include one of experiment.start's enable parameters reads on or off from
+ * include one of run.start's enable parameters reads on or off from
  * it, and while on, its first other item, its main value. On means
  * scheduled, not that its actuator is running now. The rest of the schedule
  * is in Settings, so it is not repeated here, and a group with no enable is
@@ -983,7 +989,7 @@ export function operatorSettingsLines(
   operator: OperatorBlock | undefined,
   parameters: ParameterDefinition[],
 ): string[] {
-  const enables = new Set(operator?.experiment?.start?.enable ?? []);
+  const enables = new Set(operatorRun(operator)?.start?.enable ?? []);
   const byName = new Map(parameters.map((p) => [p.name, p]));
   const lines: string[] = [];
   for (const group of operator?.settings ?? []) {
@@ -1014,8 +1020,38 @@ export function signalDevice(signal: string): string {
   return signal.split("/").slice(0, 2).join("/");
 }
 
+/** The parameter's value is true; one the runtime does not report is not. */
+function isOn(parameters: ParameterDefinition[], name: string): boolean {
+  return parameters.find((p) => p.name === name)?.value === true;
+}
+
 /**
- * The messages of experiment.start.require entries that do not hold
+ * The run.start.require entries that apply to this Start (anolis#701): those
+ * without `when`, and those whose `when` parameter is on now. Start leaves
+ * the switches as the operator set them.
+ */
+export function applicableRequirements(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): StartRequirement[] {
+  return (start?.require ?? []).filter((r) => r.when === undefined || isOn(parameters, r.when));
+}
+
+/**
+ * Start has nothing to run (anolis#701): the profile lists groups' on
+ * switches in start.enable and every one of them is off. A profile that
+ * lists none can always start.
+ */
+export function nothingSwitchedOn(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): boolean {
+  const switches = start?.enable ?? [];
+  return switches.length > 0 && !switches.some((name) => isOn(parameters, name));
+}
+
+/**
+ * The messages of run.start.require entries that do not hold
  * (anolis#686), from the state Operate holds per device. A reading that is
  * missing or not OK cannot show the condition holds, so it does not, and the
  * message says which.

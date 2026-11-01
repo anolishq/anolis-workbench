@@ -21,7 +21,7 @@ const OPERATOR = {
       ],
     },
   ],
-  experiment: {
+  run: {
     start: { enable: ["impeller_enable"], mode: "AUTO" },
     stop: { disable: ["impeller_enable"], mode: "IDLE" },
   },
@@ -73,9 +73,9 @@ describe("Operate.svelte — before the first status (wb#754)", () => {
       expect(screen.getByTestId("machine-line")).toHaveTextContent("Connecting to the runtime…"),
     );
 
-    await fireEvent.click(screen.getByRole("button", { name: "Start experiment" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Start run" }));
 
-    const feedback = await screen.findByTestId("experiment-feedback");
+    const feedback = await screen.findByTestId("run-feedback");
     expect(feedback).toHaveTextContent("still connecting");
     expect(feedback).not.toHaveTextContent("not answering");
   });

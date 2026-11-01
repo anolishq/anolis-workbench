@@ -8,6 +8,7 @@ import type {
 } from "../../src/lib/contracts";
 import {
   applyCallFailedEvent,
+  applicableRequirements,
   callFailureLines,
   operatorReadings,
   operatorSettingsLines,
@@ -34,7 +35,7 @@ const OPERATOR: OperatorBlock = {
     },
     { group: "Missing", items: [{ parameter: "nope", label: "Value" }] },
   ],
-  experiment: { start: { enable: ["dose_enable"], mode: "AUTO" } },
+  run: { start: { enable: ["dose_enable"], mode: "AUTO" } },
 };
 
 describe("operatorReadings", () => {
@@ -98,7 +99,34 @@ describe("operatorSettingsLines", () => {
   });
 });
 
-// anolis#686: experiment.start.require, compared by the value's type.
+// anolis#701: a require entry with `when` applies only while that bool
+// parameter reads true now. Start no longer turns the switches on.
+describe("applicableRequirements", () => {
+  const brake = { signal: "bread0/dcmt0/motor1_brake", equals: false, message: "Release the sampler's brake" };
+  const params = (value: boolean): ParameterDefinition[] => [
+    { name: "sample_enable", type: "bool", value },
+  ];
+
+  it("keeps an entry without when", () => {
+    expect(applicableRequirements({ mode: "AUTO", require: [brake] }, params(false))).toEqual([brake]);
+  });
+
+  it("drops an entry whose when parameter is off and Start leaves it off", () => {
+    const entry = { ...brake, when: "sample_enable" };
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, params(false))).toEqual([]);
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, [])).toEqual([]);
+  });
+
+  it("keeps it while the parameter is on, and only then, start.enable or not", () => {
+    const entry = { ...brake, when: "sample_enable" };
+    expect(applicableRequirements({ mode: "AUTO", require: [entry] }, params(true))).toEqual([entry]);
+    expect(
+      applicableRequirements({ mode: "AUTO", enable: ["sample_enable"], require: [entry] }, params(false)),
+    ).toEqual([]);
+  });
+});
+
+// anolis#686: run.start.require, compared by the value's type.
 describe("unmetStartRequirements", () => {
   const REQUIRE = [
     { signal: "bread0/dcmt1/motor1_brake", equals: false, message: "Release the brake" },

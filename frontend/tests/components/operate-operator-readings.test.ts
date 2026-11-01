@@ -36,7 +36,7 @@ const OPERATOR = {
     },
     { group: "Limits", items: [{ parameter: "temp_max_c", label: "Max", unit: "°C" }] },
   ],
-  experiment: {
+  run: {
     start: { enable: ["impeller_enable", "dose1_enable"], mode: "AUTO" },
     stop: { disable: ["impeller_enable", "dose1_enable"], mode: "IDLE" },
   },
@@ -193,7 +193,7 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
     expect(now).not.toHaveTextContent("For 3 s");
     expect(now).toHaveTextContent("Stirring: off");
     expect(now).not.toHaveTextContent("Speed");
-    // A group with no enable among experiment.start.enable says nothing here.
+    // A group with no enable among run.start.enable says nothing here.
     expect(now).not.toHaveTextContent("Limits");
     expect(now.closest("details")).toBeNull();
     expect(
@@ -205,7 +205,7 @@ describe("Operate.svelte — the operator panel's readings (#728)", () => {
   it("shows neither without an operator block", async () => {
     fakeRuntime({ operator: null });
 
-    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("running"));
+    await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Running."));
     expect(screen.queryByTestId("operator-readings")).toBeNull();
     expect(screen.queryByTestId("operator-now")).toBeNull();
   });

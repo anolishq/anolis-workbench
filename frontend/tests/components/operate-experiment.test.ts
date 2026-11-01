@@ -7,8 +7,8 @@ import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
 // wb#729: the operator panel's settings, the declared groups with labels,
 // units, current values and where each value came from, saved one group at a
 // time; a note once after a restart that they are back at their defaults
-// (anolis#681); and Start and Stop experiment, which run the profile's
-// experiment.start and experiment.stop, Start refusing with the reason and
+// (anolis#681); and Start and Stop run, which run the profile's
+// run.start and run.stop, Start refusing with the reason and
 // the fix while the software stop is latched, a board is tripped or a device
 // is lost.
 
@@ -26,7 +26,7 @@ const OPERATOR = {
     },
     { group: "Stirring", items: [{ parameter: "impeller_pwm", label: "Speed", unit: "%" }] },
   ],
-  experiment: {
+  run: {
     start: { enable: ["impeller_enable", "dose1_enable"], mode: "AUTO" },
     stop: { disable: ["impeller_enable", "dose1_enable"], mode: "IDLE" },
   },
@@ -57,6 +57,12 @@ function fakeRuntime(
     states?: Record<string, { signal_id: string; value: unknown; quality: string }[]>;
     /** Holds each GET /v0/parameters after a parameter post until it settles. */
     refreshAfterSave?: Promise<void>;
+    /** A run already open when the page loads (anolis#696). */
+    openRun?: boolean;
+    /** The runtime has no run journal: every /v0/runs answers 503. */
+    noJournal?: boolean;
+    /** Bool parameters to start at these values instead of the defaults. */
+    switches?: Record<string, boolean>;
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
@@ -65,10 +71,18 @@ function fakeRuntime(
     { name: "dose1_enable", type: "bool", value: false, source: "default" },
     { name: "dose1_interval_s", type: "int64", value: 20, source: "operator", min: 1, max: 86400 },
     { name: "dose1_pulse_s", type: "int64", value: 3, source: "default", min: 1, max: 60 },
-    { name: "impeller_enable", type: "bool", value: false, source: "default" },
+    // On, so a plain Start has something switched on (anolis#701).
+    { name: "impeller_enable", type: "bool", value: true, source: "default" },
     { name: "impeller_pwm", type: "int64", value: 80, source: "default", min: 0, max: 100 },
   ];
+  for (const [name, value] of Object.entries(opts.switches ?? {})) {
+    const p = params.find((x) => x.name === name);
+    if (p) p.value = value;
+  }
   const posts: Post[] = [];
+  const runs: { run_id: string; state: string }[] = opts.openRun
+    ? [{ run_id: "demo-0", state: "open" }]
+    : [];
   // A poll's GET /v0/parameters held after reading, to land after a Save (#767).
   let holdNextRead: Promise<void> | null = null;
   vi.stubGlobal(
@@ -86,6 +100,23 @@ function fakeRuntime(
         if (path === "/v0/mode") {
           mode = String(body.mode);
           return jsonResponse(200, { status: { code: "OK" }, mode });
+        }
+        if (path.startsWith("/v0/runs") && opts.noJournal)
+          return jsonResponse(503, {
+            status: { code: "UNAVAILABLE", message: "Run registry not enabled" },
+          });
+        if (path === "/v0/runs") {
+          if (runs.some((r) => r.state === "open"))
+            return jsonResponse(409, { status: { code: "FAILED_PRECONDITION" } });
+          const run = { run_id: `demo-${runs.length + 1}`, state: "open" };
+          runs.unshift(run);
+          return jsonResponse(200, { status: { code: "OK" }, run });
+        }
+        const close = path.match(/^\/v0\/runs\/([^/]+)\/close$/);
+        if (close) {
+          const run = runs.find((r) => r.run_id === close[1]);
+          if (run) run.state = "closed";
+          return jsonResponse(200, { status: { code: "OK" }, run });
         }
         return jsonResponse(200, { status: { code: "OK" } });
       }
@@ -120,6 +151,10 @@ function fakeRuntime(
         });
       }
       if (path === "/v0/mode") return jsonResponse(200, { status: { code: "OK" }, mode });
+      if (path === "/v0/runs") {
+        if (opts.noJournal) return jsonResponse(503, { status: { code: "UNAVAILABLE" } });
+        return jsonResponse(200, { status: { code: "OK" }, runs, count: runs.length });
+      }
       if (path === "/v0/parameters") {
         if (holdNextRead) {
           const held = holdNextRead;
@@ -173,6 +208,7 @@ function fakeRuntime(
   return {
     posts,
     mode: () => mode,
+    runs,
     /** Holds the next GET /v0/parameters with the values as read; returns its release. */
     holdNextParametersRead: () => {
       let release = () => {};
@@ -255,12 +291,18 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
   it("keeps a ticked box ticked while Save refreshes the values (#745)", async () => {
     let release = () => {};
     const rt = fakeRuntime({ refreshAfterSave: new Promise<void>((r) => (release = r)) });
-    const on = (await waitFor(() => within(row("Dose 1", "On")).getByRole("checkbox"))) as HTMLInputElement;
-    await waitFor(() => expect(within(row("Dose 1", "Every")).getByRole("textbox")).toHaveValue("20"));
+    const on = (await waitFor(() =>
+      within(row("Dose 1", "On")).getByRole("checkbox"),
+    )) as HTMLInputElement;
+    await waitFor(() =>
+      expect(within(row("Dose 1", "Every")).getByRole("textbox")).toHaveValue("20"),
+    );
 
     await fireEvent.click(on);
     await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(paramPosts(rt.posts)).toEqual([{ name: "dose1_enable", value: true }]));
+    await waitFor(() =>
+      expect(paramPosts(rt.posts)).toEqual([{ name: "dose1_enable", value: true }]),
+    );
 
     // Posted, the refresh still out: the box shows what was saved.
     expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
@@ -357,46 +399,120 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
   });
 });
 
-describe("Operate.svelte — Start and Stop experiment (#729)", () => {
+// anolis#696: operator.run (operator.experiment is its deprecated alias).
+// Settings and Start/Stop are one section, headed by run.label or "Run".
+// Start run opens a run in the runtime's journal before it sets anything, so
+// the run records the settings and every change after; Stop run closes it.
+describe("Operate.svelte — Start and Stop run (#729, anolis#696)", () => {
+  const SETTINGS = {
+    dose1_enable: false,
+    dose1_interval_s: 20,
+    dose1_pulse_s: 3,
+    impeller_pwm: 80,
+  };
+  const sent = (posts: Post[]) => posts.map((p) => [p.path, p.body]);
+
   async function click(name: string) {
     await waitFor(() =>
       expect(screen.getByTestId("machine-line")).not.toHaveTextContent(
         /not answering|Connecting/,
       ),
     );
-    await fireEvent.click(
-      within(screen.getByTestId("operator-experiment")).getByRole("button", { name }),
-    );
+    await fireEvent.click(within(screen.getByTestId("operator-run")).getByRole("button", { name }));
   }
 
-  it("Start sets each enable, then goes to AUTO by way of MANUAL", async () => {
+  // anolis#701: Start leaves the On switches as the operator set them.
+  it("Start opens a run with the settings, leaves the On switches as they are, then goes to AUTO by way of MANUAL", async () => {
     const rt = fakeRuntime({ mode: "IDLE" });
     await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
-    await click("Start experiment");
+    await click("Start run");
 
     await waitFor(() => expect(rt.mode()).toBe("AUTO"));
-    expect(rt.posts.map((p) => p.body)).toEqual([
-      { name: "impeller_enable", value: true },
-      { name: "dose1_enable", value: true },
-      { mode: "MANUAL" },
-      { mode: "AUTO" },
+    expect(sent(rt.posts)).toEqual([
+      ["/v0/runs", { params: SETTINGS }],
+      ["/v0/mode", { mode: "MANUAL" }],
+      ["/v0/mode", { mode: "AUTO" }],
     ]);
-    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent("started");
+    const feedback = await screen.findByTestId("run-feedback");
+    expect(feedback).toHaveTextContent("Run started: AUTO.");
+    expect(feedback).toHaveTextContent("demo-1");
   });
 
-  it("Stop clears each enable, then goes to IDLE by way of MANUAL", async () => {
-    const rt = fakeRuntime({ mode: "AUTO" });
+  it("Stop clears each enable, goes to IDLE by way of MANUAL, then closes the open run", async () => {
+    const rt = fakeRuntime({ mode: "AUTO", openRun: true });
     await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("AUTO"));
-    await click("Stop experiment");
+    await click("Stop run");
 
-    await waitFor(() => expect(rt.mode()).toBe("IDLE"));
-    expect(rt.posts.map((p) => p.body)).toEqual([
-      { name: "impeller_enable", value: false },
-      { name: "dose1_enable", value: false },
-      { mode: "MANUAL" },
-      { mode: "IDLE" },
+    await waitFor(() => expect(rt.runs[0].state).toBe("closed"));
+    expect(sent(rt.posts)).toEqual([
+      ["/v0/parameters", { name: "impeller_enable", value: false }],
+      ["/v0/parameters", { name: "dose1_enable", value: false }],
+      ["/v0/mode", { mode: "MANUAL" }],
+      ["/v0/mode", { mode: "IDLE" }],
+      ["/v0/runs/demo-0/close", { close_reason: "operator_stop" }],
     ]);
-    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent("stopped");
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent("Run stopped: IDLE.");
+  });
+
+  it("Start refuses when nothing is switched on, and sends nothing (anolis#701)", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      switches: { impeller_enable: false, dose1_enable: false },
+    });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
+      "Refused: nothing is switched on. Tick On for at least one group.",
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("Start reports a run already open, names it, and changes nothing", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", openRun: true });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    const feedback = await screen.findByTestId("run-feedback");
+    expect(feedback).toHaveTextContent(/run demo-0 is already open.*Stop run closes it/);
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("without a run journal, Start still runs and says the run is not recorded", async () => {
+    const rt = fakeRuntime({ mode: "IDLE", noJournal: true });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
+      /Run started: AUTO\. Not recorded: the runtime has no run journal/,
+    );
+  });
+
+  it("is one section, headed by the run's label, with the settings and when they apply", async () => {
+    fakeRuntime({ operator: { ...OPERATOR, run: { ...OPERATOR.run, label: "Batch" } } });
+
+    const section = await screen.findByTestId("operator-run");
+    expect(within(section).getByRole("heading", { level: 3 })).toHaveTextContent("Batch");
+    expect(within(section).getByTestId("operator-settings")).toBeInTheDocument();
+    expect(section).toHaveTextContent("Settings apply while the automation runs (AUTO).");
+  });
+
+  it('is headed "Run" without a label', async () => {
+    fakeRuntime();
+
+    const section = await screen.findByTestId("operator-run");
+    expect(within(section).getByRole("heading", { level: 3 })).toHaveTextContent(/^Run$/);
+  });
+
+  it("reads the deprecated operator.experiment as the run", async () => {
+    const { run, ...rest } = OPERATOR;
+    const rt = fakeRuntime({ mode: "IDLE", operator: { ...rest, experiment: run } });
+    await waitFor(() => expect(screen.getByTestId("mode-badge")).toHaveTextContent("IDLE"));
+    await click("Start run");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
+    expect(rt.posts[0].path).toBe("/v0/runs");
   });
 
   it.each([
@@ -407,7 +523,7 @@ describe("Operate.svelte — Start and Stop experiment (#729)", () => {
       "software stop",
       /software stop is latched.*Clear the latch/,
     ],
-    ["a board is tripped", { tripped: true }, "tripped", /bread0\/dcmt0.*tripped.*Clear the trip/],
+    ["a device is tripped", { tripped: true }, "tripped", /bread0\/dcmt0.*tripped.*Clear the trip/],
     ["a device is lost", { lost: true }, "lost", /bread0\/dcmt1.*lost.*power/],
     // From FAULT, going by way of MANUAL would clear the fault unseen.
     [
@@ -434,36 +550,34 @@ describe("Operate.svelte — Start and Stop experiment (#729)", () => {
       );
       await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent(line));
       await fireEvent.click(
-        within(screen.getByTestId("operator-experiment")).getByRole("button", {
-          name: "Start experiment",
-        }),
+        within(screen.getByTestId("operator-run")).getByRole("button", { name: "Start run" }),
       );
 
-      expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(text);
+      expect(await screen.findByTestId("run-feedback")).toHaveTextContent(text);
       expect(rt.posts).toEqual([]);
     },
   );
 
-  it("offers neither without an experiment, and no settings without settings", async () => {
+  it("offers no run section without a run or settings", async () => {
     fakeRuntime({ operator: null });
 
     await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent("Ready"));
-    expect(screen.queryByTestId("operator-experiment")).toBeNull();
+    expect(screen.queryByTestId("operator-run")).toBeNull();
     expect(screen.queryByTestId("operator-settings")).toBeNull();
   });
 });
 
-// anolis#686: the profile's experiment.start.require, conditions on signals
+// anolis#686: the profile's run.start.require, conditions on signals
 // that must hold before Start runs. Start reads each named signal when
 // clicked and refuses with the declared message while one does not hold,
 // after the generic refusals.
 describe("Operate.svelte — Start's declared requirements (#686)", () => {
   const REQUIRING = {
     ...OPERATOR,
-    experiment: {
-      ...OPERATOR.experiment,
+    run: {
+      ...OPERATOR.run,
       start: {
-        ...OPERATOR.experiment.start,
+        ...OPERATOR.run.start,
         require: [
           {
             signal: "bread0/dcmt1/motor1_brake",
@@ -489,9 +603,7 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
   async function start(line: string) {
     await waitFor(() => expect(screen.getByTestId("machine-line")).toHaveTextContent(line));
     await fireEvent.click(
-      within(screen.getByTestId("operator-experiment")).getByRole("button", {
-        name: "Start experiment",
-      }),
+      within(screen.getByTestId("operator-run")).getByRole("button", { name: "Start run" }),
     );
   }
 
@@ -499,7 +611,7 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: brakes(true, false) });
     await start("Ready");
 
-    const feedback = await screen.findByTestId("experiment-feedback");
+    const feedback = await screen.findByTestId("run-feedback");
     expect(feedback).toHaveTextContent("Release dose pump 1's brake");
     expect(feedback).not.toHaveTextContent("pump 2");
     expect(rt.posts).toEqual([]);
@@ -509,7 +621,7 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: brakes(true, true) });
     await start("Ready");
 
-    const feedback = await screen.findByTestId("experiment-feedback");
+    const feedback = await screen.findByTestId("run-feedback");
     expect(feedback).toHaveTextContent("Release dose pump 1's brake");
     expect(feedback).toHaveTextContent("Release dose pump 2's brake");
     expect(rt.posts).toEqual([]);
@@ -529,7 +641,7 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
       states: brakes(false, false, "STALE"),
     });
     await start("Ready");
-    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
       /Release dose pump 1's brake.*stale/,
     );
     expect(stale.posts).toEqual([]);
@@ -538,10 +650,49 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
   it("refuses when a required signal has no reading", async () => {
     const rt = fakeRuntime({ mode: "IDLE", operator: REQUIRING, states: {} });
     await start("Ready");
-    expect(await screen.findByTestId("experiment-feedback")).toHaveTextContent(
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
       /Release dose pump 1's brake.*no reading/,
     );
     expect(rt.posts).toEqual([]);
+  });
+
+  // anolis#701: a requirement with when follows that group's On switch.
+  const SAMPLER_STYLE = {
+    ...REQUIRING,
+    run: {
+      ...REQUIRING.run,
+      start: {
+        ...REQUIRING.run.start,
+        require: [{ ...REQUIRING.run.start.require[0], when: "dose1_enable" }],
+      },
+    },
+  };
+
+  it("refuses a ticked group whose condition does not hold", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      operator: SAMPLER_STYLE,
+      states: brakes(true, false),
+      switches: { dose1_enable: true },
+    });
+    await start("Ready");
+
+    expect(await screen.findByTestId("run-feedback")).toHaveTextContent(
+      "Release dose pump 1's brake",
+    );
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("runs with an unticked group whose condition does not hold", async () => {
+    const rt = fakeRuntime({
+      mode: "IDLE",
+      operator: SAMPLER_STYLE,
+      states: brakes(true, false),
+      switches: { dose1_enable: false },
+    });
+    await start("Ready");
+
+    await waitFor(() => expect(rt.mode()).toBe("AUTO"));
   });
 
   it("gives a generic refusal first", async () => {
@@ -553,7 +704,7 @@ describe("Operate.svelte — Start's declared requirements (#686)", () => {
     });
     await start("software stop");
 
-    const feedback = await screen.findByTestId("experiment-feedback");
+    const feedback = await screen.findByTestId("run-feedback");
     expect(feedback).toHaveTextContent("software stop is latched");
     expect(feedback).not.toHaveTextContent("brake");
     expect(rt.posts).toEqual([]);

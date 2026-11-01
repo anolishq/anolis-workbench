@@ -47,7 +47,6 @@
     coerceParameterValue,
     deriveOperateAvailability,
     DISPATCHABLE_COVERAGE_SINCE,
-    experimentStartRefusal,
     extractAutomationStatus,
     extractAutomationTree,
     extractCapabilities,
@@ -66,10 +65,14 @@
     normalizeParameterType,
     normalizeProviderHealthQuality,
     operatorReadings,
+    operatorRun,
     operatorSettingsLines,
     signalDevice,
+    applicableRequirements,
+    nothingSwitchedOn,
     unmetStartRequirements,
     renderBtOutline,
+    runStartRefusal,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
@@ -239,6 +242,8 @@
       if (moved) readingHistory = next;
     });
   });
+  // operator.run, or its deprecated alias operator.experiment (anolis#696).
+  const run = $derived(operatorRun(operator));
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
   const dispatchableCoverage = $derived(
@@ -964,7 +969,7 @@
     }
   }
 
-  // ── Operator settings and Start/Stop experiment (wb#729) ──────────────────
+  // ── Operator settings and Start/Stop run (wb#729, anolis#696) ─────────────
   // What the operator has typed per parameter, until the group is saved.
   let settingsDraft = $state<Record<string, string>>({});
   let settingsErrors = $state<Record<string, string>>({});
@@ -974,8 +979,8 @@
   // Kept across Operate stopping, so a restart from Commission counts too.
   let restartNote = $state<boolean>(false);
   let lastUptime: number | null = null;
-  let experimentRunning = $state<boolean>(false);
-  let experimentFeedback = $state<{ text: string; cls: string } | null>(null);
+  let runBusy = $state<boolean>(false);
+  let runFeedback = $state<{ text: string; cls: string } | null>(null);
 
   function noteRestart(status: RuntimeApiStatus | null): void {
     if (!status) return;
@@ -1068,25 +1073,43 @@
   }
 
   /**
-   * Runs experiment.start or experiment.stop: the parameters, then the mode,
-   * by way of MANUAL where the runtime does not allow the move directly.
+   * The open run in the runtime's journal (anolis#696): its id, null with
+   * none open, or undefined when the runtime has no journal (503: no
+   * runtime.data_dir). Only the newest run can be open.
    */
-  async function runExperiment(kind: "start" | "stop"): Promise<void> {
-    const start = operator?.experiment?.start;
-    const stop = operator?.experiment?.stop;
+  async function openRunId(): Promise<string | null | undefined> {
+    try {
+      const body = await fetchJson<UnknownRecord>("/v0/runs?limit=1");
+      const newest = (Array.isArray(body.runs) ? body.runs : [])[0] as UnknownRecord | undefined;
+      return newest?.state === "open" && typeof newest.run_id === "string" ? newest.run_id : null;
+    } catch (err) {
+      if (err instanceof ApiResponseError && err.status === 503) return undefined;
+      throw err;
+    }
+  }
+
+  /**
+   * Runs run.start or run.stop: the parameters, then the mode, by way of
+   * MANUAL where the runtime does not allow the move directly. Start opens a
+   * run in the journal first, so the run records the settings it started
+   * with and every change after; Stop closes the open run last.
+   */
+  async function runStartStop(kind: "start" | "stop"): Promise<void> {
+    const start = run?.start;
+    const stop = run?.stop;
     const step = kind === "start" ? start : stop;
     if (!step) return;
-    experimentFeedback = null;
+    runFeedback = null;
     if (kind === "start" && !statusSettled) {
       // Not "not answering": the first status has not arrived yet (wb#754).
-      experimentFeedback = {
+      runFeedback = {
         text: "Refused: still connecting to the runtime. Start again in a moment.",
         cls: "field-error",
       };
       return;
     }
     if (kind === "start") {
-      const refusal = experimentStartRefusal(
+      const refusal = runStartRefusal(
         runtimeStatusData,
         estop,
         stopChain,
@@ -1095,26 +1118,60 @@
         automationFault?.message ?? "",
       );
       if (refusal) {
-        experimentFeedback = { text: refusal, cls: "field-error" };
+        runFeedback = { text: refusal, cls: "field-error" };
+        return;
+      }
+      // Start runs the groups the operator switched on, and leaves the
+      // switches as they are (anolis#701).
+      if (nothingSwitchedOn(start, parameters)) {
+        runFeedback = {
+          text: "Refused: nothing is switched on. Tick On for at least one group.",
+          cls: "field-error",
+        };
         return;
       }
       // The profile's own conditions (anolis#686), on signals read now, not
       // up to a poll old.
-      const require = start?.require ?? [];
+      const require = applicableRequirements(start, parameters);
       if (require.length) {
         await loadDeviceStates(require.map((r) => signalDevice(r.signal)));
         const unmet = unmetStartRequirements(require, deviceStates);
         if (unmet.length) {
-          experimentFeedback = { text: `Refused: ${unmet.join("; ")}.`, cls: "field-error" };
+          runFeedback = { text: `Refused: ${unmet.join("; ")}.`, cls: "field-error" };
           return;
         }
       }
     }
-    const names = (kind === "start" ? start?.enable : stop?.disable) ?? [];
+    // Stop switches its groups off; Start leaves the switches alone.
+    const names = kind === "stop" ? (stop?.disable ?? []) : [];
     const verb = kind === "start" ? "Start" : "Stop";
-    experimentRunning = true;
-    let at = "";
+    runBusy = true;
+    let at = "reading the run journal";
+    let recorded = "";
     try {
+      const openId = await openRunId();
+      if (kind === "start" && openId) {
+        runFeedback = {
+          text: `Refused: run ${openId} is already open. Stop run closes it.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      if (kind === "start" && openId === null) {
+        at = "opening the run";
+        const params: Record<string, unknown> = {};
+        for (const item of (operator?.settings ?? []).flatMap((g) => g.items)) {
+          const param = parameters.find((p) => p.name === item.parameter);
+          if (param) params[param.name] = param.value;
+        }
+        const opened = await fetchJson<UnknownRecord>("/v0/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ params }),
+        });
+        const id = (opened.run as UnknownRecord | undefined)?.run_id;
+        recorded = typeof id === "string" ? ` Recorded as run ${id}.` : "";
+      }
       for (const name of names) {
         at = `setting ${name}`;
         await fetchJson<UnknownRecord>("/v0/parameters", {
@@ -1131,17 +1188,29 @@
         at = `setting ${step.mode}`;
         await postMode(step.mode);
       }
-      experimentFeedback = {
-        text: `Experiment ${kind === "start" ? "started" : "stopped"}: ${step.mode}.`,
+      if (kind === "stop" && openId) {
+        at = `closing run ${openId}`;
+        await fetchJson<UnknownRecord>(`/v0/runs/${encodeURIComponent(openId)}/close`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ close_reason: "operator_stop" }),
+        });
+        recorded = ` Run ${openId} closed.`;
+      }
+      if (openId === undefined) {
+        recorded = " Not recorded: the runtime has no run journal (runtime.data_dir is not set).";
+      }
+      runFeedback = {
+        text: `Run ${kind === "start" ? "started" : "stopped"}: ${step.mode}.${recorded}`,
         cls: "field-note",
       };
     } catch (err) {
-      experimentFeedback = {
+      runFeedback = {
         text: `${verb} stopped at ${at}: ${err instanceof Error ? err.message : String(err)}`,
         cls: "field-error",
       };
     } finally {
-      experimentRunning = false;
+      runBusy = false;
       void refreshParametersOnly();
       void refreshModeOnly();
     }
@@ -1886,112 +1955,117 @@
       </div>
     {/if}
 
-    {#if operator?.experiment?.start || operator?.experiment?.stop}
-      <!-- The profile's experiment.start and experiment.stop (wb#729). -->
-      <div class="operate-section" data-testid="operator-experiment">
-        <h3>Experiment</h3>
-        <div class="mode-row">
-          {#if operator.experiment.start}
-            <button
-              type="button"
-              class="btn-primary"
-              disabled={experimentRunning}
-              onclick={() => runExperiment("start")}>Start experiment</button
-            >
-          {/if}
-          {#if operator.experiment.stop}
-            <button
-              type="button"
-              class="btn-secondary"
-              disabled={experimentRunning}
-              onclick={() => runExperiment("stop")}>Stop experiment</button
-            >
-          {/if}
-          {#if experimentFeedback}
-            <span class={experimentFeedback.cls} data-testid="experiment-feedback"
-              >{experimentFeedback.text}</span
-            >
-          {/if}
-        </div>
-        <p class="field-note">
-          Stop experiment ends the experiment; the software stop above stays the emergency control.
-        </p>
-      </div>
-    {/if}
-
-    {#if operator?.settings?.length}
-      <!-- The declared settings, one Save per group (wb#729). -->
-      <div class="operate-section" data-testid="operator-settings">
-        <h3>Settings</h3>
-        {#if restartNote}
-          <div class="workspace-advisory" data-testid="settings-restarted">
-            The runtime restarted, so the settings are back at their defaults.
-            <button type="button" class="btn-secondary btn-sm" onclick={() => (restartNote = false)}
-              >OK</button
-            >
-          </div>
-        {/if}
-        {#each operator.settings as group (group.group)}
-          <form
-            class="settings-group"
-            data-testid="settings-group"
-            onsubmit={(e: Event) => {
-              e.preventDefault();
-              void saveSettingsGroup(group);
-            }}
-          >
-            <h4>{group.group}</h4>
-            {#each group.items as item (item.parameter)}
-              {@const param = parameters.find((p) => p.name === item.parameter)}
-              {@const id = `setting-${item.parameter}`}
-              <div class="setting-row" data-testid="setting">
-                <label for={id}>{item.label}</label>
-                {#if !param}
-                  <span class="field-note"
-                    >{statusSettled ? "not reported by the runtime" : "loading…"}</span
-                  >
-                {:else if param.type === "bool"}
-                  <input
-                    {id}
-                    type="checkbox"
-                    checked={settingInput(param) === "true"}
-                    onchange={(e: Event) =>
-                      (settingsDraft = {
-                        ...settingsDraft,
-                        [param.name]: String(inputTarget(e).checked),
-                      })}
-                  />
-                {:else}
-                  <input
-                    {id}
-                    type="text"
-                    inputmode="decimal"
-                    value={settingInput(param)}
-                    oninput={(e: Event) =>
-                      (settingsDraft = { ...settingsDraft, [param.name]: inputTarget(e).value })}
-                  />
-                {/if}
-                {#if item.unit}<span>{item.unit}</span>{/if}
-                {#if param?.source === "operator"}
-                  <span class="badge ok">changed</span>
-                {:else if param?.source === "default"}
-                  <span class="badge unknown">default</span>
-                {/if}
-                {#if settingsErrors[item.parameter]}
-                  <span class="field-error">{settingsErrors[item.parameter]}</span>
-                {/if}
-              </div>
-            {/each}
-            <button type="submit" class="btn-secondary btn-sm">Save</button>
-            {#if settingsFeedback[group.group]}
-              <span
-                class={settingsFeedback[group.group].cls}
-                title={settingsFeedback[group.group].title}
-                >{settingsFeedback[group.group].text}</span
+    {#if run?.start || run?.stop || operator?.settings?.length}
+      <!-- The profile's run and settings, one section (wb#729, anolis#696):
+           Start run and Stop run, then the declared settings, one Save per
+           group. Headed by run.label, "Run" by default. -->
+      <div class="operate-section" data-testid="operator-run">
+        <h3>{run?.label ?? "Run"}</h3>
+        {#if run?.start || run?.stop}
+          <div class="mode-row">
+            {#if run.start}
+              <button
+                type="button"
+                class="btn-primary"
+                disabled={runBusy}
+                onclick={() => runStartStop("start")}>Start run</button
               >
             {/if}
-          </form>
-        {/each}
+            {#if run.stop}
+              <button
+                type="button"
+                class="btn-secondary"
+                disabled={runBusy}
+                onclick={() => runStartStop("stop")}>Stop run</button
+              >
+            {/if}
+            {#if runFeedback}
+              <span class={runFeedback.cls} data-testid="run-feedback">{runFeedback.text}</span>
+            {/if}
+          </div>
+          <p class="field-note">
+            Stop run ends the run; the software stop above stays the emergency control.
+          </p>
+        {/if}
+        {#if operator?.settings?.length}
+          <div data-testid="operator-settings">
+            <p class="field-note">Settings apply while the automation runs (AUTO).</p>
+            {#if restartNote}
+              <div class="workspace-advisory" data-testid="settings-restarted">
+                The runtime restarted, so the settings are back at their defaults.
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
+                  onclick={() => (restartNote = false)}>OK</button
+                >
+              </div>
+            {/if}
+            {#each operator.settings as group (group.group)}
+              <form
+                class="settings-group"
+                data-testid="settings-group"
+                onsubmit={(e: Event) => {
+                  e.preventDefault();
+                  void saveSettingsGroup(group);
+                }}
+              >
+                <h4>{group.group}</h4>
+                {#each group.items as item (item.parameter)}
+                  {@const param = parameters.find((p) => p.name === item.parameter)}
+                  {@const id = `setting-${item.parameter}`}
+                  <div class="setting-row" data-testid="setting">
+                    <label for={id}>{item.label}</label>
+                    {#if !param}
+                      <span class="field-note"
+                        >{statusSettled ? "not reported by the runtime" : "loading…"}</span
+                      >
+                    {:else if param.type === "bool"}
+                      <input
+                        {id}
+                        type="checkbox"
+                        checked={settingInput(param) === "true"}
+                        onchange={(e: Event) =>
+                          (settingsDraft = {
+                            ...settingsDraft,
+                            [param.name]: String(inputTarget(e).checked),
+                          })}
+                      />
+                    {:else}
+                      <input
+                        {id}
+                        type="text"
+                        inputmode="decimal"
+                        value={settingInput(param)}
+                        oninput={(e: Event) =>
+                          (settingsDraft = {
+                            ...settingsDraft,
+                            [param.name]: inputTarget(e).value,
+                          })}
+                      />
+                    {/if}
+                    {#if item.unit}<span>{item.unit}</span>{/if}
+                    {#if param?.source === "operator"}
+                      <span class="badge ok">changed</span>
+                    {:else if param?.source === "default"}
+                      <span class="badge unknown">default</span>
+                    {/if}
+                    {#if settingsErrors[item.parameter]}
+                      <span class="field-error">{settingsErrors[item.parameter]}</span>
+                    {/if}
+                  </div>
+                {/each}
+                <button type="submit" class="btn-secondary btn-sm">Save</button>
+                {#if settingsFeedback[group.group]}
+                  <span
+                    class={settingsFeedback[group.group].cls}
+                    title={settingsFeedback[group.group].title}
+                    >{settingsFeedback[group.group].text}</span
+                  >
+                {/if}
+              </form>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
 

@@ -41,6 +41,26 @@ Historical note:
 
 ### Changed
 
+- **The operator panel's Start and Stop open and close a run** (anolishq/anolis#696).
+  Settings and Start/Stop are one section, headed by the profile's
+  `operator.run.label` ("Run" by default), with a line saying the settings
+  apply while the automation runs (AUTO). Start run opens a run in the
+  runtime's journal (`POST /v0/runs`) with the settings' current values
+  before it sets anything, so the run records them and every change after;
+  Stop run closes the open run (`operator_stop`) after it sets the mode.
+  Start refuses, naming the run, while one is already open. Without a run
+  journal (no `runtime.data_dir`) both still run and say the run is not
+  recorded. The profile's `operator.run` is read, and the deprecated
+  `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
+  profile schema knows `operator.run`. The machine line reads "Running." in
+  AUTO, where it read "Experiment running.".
+- **Start respects the On switches** (anolishq/anolis#701). Start run no
+  longer sets the profile's `start.enable` parameters true: it runs with the
+  groups the operator ticked On, and refuses ("Refused: nothing is switched
+  on. Tick On for at least one group.") when every one is off. Stop run still
+  switches its `stop.disable` parameters off. A `require` entry with `when`
+  applies only while that parameter is on, so a group left off is not held
+  to its conditions.
 - **A setting an operator changed reads "changed"** (#232), where it read
   "set"; one at the project's value still reads "default".
 - **Plain wording in the UI** (#746). The UI's text has no em dashes: each

@@ -6,7 +6,7 @@ import type {
   RuntimeApiStatus,
   StopChainStatus,
 } from "../../src/lib/contracts";
-import { deviceLosses, experimentStartRefusal, machineLine } from "../../src/lib/operate-contracts";
+import { deviceLosses, runStartRefusal, machineLine } from "../../src/lib/operate-contracts";
 
 function status(mode: string, extra: Partial<RuntimeApiStatus> = {}): RuntimeApiStatus {
   return {
@@ -71,10 +71,10 @@ describe("machineLine (wb#727)", () => {
     expect(machineLine(status("MANUAL"), null, null, []).state).toBe("ready");
   });
 
-  it("says the experiment is running in AUTO", () => {
+  it("says the machine is running in AUTO", () => {
     expect(machineLine(status("AUTO"), null, null, [])).toMatchObject({
       state: "running",
-      text: "Experiment running.",
+      text: "Running.",
     });
   });
 
@@ -198,8 +198,8 @@ describe("machineLine (wb#727)", () => {
   });
 });
 
-// wb#729: what Start experiment refuses on, with the fix.
-describe("experimentStartRefusal", () => {
+// wb#729: what Start run refuses on, with the fix.
+describe("runStartRefusal", () => {
   const reachable: ProviderHealth[] = [
     {
       provider_id: "bread0",
@@ -209,40 +209,40 @@ describe("experimentStartRefusal", () => {
   ];
 
   it("is empty when nothing would stop it", () => {
-    expect(experimentStartRefusal(status("IDLE"), null, null, [], [])).toBe("");
+    expect(runStartRefusal(status("IDLE"), null, null, [], [])).toBe("");
   });
 
   it("refuses while the runtime is not answering, the emergency stop is in force, or in FAULT", () => {
-    expect(experimentStartRefusal(null, null, null, [], [])).toMatch(/not answering/);
+    expect(runStartRefusal(null, null, null, [], [])).toMatch(/not answering/);
     const down = { ...status("IDLE"), status: { code: "UNAVAILABLE" } } as RuntimeApiStatus;
-    expect(experimentStartRefusal(down, null, null, [], [])).toMatch(/not answering/);
-    expect(experimentStartRefusal(status("IDLE"), LATCHED, chain("in_force"), [], [])).toMatch(
+    expect(runStartRefusal(down, null, null, [], [])).toMatch(/not answering/);
+    expect(runStartRefusal(status("IDLE"), LATCHED, chain("in_force"), [], [])).toMatch(
       /emergency stop is in force/,
     );
-    expect(experimentStartRefusal(status("FAULT"), null, null, [], [])).toMatch(
+    expect(runStartRefusal(status("FAULT"), null, null, [], [])).toMatch(
       /in FAULT\. Set MANUAL/,
     );
-    expect(experimentStartRefusal(status("FAULT"), null, null, [], [], "pump refused")).toMatch(
+    expect(runStartRefusal(status("FAULT"), null, null, [], [], "pump refused")).toMatch(
       /in FAULT \(pump refused\)/,
     );
   });
 
   it("names the latch, then a tripped board, then a lost device, in that order", () => {
     const lost = status("IDLE", { device_loss_latched: ["bread0/dcmt1"] });
-    expect(experimentStartRefusal(lost, LATCHED, null, ["bread0/dcmt0"], [])).toMatch(
+    expect(runStartRefusal(lost, LATCHED, null, ["bread0/dcmt0"], [])).toMatch(
       /software stop is latched/,
     );
-    expect(experimentStartRefusal(lost, null, null, ["bread0/dcmt0"], [])).toMatch(
+    expect(runStartRefusal(lost, null, null, ["bread0/dcmt0"], [])).toMatch(
       /bread0\/dcmt0 tripped/,
     );
-    expect(experimentStartRefusal(lost, null, null, [], [])).toMatch(/bread0\/dcmt1 lost/);
+    expect(runStartRefusal(lost, null, null, [], [])).toMatch(/bread0\/dcmt1 lost/);
   });
 
   it("does not call a latched device that is back, or one the stop chain removed, lost", () => {
     const back = status("IDLE", { device_loss_latched: ["bread0/dcmt1"] });
-    expect(experimentStartRefusal(back, null, null, [], reachable)).toBe("");
+    expect(runStartRefusal(back, null, null, [], reachable)).toBe("");
     // Refused for the stop itself, not for the device it removed.
-    const underStop = experimentStartRefusal(
+    const underStop = runStartRefusal(
       back,
       null,
       chain("in_force", ["bread0/dcmt1"]),
