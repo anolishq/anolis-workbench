@@ -96,7 +96,8 @@ def verify_environment() -> None:
         print("ERROR: Workbench frontend directory not found.", file=sys.stderr)
         print(f"  Expected: {FRONTEND_DIR}", file=sys.stderr)
         sys.exit(1)
-    if not provider_schemas.available_kinds():
+    # Packaged only: imports must not hide an install missing its own envelopes.
+    if not provider_schemas.packaged_kinds():
         print("ERROR: No vendored provider config schemas found.", file=sys.stderr)
         print(f"  Expected envelopes under: {paths_module.PROVIDER_SCHEMAS_DIR}", file=sys.stderr)
         sys.exit(1)

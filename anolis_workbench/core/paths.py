@@ -70,6 +70,9 @@ PROVIDER_SCHEMAS_DIR = _select_asset_path(
     _SOURCE_ASSET_ROOT / "schemas" / "providers",
     _PACKAGED_ASSET_ROOT / "schemas" / "providers",
 )
+# Envelopes imported with `anolis-workbench provider import` (#286, #783): per
+# user and per host, beside the projects, never in the package.
+IMPORTED_PROVIDER_SCHEMAS_DIR = DATA_ROOT / "schemas" / "providers"
 
 
 class UnsafeDeleteError(ValueError):

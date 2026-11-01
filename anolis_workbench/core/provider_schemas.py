@@ -8,14 +8,15 @@ set of known provider kinds IS the set of vendored envelopes.
 
 A config is only meaningfully valid against the schema of the provider version
 the machine actually PINS, so resolution is keyed on ``(kind, version)`` rather
-than kind alone — see `resolve`. Today only the packaged tier is populated, so
-a pin that disagrees with the packaged envelope yields a warning rather than a
-different schema; #286 adds the sideloaded tier that can satisfy it exactly.
+than kind alone — see `resolve`. Two tiers feed it: the packaged envelopes, and
+envelopes an operator imported (`provider_import`, #286), which can satisfy a
+pin the package doesn't.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -24,8 +25,16 @@ from anolis_workbench.core import paths as paths_module
 
 _ENVELOPE_SUFFIX = ".config-schema.json"
 
+logger = logging.getLogger(__name__)
+
 _cache_lock = threading.Lock()
 _envelope_cache: dict[str, dict[str, Any]] | None = None
+
+# Imported envelopes, keyed (kind, version), with the stamp of the directory
+# they were read at and the files skipped (#783). Reread when the stamp
+# changes, so a running server sees an import made from the CLI.
+_imports_lock = threading.Lock()
+_imports_cache: tuple[tuple[Any, ...], dict[tuple[str, str], dict[str, Any]], dict[str, str]] | None = None
 
 
 def _validate_envelope_shape(kind: str, doc: Any) -> dict[str, Any]:
@@ -54,19 +63,113 @@ def _load_envelopes() -> dict[str, dict[str, Any]]:
         return _envelope_cache
 
 
-def available_kinds() -> list[str]:
-    """Provider kinds with a vendored config-schema envelope."""
-    return sorted(_load_envelopes().keys())
+def _reset_imports_cache() -> None:
+    global _imports_cache
+    with _imports_lock:
+        _imports_cache = None
 
 
-def get_envelope(kind: str) -> dict[str, Any] | None:
-    """The full envelope for a kind, or None when unknown."""
+def _imports_stamp(directory: Any) -> tuple[Any, ...]:
+    from anolis_workbench.core import canonical, provider_import
+
+    if not directory.is_dir():
+        return ()
+    return tuple(
+        (path.name, canonical._file_stamp(path))
+        for path in sorted(directory.glob(f"*{provider_import.ENVELOPE_SUFFIX}"))
+    )
+
+
+def _load_imports() -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, str]]:
+    """Imported envelopes, and {file name: why it was skipped}.
+
+    A bad import is skipped and logged, never raised: unlike a packaged
+    envelope, nothing verified it, and one bad file must not take every
+    validation, or the server's startup check, down with it (#783).
+    """
+    from anolis_workbench.core import provider_import
+
+    global _imports_cache
+    directory = paths_module.IMPORTED_PROVIDER_SCHEMAS_DIR
+    with _imports_lock:
+        stamp = _imports_stamp(directory)
+        if _imports_cache is not None and _imports_cache[0] == stamp:
+            return _imports_cache[1], _imports_cache[2]
+        envelopes: dict[tuple[str, str], dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        for name, _ in stamp:
+            try:
+                parsed = provider_import.parse_stored_name(name)
+                if parsed is None:
+                    raise provider_import.ImportRefused("the file name is not <kind>@<version>.config-schema.json")
+                kind, version, envelope = provider_import.check_envelope((directory / name).read_bytes())
+                if (kind, version) != parsed:
+                    raise provider_import.ImportRefused(
+                        f"it declares {kind} {version}, which disagrees with its file name"
+                    )
+            except Exception as exc:  # noqa: BLE001 — any failure skips the file, never the caller
+                errors[name] = str(exc) or type(exc).__name__
+                logger.warning("Skipping imported provider schema %s: %s", directory / name, errors[name])
+                continue
+            packaged = _load_envelopes().get(kind)
+            if packaged is not None and packaged.get("provider_version") == version:
+                # A later workbench packages this version: its CI-verified
+                # envelope wins over the local import, which would otherwise
+                # shadow it for every project pinning it.
+                errors[name] = f"superseded by the packaged envelope for {kind} {version}"
+                logger.info("Imported provider schema %s is %s", directory / name, errors[name])
+                continue
+            envelopes[(kind, version)] = envelope
+        _imports_cache = (stamp, envelopes, errors)
+        return envelopes, errors
+
+
+def import_errors() -> dict[str, str]:
+    """{file name: reason} for each imported envelope that was skipped."""
+    return dict(_load_imports()[1])
+
+
+def packaged_kinds() -> list[str]:
+    """Provider kinds the workbench packages, ignoring imports."""
+    return sorted(_load_envelopes())
+
+
+def packaged_envelope(kind: str) -> dict[str, Any] | None:
+    """The envelope the workbench packages for a kind, ignoring imports."""
     return _load_envelopes().get(kind)
 
 
+def _highest_import(kind: str) -> tuple[str, dict[str, Any]] | None:
+    from anolis_workbench.core import provider_import
+
+    versions = [(version, env) for (k, version), env in _load_imports()[0].items() if k == kind]
+    if not versions:
+        return None
+    return max(versions, key=lambda pair: provider_import.semver_key(pair[0]))
+
+
+def available_kinds() -> list[str]:
+    """Provider kinds with a packaged or an imported config-schema envelope."""
+    return sorted(set(_load_envelopes()) | {kind for kind, _ in _load_imports()[0]})
+
+
+def get_envelope(kind: str) -> dict[str, Any] | None:
+    """A kind's envelope, packaged first, else its highest import; None when unknown."""
+    packaged = _load_envelopes().get(kind)
+    if packaged is not None:
+        return packaged
+    highest = _highest_import(kind)
+    return highest[1] if highest else None
+
+
 def all_envelopes() -> dict[str, dict[str, Any]]:
-    """kind -> envelope, for the /api/provider-schemas route."""
-    return dict(_load_envelopes())
+    """kind -> envelope (as get_envelope), for the /api/provider-schemas route."""
+    result: dict[str, dict[str, Any]] = {}
+    for kind in available_kinds():
+        envelope = get_envelope(kind)
+        if envelope is not None:
+            result[kind] = envelope
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +184,7 @@ class Resolution:
 
     kind: str
     envelope: dict[str, Any]
-    source: str  # "packaged" (#286 adds "sideloaded")
+    source: str  # "packaged", or "sideloaded" for an imported envelope (#286)
     pinned_version: str | None  # what the machine pins, when it pins anything
     envelope_version: str | None  # the provider version the envelope came from
 
@@ -139,18 +242,31 @@ def pinned_version(profile: Any, kind: str) -> str | None:
 def resolve(kind: str, version: str | None = None) -> Resolution | None:
     """The envelope to validate `kind` against at pinned `version`, or None.
 
+    Per (kind, version), as #283 decided: an import for exactly the pinned
+    version wins; otherwise the packaged envelope; otherwise, for a kind only
+    imports know, its highest imported version. An unpinned profile gets the
+    packaged envelope. Because an import is only chosen on an exact pin match,
+    it can never shadow a project pinned at the packaged version.
+
     Never fetches. An inexact resolution is deliberately still a resolution:
     refusing to validate at all would be worse than validating against a
     near-neighbour contract and saying so.
     """
+    imports = _load_imports()[0]
+    if version is not None and (kind, version) in imports:
+        return Resolution(kind, imports[(kind, version)], "sideloaded", version, version)
     envelope = _load_envelopes().get(kind)
+    source = "packaged"
     if envelope is None:
-        return None
+        highest = _highest_import(kind)
+        if highest is None:
+            return None
+        envelope, source = highest[1], "sideloaded"
     envelope_version = envelope.get("provider_version")
     return Resolution(
         kind=kind,
         envelope=envelope,
-        source="packaged",
+        source=source,
         pinned_version=version,
         envelope_version=envelope_version if isinstance(envelope_version, str) else None,
     )

@@ -13,6 +13,24 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- **`anolis-workbench provider import` and `provider list`** (#783, part of
+  #286): import a provider's `--config-schema` envelope from a file, offline,
+  for a provider kind or version the workbench doesn't package. A project
+  that pins that kind at that version is validated against the import; a
+  project pinning the packaged version keeps the packaged schema, and a kind
+  only imports know falls back to its highest imported version with the
+  usual skew warning. An import is refused unless it is a valid JSON Schema
+  without `$ref` or non-finite numbers, names its kind as
+  `anolis-provider-<kind>` (lowercase letters, digits, hyphens, at most 64)
+  and a semver `provider_version` (at most 128), and stays under 256 KiB and
+  32 levels deep; it can't replace a packaged envelope, and replacing an
+  earlier import needs `--replace`. A later workbench that packages an
+  imported version supersedes the import. A running workbench sees an import
+  without a restart, and skips (and `provider list` names) an import that
+  fails to load instead of failing.
+
 ## [0.31.0] - 2026-11-01
 
 Upgrade notes:
