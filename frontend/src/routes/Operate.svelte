@@ -1812,8 +1812,8 @@
       {#if staleWorkbench !== null}
         <div class="workspace-advisory" data-testid="workbench-stale">
           The workbench was {describeWorkbenchChange(staleWorkbench)} after this page loaded, so the page
-          still runs its older code and project. Reload it before starting a run or pressing an action;
-          Stop run, the mode and the software stop still work.
+          may be running older code or an older project. Reload it before starting a run or pressing an
+          action; Stop run, the mode and the software stop still work.
           <button type="button" class="btn-secondary" onclick={() => location.reload()}
             >Reload</button
           >
