@@ -68,6 +68,11 @@ Historical note:
 
 ### Fixed
 
+- **A saved setting no longer flickers back for one poll** (#767). A poll
+  that read the parameters before a Save and landed after it showed the old
+  value until the next poll, 5 s later: a ticked On box unticked, then ticked
+  again. Each parameters read is numbered when it starts, and a reply older
+  than the one shown is dropped.
 - **Operate says it is connecting until the first status arrives** (#754).
   The machine line said "The runtime is not answering." while the first
   runtime status was still on its way; it now says "Connecting to the
