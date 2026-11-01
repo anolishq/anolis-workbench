@@ -22,12 +22,27 @@ Historical note:
   project pinning the packaged version keeps the packaged schema, and a kind
   only imports know falls back to its highest imported version with the
   usual skew warning. An import is refused unless it is a valid JSON Schema
-  without `$ref`, names its kind as `anolis-provider-<kind>` (lowercase
-  letters, digits, hyphens) and a semver `provider_version`, and stays under
-  256 KiB and 32 levels deep; it can't replace a packaged envelope, and
-  replacing an earlier import needs `--replace`. A running workbench sees an
-  import without a restart, and skips (and `provider list` names) an import
-  that fails to load instead of failing.
+  without `$ref` or non-finite numbers, names its kind as
+  `anolis-provider-<kind>` (lowercase letters, digits, hyphens, at most 64)
+  and a semver `provider_version` (at most 128), and stays under 256 KiB and
+  32 levels deep; it can't replace a packaged envelope, and replacing an
+  earlier import needs `--replace`. A later workbench that packages an
+  imported version supersedes the import. A running workbench sees an import
+  without a restart, and skips (and `provider list` names) an import that
+  fails to load instead of failing.
+
+## [0.31.0] - 2026-11-01
+
+Upgrade notes:
+
+- **After a watchdog-trip clear, Operate offers only the steps the machine
+  profile declares.** The brake-release step that appeared for any device
+  with a two-bool `set_brake` is gone; a profile declares it under
+  `operator.trip_recovery` (anolis 0.10.1). Without an entry, brakes a trip
+  engaged stay engaged until released from the device's functions.
+- **An Operate page asks for a reload after the workbench restarts or is
+  upgraded under it**, and refuses Start run and action presses until
+  reloaded. Stopping still works.
 
 ### Changed
 
@@ -42,6 +57,8 @@ Historical note:
   brakes a trip engaged stay engaged until released from the device's
   functions. Needs anolis 0.10.1, whose profile schema knows
   `operator.trip_recovery` (anolishq/anolis#719).
+- **The sim-quickstart template and the anolis contract locks pin anolis
+  0.10.1.**
 
 ### Fixed
 
@@ -49,8 +66,9 @@ Historical note:
   page** (#777). `/api/status` now names the package version and an instance
   fixed for the life of the server process. A page compares the first it saw
   with each later one; when they differ it asks for a reload, and refuses
-  Start run and action presses until then, because it still runs the older
-  code and project. Stop run, mode changes and the software stop still work.
+  Start run and action presses until then, because it may be running older
+  code or an older project. Stop run, mode changes and the software stop
+  still work.
 
 ## [0.30.0] - 2026-11-01
 
