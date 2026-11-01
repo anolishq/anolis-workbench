@@ -15,6 +15,14 @@ Historical note:
 
 ### Added
 
+- **Action buttons in the Run section** (anolishq/anolis#697), from the
+  profile's `operator.actions`, such as "Sample now". A press reads the
+  button's int64 counter parameter from the runtime and writes it plus one;
+  a tree turns each increase into one run, for example with
+  `RequestedPulseWindow`. A press refuses, sending nothing, outside AUTO
+  (the tree counts presses only while it runs), or when the runtime does not
+  report the parameter or it is not int64. Needs anolis 0.9.0, whose profile
+  schema knows `operator.actions`.
 - **The not-covered chip names the functions** (anolishq/anolis#698), with
   anolis 0.9.0: its ⓘ lists each function the software stop won't drive, as
   provider/device/function. A second chip, "⚠ N not covered by FAULT", shows
