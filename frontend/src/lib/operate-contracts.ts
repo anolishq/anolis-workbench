@@ -98,6 +98,10 @@ function asArray<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
+function isString(v: unknown): v is string {
+  return typeof v === "string";
+}
+
 function toFinite(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -247,6 +251,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
     device_count: toFinite(r.device_count) ?? 0,
     providers: asArray(r.providers) as RuntimeApiStatus["providers"],
     device_loss_latched: asArray(r.device_loss_latched).map(String),
+    fault_uncovered_functions: asArray(r.fault_uncovered_functions).filter(isString),
   };
 }
 
@@ -419,6 +424,7 @@ export function extractEstopStatus(payload: unknown): EstopStatus | null {
     // toFinite(null) is 0, but an absent latch time must stay null.
     latched_at_epoch_ms: r.latched_at_epoch_ms == null ? null : toFinite(r.latched_at_epoch_ms),
     uncovered_actuating_functions: toFinite(r.uncovered_actuating_functions) ?? 0,
+    uncovered_functions: asArray(r.uncovered_functions).filter(isString),
   };
 }
 
