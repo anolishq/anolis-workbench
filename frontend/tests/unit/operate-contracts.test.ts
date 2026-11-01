@@ -7,6 +7,8 @@ import {
   argAllowedValues,
   checkAllowedValue,
   coerceParameterValue,
+  formatDuration,
+  summarizeStream,
   deriveOperateAvailability,
   extractAutomationStatus,
   extractAutomationTree,
@@ -173,6 +175,7 @@ describe("operate-contracts extractors", () => {
       device_count: 0,
       providers: [],
       device_loss_latched: [],
+      fault_uncovered_functions: [],
     });
 
     expect(
@@ -201,6 +204,7 @@ describe("operate-contracts extractors", () => {
       last_evaluation_at_epoch_ms: 1234,
       run_id: "01J0RUN",
       last_error: null,
+      call_failures: [],
     });
 
     // Unknown / missing fields normalize to neutral defaults; a null
@@ -217,6 +221,7 @@ describe("operate-contracts extractors", () => {
       last_evaluation_at_epoch_ms: null,
       run_id: null,
       last_error: null,
+      call_failures: [],
     });
 
     expect(extractAutomationTree({ tree: "<BehaviorTree/>" })).toBe("<BehaviorTree/>");
@@ -445,6 +450,34 @@ describe("RUNTIME_MODES contract", () => {
   });
 });
 
+describe("call_failures (anolis#678)", () => {
+  const failure = {
+    device_handle: "bread0/dcmt1",
+    function: "pulse_motor",
+    consecutive_failures: 2,
+    last_error: "motor1 brake engaged",
+    last_failure_at_epoch_ms: 1_700_000_000_000,
+  };
+
+  it("extractAutomationStatus reads each entry of call_failures", () => {
+    expect(extractAutomationStatus({ call_failures: [failure] }).call_failures).toEqual([failure]);
+  });
+
+  it("reads every field AutomationCallFailure requires in the vendored contract", () => {
+    const contract = readFileSync(
+      fileURLToPath(new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url)),
+      "utf8",
+    );
+    const match = contract.match(
+      /AutomationCallFailure:\s*\n(?:.*\n)*?\s*required:\s*\[([^\]]+)\]/,
+    );
+    expect(match, "AutomationCallFailure not found in contract").not.toBeNull();
+    const required = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
+    const [read] = extractAutomationStatus({ call_failures: [failure] }).call_failures;
+    expect(Object.keys(read).sort()).toEqual([...required].sort());
+  });
+});
+
 describe("estop contract", () => {
   const contractPath = fileURLToPath(
     new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url),
@@ -493,7 +526,31 @@ describe("extractEstopStatus", () => {
       software_safe_state: "setpoints",
       latched_at_epoch_ms: 1234,
       uncovered_actuating_functions: 2,
+      uncovered_functions: [],
     });
+  });
+
+  it("reads uncovered_functions, keeping strings only (anolis 0.9.0)", () => {
+    const out = extractEstopStatus({
+      estop: {
+        latched: false,
+        software_safe_state: "hooks",
+        latched_at_epoch_ms: null,
+        uncovered_actuating_functions: 2,
+        uncovered_functions: ["bread0/dcmt0/motor1_value", 7, "bread0/dcmt1/motor2_value"],
+      },
+    });
+    expect(out?.uncovered_functions).toEqual([
+      "bread0/dcmt0/motor1_value",
+      "bread0/dcmt1/motor2_value",
+    ]);
+  });
+
+  it("extractRuntimeStatus reads fault_uncovered_functions, keeping strings only (anolis 0.9.0)", () => {
+    const status = extractRuntimeStatus({
+      fault_uncovered_functions: ["bread0/dcmt0/motor1_value", null],
+    });
+    expect(status.fault_uncovered_functions).toEqual(["bread0/dcmt0/motor1_value"]);
   });
 
   it("returns null when the block is absent or not an object", () => {
@@ -512,6 +569,7 @@ describe("extractEstopStatus", () => {
       software_safe_state: "none",
       latched_at_epoch_ms: null,
       uncovered_actuating_functions: 0,
+      uncovered_functions: [],
     });
   });
 
@@ -712,7 +770,11 @@ describe("extractStopChain (wb#631)", () => {
     const read = extractStopChain({
       stop_chain: {
         ...chain,
-        expectations: { "bread0/dcmt0": "power_loss", "bread0/dcmt1": "sometimes", "bread0/rlht0": 3 },
+        expectations: {
+          "bread0/dcmt0": "power_loss",
+          "bread0/dcmt1": "sometimes",
+          "bread0/rlht0": 3,
+        },
         mismatches: [{ reason: "no device" }, { device: "bread0/dcmt0", expect: "power_loss" }],
       },
     });
@@ -737,12 +799,25 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
         safe_state_achieved: achieved,
         failed_actions: achieved
           ? []
-          : [{ device_handle: "bread0/dcmt0", function: "set_mode", success: false, error: "WATCHDOG_TRIP" }],
+          : [
+              {
+                device_handle: "bread0/dcmt0",
+                function: "set_mode",
+                success: false,
+                error: "WATCHDOG_TRIP",
+              },
+            ],
       },
     });
 
   it("is OK only when nothing in the machine state needs attention", () => {
-    expect(summarizeRuntimeHealth(loaded([{ provider_id: "bread0", state: "AVAILABLE" }]), estop(false), startup(true))).toEqual({
+    expect(
+      summarizeRuntimeHealth(
+        loaded([{ provider_id: "bread0", state: "AVAILABLE" }]),
+        estop(false),
+        startup(true),
+      ),
+    ).toEqual({
       label: "OK",
       cls: "ok",
       reasons: [],
@@ -807,7 +882,12 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
         expectations: { "bread0/dcmt1": "reports_estop" },
         expected_losses: [],
         mismatches: [
-          { device: "bread0/dcmt1", expect: "reports_estop", reason: "estop reads false", since_epoch_ms: 1 },
+          {
+            device: "bread0/dcmt1",
+            expect: "reports_estop",
+            reason: "estop reads false",
+            since_epoch_ms: 1,
+          },
         ],
         since_epoch_ms: null,
       },
@@ -853,7 +933,12 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
 });
 
 describe("allowed_values on function args (wb#576)", () => {
-  const mode = { name: "mode", type: "string", required: true, allowed_values: ["open_loop", "closed_speed"] };
+  const mode = {
+    name: "mode",
+    type: "string",
+    required: true,
+    allowed_values: ["open_loop", "closed_speed"],
+  };
 
   it("accepts a value in the set and refuses one outside it, case included", () => {
     expect(() => checkAllowedValue(mode, "closed_speed")).not.toThrow();
@@ -863,7 +948,9 @@ describe("allowed_values on function args (wb#576)", () => {
   });
 
   it("leaves an unconstrained string, and a non-string arg, unchecked", () => {
-    expect(() => checkAllowedValue({ name: "label", type: "string", required: false }, "x")).not.toThrow();
+    expect(() =>
+      checkAllowedValue({ name: "label", type: "string", required: false }, "x"),
+    ).not.toThrow();
     const count = { name: "n", type: "int64", required: true, allowed_values: ["1"] };
     expect(argAllowedValues(count)).toEqual([]);
     expect(() => checkAllowedValue(count, "2")).not.toThrow();
@@ -872,5 +959,26 @@ describe("allowed_values on function args (wb#576)", () => {
   it("reads allowed_values through normalizeArgSpec", () => {
     const arg = normalizeArgSpec({ type: "string", allowed_values: ["a", "b"] }, "mode");
     expect(argAllowedValues(arg)).toEqual(["a", "b"]);
+  });
+});
+
+describe("formatDuration and summarizeStream (wb#748)", () => {
+  it.each([
+    [0, "0 s"],
+    [59, "59 s"],
+    [60, "1 min"],
+    [3725, "1 h 2 min"],
+    [53720, "14 h 55 min"],
+    [90000, "1 d 1 h"],
+    [86400 + 59, "1 d"],
+  ])("%i s reads %s", (seconds, text) => {
+    expect(formatDuration(seconds)).toBe(text);
+  });
+
+  it("names each stream state", () => {
+    expect(summarizeStream({ state: "connected", attempts: 0 })).toEqual({ label: "Connected", cls: "ok", detail: "" });
+    expect(summarizeStream({ state: "reconnecting", attempts: 3, delay_ms: 1500 }).detail).toBe("attempt 3, retry in 2 s");
+    expect(summarizeStream({ state: "stale", attempts: 0, idle_ms: 75000 }).detail).toBe("no events for 1 min 15 s");
+    expect(summarizeStream({ state: "disconnected", attempts: 0 }).label).toBe("Disconnected");
   });
 });

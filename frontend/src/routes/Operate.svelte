@@ -1,8 +1,18 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import ConnectionSection from "../lib/ConnectionSection.svelte";
   import InfoToggle from "../lib/InfoToggle.svelte";
+  import {
+    pushSample,
+    readingSamples,
+    type Sample,
+    sparklineMinSpan,
+    sparklinePath,
+    sparklineRange,
+  } from "../lib/sparkline";
   import type {
+    AutomationCallFailure,
     AutomationStatus,
     Device,
     DeviceCapabilities,
@@ -21,6 +31,7 @@
     WorkbenchConfig,
   } from "../lib/contracts";
   import { isImportedDoc } from "../lib/contracts";
+  import type { MachineLineTarget } from "../lib/operate-contracts";
   import {
     activeVariant,
     launchVariantMismatch,
@@ -28,8 +39,10 @@
     type SavedLaunch,
   } from "../lib/canonical";
   import {
+    applyCallFailedEvent,
     argAllowedValues,
     callErrorText,
+    callFailureLines,
     checkAllowedValue,
     coerceParameterValue,
     deriveOperateAvailability,
@@ -46,13 +59,24 @@
     extractRuntimeStatus,
     extractStartupSafeState,
     extractStopChain,
+    CONNECTING_LINE,
+    machineLine,
     modeTargets,
     normalizeParameterType,
     normalizeProviderHealthQuality,
+    operatorReadings,
+    operatorRun,
+    operatorSettingsLines,
+    signalDevice,
+    applicableRequirements,
+    nothingSwitchedOn,
+    unmetStartRequirements,
     renderBtOutline,
+    runStartRefusal,
     summarizeEstopResponse,
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
+    summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
   } from "../lib/operate-contracts";
@@ -133,6 +157,9 @@
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
   let statusSettled = $state<boolean>(false);
+  // Why the runtime refused the status poll, when it did: the proxy names the
+  // command that gives the workbench a token (#722).
+  let statusRefusal = $state<string>("");
   // Whether /v0/devices has answered once: until then the list is loading,
   // not empty (#568).
   let devicesSettled = $state<boolean>(false);
@@ -149,7 +176,7 @@
   let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
-  // Boards whose command watchdog tripped, and the one being cleared (wb#572).
+  // Devices whose command watchdog tripped, and the one being cleared (wb#572).
   // Each step of the clear is the operator's click; nothing runs on its own.
   const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
   let tripKey = $state<string>("");
@@ -167,18 +194,77 @@
   // dropped (wb#516). Not rendered, so not state.
   const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
+  // The operator panel's line on what the machine is doing (wb#727).
+  // Until the first status settles, it is connecting, not down (wb#754).
+  const machine = $derived(
+    statusSettled
+      ? machineLine(runtimeStatusData, estop, stopChain, trippedKeys, providerHealth)
+      : CONNECTING_LINE,
+  );
+  // Where each machine-line link scrolls to; none is in a collapsed section.
+  const MACHINE_LINE_SECTIONS: Record<MachineLineTarget, string> = {
+    mode: "mode-section",
+    "watchdog-trips": "watchdog-trips",
+    "provider-health": "provider-health",
+    "runtime-status": "runtime-status",
+  };
+
+  function goToSection(target: MachineLineTarget) {
+    const section = document.querySelector<HTMLElement>(
+      `[data-testid="${MACHINE_LINE_SECTIONS[target]}"]`,
+    );
+    if (!section) return;
+    // Land below the sticky stop row, measured now: it wraps and grows when
+    // latched (wb#745).
+    const stop = document.querySelector(".operate-estop-section");
+    section.style.scrollMarginTop = `${(stop?.getBoundingClientRect().height ?? 0) + 8}px`;
+    section.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // The profile's operator block (wb#728): absent, the panel shows neither part.
+  const operator = $derived(system?.profile?.operator);
+  const readings = $derived(operatorReadings(operator, deviceStates, !statusSettled));
+  // Each declared reading's last ten minutes, by signal (wb#747): a point
+  // when the reading's own timestamp moves, null while it is not OK. Empty
+  // on load, with no backfill.
+  let readingHistory = $state<Record<string, Sample[]>>({});
+  let readingStamps: Record<string, string> = {};
+  $effect(() => {
+    const samples = readingSamples(operator, deviceStates);
+    untrack(() => {
+      const next = { ...readingHistory };
+      let moved = false;
+      for (const s of samples) {
+        if (readingStamps[s.signal] === s.stamp) continue;
+        readingStamps[s.signal] = s.stamp;
+        next[s.signal] = pushSample(next[s.signal] ?? [], { t: Date.now(), v: s.value });
+        moved = true;
+      }
+      if (moved) readingHistory = next;
+    });
+  });
+  // operator.run, or its deprecated alias operator.experiment (anolis#696).
+  const run = $derived(operatorRun(operator));
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
   const dispatchableCoverage = $derived(
     versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE),
   );
+  const faultUncovered = $derived(runtimeStatusData?.fault_uncovered_functions ?? []);
   let parameters = $state<ParameterDefinition[]>([]);
   let automationStatus = $state<AutomationStatus | null>(null);
   // Transient automation fault surfaced from an SSE event (a fault is an event,
-  // not an execution_status — the next status poll reflects the engine's truth).
+  // not an execution_status; the next status poll reflects the engine's truth).
   let automationFault = $state<{ message: string; timestamp_ms: number } | null>(null);
+  // From status on each poll, and from automation_call_failed between polls.
+  let callFailures = $state<AutomationCallFailure[]>([]);
+  const failingCalls = $derived(callFailureLines(callFailures));
   let behaviorTree = $state<string>("");
-  let eventTrace = $state<Array<{ type: string; timestamp_ms: number; details: string }>>([]);
+  // `seq` keys the trace's rows: timestamp_ms comes from the runtime, and
+  // events from one poll share it.
+  let eventTrace = $state<
+    Array<{ type: string; timestamp_ms: number; details: string; seq: number }>
+  >([]);
+  let traceSeq = 0;
 
   let streamStatus = $state<{
     state: string;
@@ -282,6 +368,7 @@
     runtimeStatusData = null;
     automationStatus = null;
     automationFault = null;
+    callFailures = [];
     behaviorTree = "";
     modeSelectorDirty = false;
     modeFixedReason = "";
@@ -296,6 +383,8 @@
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
+    readingHistory = {};
+    readingStamps = {};
   }
 
   async function loadWorkbenchConfig(): Promise<void> {
@@ -337,6 +426,7 @@
     ensureEventStream();
 
     const epoch = estopEpoch;
+    const paramsSeq = ++paramsReadSeq;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
       fetchJson<UnknownRecord>("/v0/mode"),
       fetchJson<UnknownRecord>("/v0/providers/health"),
@@ -366,8 +456,16 @@
     } else {
       devices = [];
     }
+    await loadReadingDevices();
 
     runtimeStatusData = rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value) : null;
+    noteRestart(runtimeStatusData);
+    statusRefusal =
+      rtRes.status === "rejected" &&
+      rtRes.reason instanceof ApiResponseError &&
+      rtRes.reason.status === 401
+        ? rtRes.reason.message
+        : "";
     // Keep the last-known estop state on a transient status-poll failure so the
     // safety control never disappears mid-session (wb#236), and the state a
     // stop or clear reply reported since this poll left (wb#614).
@@ -377,15 +475,31 @@
     startupSafeState =
       rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
     stopChain = rtRes.status === "fulfilled" ? extractStopChain(rtRes.value) : stopChain;
-    parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
+    applyParameters(
+      paramsSeq,
+      parRes.status === "fulfilled" ? extractParameters(parRes.value) : [],
+    );
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
+    callFailures = automationStatus?.call_failures ?? [];
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
   }
 
+  // A poll reads the parameters, then waits on other requests before showing
+  // them; a Save in between refreshes with newer values. Each read is numbered
+  // when it starts, and a reply older than the one shown is dropped (wb#767).
+  let paramsReadSeq = 0;
+  let paramsShownSeq = 0;
+  function applyParameters(seq: number, value: ParameterDefinition[]): void {
+    if (seq < paramsShownSeq) return;
+    paramsShownSeq = seq;
+    parameters = value;
+  }
+
   async function refreshParametersOnly(): Promise<void> {
+    const seq = ++paramsReadSeq;
     try {
       const p = await fetchJson<UnknownRecord>("/v0/parameters");
-      parameters = extractParameters(p);
+      applyParameters(seq, extractParameters(p));
     } catch {
       /* best-effort */
     }
@@ -460,6 +574,42 @@
     }
   }
 
+  // The devices the operator panel's readings name (wb#728), other than the
+  // selected one, which ensureSelectedDeviceLoaded has just read.
+  async function loadReadingDevices(): Promise<void> {
+    await loadDeviceStates(
+      (operator?.readings ?? [])
+        .map((r) => signalDevice(r.signal))
+        .filter((k) => k !== selectedKey),
+    );
+  }
+
+  /** Reads each device's state into deviceStates; a failed read files none. */
+  async function loadDeviceStates(deviceKeys: string[]): Promise<void> {
+    const keys = deviceKeys.filter((key, i, all) => all.indexOf(key) === i);
+    await Promise.all(
+      keys.map(async (key) => {
+        const removal = deviceRemovals[key] ?? 0;
+        const [providerId, deviceId] = key.split("/");
+        let values: DeviceStateValue[] | null;
+        try {
+          values = extractDeviceStateValues(
+            await fetchJson<UnknownRecord>(
+              `/v0/state/${encodeURIComponent(providerId)}/${encodeURIComponent(deviceId)}`,
+            ),
+          );
+        } catch {
+          values = null;
+        }
+        if ((deviceRemovals[key] ?? 0) !== removal) return;
+        const next = { ...deviceStates };
+        if (values) next[key] = values;
+        else delete next[key];
+        deviceStates = next;
+      }),
+    );
+  }
+
   function getSelectedDevice(): Device | null {
     if (!selectedKey) return null;
     return devices.find((d) => `${d.provider_id}/${d.device_id}` === selectedKey) ?? null;
@@ -493,7 +643,7 @@
     }
   }
 
-  // ── Software e-stop (wb#236) — thin trigger over POST /v0/estop ─────────────
+  // ── Software e-stop (wb#236): thin trigger over POST /v0/estop ──────────────
   async function refreshEstopOnly(): Promise<void> {
     const epoch = estopEpoch;
     try {
@@ -635,7 +785,7 @@
     await setMode();
   }
 
-  /** POSTs one call for the board being cleared; false, with the error shown, if refused. */
+  /** POSTs one call for the device being cleared; false, with the error shown, if refused. */
   async function callForTrip(stepNumber: number, func: FunctionSpec): Promise<boolean> {
     const [providerId, deviceId] = tripKey.split("/");
     tripError = null;
@@ -819,6 +969,302 @@
     }
   }
 
+  // ── Operator settings and Start/Stop run (wb#729, anolis#696) ─────────────
+  // What the operator has typed per parameter, until the group is saved.
+  let settingsDraft = $state<Record<string, string>>({});
+  let settingsErrors = $state<Record<string, string>>({});
+  let settingsFeedback = $state<Record<string, { text: string; cls: string; title?: string }>>({});
+  // Settings reset to the project's defaults on every runtime restart
+  // (anolis#681): a falling uptime is a restart, said once until dismissed.
+  // Kept across Operate stopping, so a restart from Commission counts too.
+  let restartNote = $state<boolean>(false);
+  let lastUptime: number | null = null;
+  let runBusy = $state<boolean>(false);
+  let runFeedback = $state<{ text: string; cls: string } | null>(null);
+  let actionBusy = $state<boolean>(false);
+  let actionFeedback = $state<{ text: string; cls: string } | null>(null);
+
+  /**
+   * An operator.actions button (anolis#697): its counter parameter, read
+   * fresh, plus one. A tree reads the increase, for example in
+   * RequestedPulseWindow, and only while the automation runs, so a press
+   * outside AUTO is refused rather than counted toward a later start.
+   */
+  async function pressAction(action: { label: string; parameter: string }): Promise<void> {
+    actionFeedback = null;
+    if (mode !== "AUTO") {
+      actionFeedback = {
+        text: `Refused: ${action.label} runs only in AUTO. Start the run first.`,
+        cls: "field-error",
+      };
+      return;
+    }
+    actionBusy = true;
+    try {
+      await refreshParametersOnly();
+      const param = parameters.find((p) => p.name === action.parameter);
+      if (!param) {
+        actionFeedback = {
+          text: `Refused: the runtime does not report ${action.parameter}.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      if (param.type !== "int64") {
+        actionFeedback = {
+          text: `Refused: ${action.parameter} is not an int64 counter.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      await fetchJson<UnknownRecord>("/v0/parameters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: param.name, value: Number(param.value) + 1 }),
+      });
+      actionFeedback = { text: `${action.label}: requested.`, cls: "field-note" };
+      await refreshParametersOnly();
+    } catch (err) {
+      actionFeedback = { text: `${action.label}: ${callErrorText(err)}`, cls: "field-error" };
+    } finally {
+      actionBusy = false;
+    }
+  }
+
+  function noteRestart(status: RuntimeApiStatus | null): void {
+    if (!status) return;
+    if (lastUptime !== null && status.uptime_seconds < lastUptime && operator?.settings?.length)
+      restartNote = true;
+    lastUptime = status.uptime_seconds;
+  }
+
+  function settingInput(param: ParameterDefinition): string {
+    return settingsDraft[param.name] ?? String(param.value ?? "");
+  }
+
+  /** Saves a group's changed values, or none of them if one is out of range. */
+  async function saveSettingsGroup(group: { group: string; items: { parameter: string }[] }) {
+    const errors: Record<string, string> = {};
+    const changes: { name: string; value: number | boolean | string }[] = [];
+    for (const item of group.items) {
+      const param = parameters.find((p) => p.name === item.parameter);
+      const raw = settingsDraft[item.parameter];
+      if (!param || raw === undefined) continue;
+      try {
+        const value = coerceParameterValue({
+          type: param.type,
+          rawValue: raw,
+          min: param.min,
+          max: param.max,
+          allowedValues: param.allowed_values,
+        });
+        if (value !== param.value) changes.push({ name: param.name, value });
+      } catch (err) {
+        errors[param.name] = err instanceof Error ? err.message : String(err);
+      }
+    }
+    const cleared = { ...settingsErrors };
+    for (const item of group.items) delete cleared[item.parameter];
+    settingsErrors = { ...cleared, ...errors };
+    if (Object.keys(errors).length) {
+      settingsFeedback = {
+        ...settingsFeedback,
+        [group.group]: { text: "Not saved: fix the values marked.", cls: "field-error" },
+      };
+      return;
+    }
+    for (const change of changes) {
+      try {
+        await fetchJson<UnknownRecord>("/v0/parameters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(change),
+        });
+      } catch (err) {
+        settingsFeedback = {
+          ...settingsFeedback,
+          [group.group]: { text: `${change.name}: ${callErrorText(err)}`, cls: "field-error" },
+        };
+        await refreshParametersOnly();
+        return;
+      }
+    }
+    // Refresh before dropping the drafts, or a ticked box shows the old
+    // value until the refresh lands (wb#745).
+    await refreshParametersOnly();
+    const drafts = { ...settingsDraft };
+    for (const item of group.items) delete drafts[item.parameter];
+    settingsDraft = drafts;
+    settingsFeedback = {
+      ...settingsFeedback,
+      [group.group]:
+        mode === "AUTO"
+          ? {
+              text: "Applied",
+              cls: "field-note",
+              title: "The automation is running and uses the new values now.",
+            }
+          : {
+              text: "Saved",
+              cls: "field-note",
+              title:
+                "Saved in the runtime. The settings take effect when the automation runs (AUTO).",
+            },
+    };
+  }
+
+  async function postMode(target: string): Promise<void> {
+    await fetchJson<UnknownRecord>("/v0/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: target }),
+    });
+  }
+
+  /**
+   * The open run in the runtime's journal (anolis#696): its id, null with
+   * none open, or undefined when the runtime has no journal (503: no
+   * runtime.data_dir). Only the newest run can be open.
+   */
+  async function openRunId(): Promise<string | null | undefined> {
+    try {
+      const body = await fetchJson<UnknownRecord>("/v0/runs?limit=1");
+      const newest = (Array.isArray(body.runs) ? body.runs : [])[0] as UnknownRecord | undefined;
+      return newest?.state === "open" && typeof newest.run_id === "string" ? newest.run_id : null;
+    } catch (err) {
+      if (err instanceof ApiResponseError && err.status === 503) return undefined;
+      throw err;
+    }
+  }
+
+  /**
+   * Runs run.start or run.stop: the parameters, then the mode, by way of
+   * MANUAL where the runtime does not allow the move directly. Start opens a
+   * run in the journal first, so the run records the settings it started
+   * with and every change after; Stop closes the open run last.
+   */
+  async function runStartStop(kind: "start" | "stop"): Promise<void> {
+    const start = run?.start;
+    const stop = run?.stop;
+    const step = kind === "start" ? start : stop;
+    if (!step) return;
+    runFeedback = null;
+    if (kind === "start" && !statusSettled) {
+      // Not "not answering": the first status has not arrived yet (wb#754).
+      runFeedback = {
+        text: "Refused: still connecting to the runtime. Start again in a moment.",
+        cls: "field-error",
+      };
+      return;
+    }
+    if (kind === "start") {
+      const refusal = runStartRefusal(
+        runtimeStatusData,
+        estop,
+        stopChain,
+        trippedKeys,
+        providerHealth,
+        automationFault?.message ?? "",
+      );
+      if (refusal) {
+        runFeedback = { text: refusal, cls: "field-error" };
+        return;
+      }
+      // Start runs the groups the operator switched on, and leaves the
+      // switches as they are (anolis#701).
+      if (nothingSwitchedOn(start, parameters)) {
+        runFeedback = {
+          text: "Refused: nothing is switched on. Tick On for at least one group.",
+          cls: "field-error",
+        };
+        return;
+      }
+      // The profile's own conditions (anolis#686), on signals read now, not
+      // up to a poll old.
+      const require = applicableRequirements(start, parameters);
+      if (require.length) {
+        await loadDeviceStates(require.map((r) => signalDevice(r.signal)));
+        const unmet = unmetStartRequirements(require, deviceStates);
+        if (unmet.length) {
+          runFeedback = { text: `Refused: ${unmet.join("; ")}.`, cls: "field-error" };
+          return;
+        }
+      }
+    }
+    // Stop switches its groups off; Start leaves the switches alone.
+    const names = kind === "stop" ? (stop?.disable ?? []) : [];
+    const verb = kind === "start" ? "Start" : "Stop";
+    runBusy = true;
+    let at = "reading the run journal";
+    let recorded = "";
+    try {
+      const openId = await openRunId();
+      if (kind === "start" && openId) {
+        runFeedback = {
+          text: `Refused: run ${openId} is already open. Stop run closes it.`,
+          cls: "field-error",
+        };
+        return;
+      }
+      if (kind === "start" && openId === null) {
+        at = "opening the run";
+        const params: Record<string, unknown> = {};
+        for (const item of (operator?.settings ?? []).flatMap((g) => g.items)) {
+          const param = parameters.find((p) => p.name === item.parameter);
+          if (param) params[param.name] = param.value;
+        }
+        const opened = await fetchJson<UnknownRecord>("/v0/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ params }),
+        });
+        const id = (opened.run as UnknownRecord | undefined)?.run_id;
+        recorded = typeof id === "string" ? ` Recorded as run ${id}.` : "";
+      }
+      for (const name of names) {
+        at = `setting ${name}`;
+        await fetchJson<UnknownRecord>("/v0/parameters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, value: kind === "start" }),
+        });
+      }
+      if (mode !== step.mode) {
+        if (!(modeTargets(mode) as string[]).includes(step.mode)) {
+          at = "setting MANUAL";
+          await postMode("MANUAL");
+        }
+        at = `setting ${step.mode}`;
+        await postMode(step.mode);
+      }
+      if (kind === "stop" && openId) {
+        at = `closing run ${openId}`;
+        await fetchJson<UnknownRecord>(`/v0/runs/${encodeURIComponent(openId)}/close`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ close_reason: "operator_stop" }),
+        });
+        recorded = ` Run ${openId} closed.`;
+      }
+      if (openId === undefined) {
+        recorded = " Not recorded: the runtime has no run journal (runtime.data_dir is not set).";
+      }
+      runFeedback = {
+        text: `Run ${kind === "start" ? "started" : "stopped"}: ${step.mode}.${recorded}`,
+        cls: "field-note",
+      };
+    } catch (err) {
+      runFeedback = {
+        text: `${verb} stopped at ${at}: ${err instanceof Error ? err.message : String(err)}`,
+        cls: "field-error",
+      };
+    } finally {
+      runBusy = false;
+      void refreshParametersOnly();
+      void refreshModeOnly();
+    }
+  }
+
   // ── SSE Event stream ──────────────────────────────────────────────────────
   function ensureEventStream(): void {
     if (streamManager) return;
@@ -864,6 +1310,8 @@
     else if (eventType === "mode_change") consumeModeChangeEvent(payload);
     else if (eventType === "parameter_change") void refreshParametersOnly();
     else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
+    else if (eventType === "automation_call_failed")
+      callFailures = applyCallFailedEvent(callFailures, payload);
     else if (eventType === "device_removed") consumeDeviceRemovedEvent(payload);
     else if (eventType === "stop_chain_change" || eventType === "stop_chain_mismatch")
       void refreshEstopOnly();
@@ -875,7 +1323,7 @@
     payload: UnknownRecord,
     detailsOverride: string | null = null,
   ): void {
-    const ev = buildTraceEvent(type, payload, Date.now());
+    const ev = { ...buildTraceEvent(type, payload, Date.now()), seq: ++traceSeq };
     if (detailsOverride) ev.details = detailsOverride;
     const buf = [...eventTrace];
     appendEventTrace(buf, ev, EVENT_TRACE_LIMIT);
@@ -933,7 +1381,7 @@
 
   function consumeAutomationFaultEvent(payload: UnknownRecord): void {
     // A fault is an event, not a status. Record it for display but never
-    // fabricate an execution_status — the polled /v0/automation/status is the
+    // fabricate an execution_status: the polled /v0/automation/status is the
     // single source of truth for the engine's state.
     const errorText =
       typeof payload.error === "string" && payload.error.trim() !== ""
@@ -1058,7 +1506,7 @@
              runtime is harmless, and a stale read must never hide it (wb#553). -->
         {#if estop?.latched}
           <div class="estop-latched-banner" data-testid="other-project-latch">
-            <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+            <span class="estop-latched-title">SAFE-STATE ENGAGED: actuation latched</span>
             <span class="estop-latched-meta">
               Latched at {formatEpochMs(estop.latched_at_epoch_ms)} on the runtime running "{runningProject}".
               Clear it from
@@ -1113,7 +1561,7 @@
       {/if}
     </div>
   {:else}
-    <!-- Software stop (wb#236) — thin trigger over POST /v0/estop. NOT an
+    <!-- Software stop (wb#236): thin trigger over POST /v0/estop. NOT an
          emergency stop: it commands devices that stay powered. One row at
          button height (wb#613): the detail sits behind click-open notes, and
          what needs attention stays in the row. -->
@@ -1153,7 +1601,7 @@
               disabled={clearRunning}
               onclick={clearEstop}
             >
-              {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
+              {clearRunning ? "Clearing…" : "Confirm clear: re-enables actuation"}
             </button>
             <button
               type="button"
@@ -1174,15 +1622,9 @@
               No safe state declared: latch only
             </span>
           {:else}
-            <!-- The stop is armed either way; "Ready" claims the machine is,
-                 so not while a board is tripped (wb#692). Current conditions
-                 only: startup_safe_state is a past event, reported until the
-                 runtime restarts, and has its own warning below. -->
-            {#if trippedKeys.length}
-              <span class="estop-chip field-error" data-testid="estop-state">Not ready</span>
-            {:else}
-              <span class="estop-chip" data-testid="estop-state">Ready</span>
-            {/if}
+            <!-- About the stop only (wb#748): the machine line says whether the
+                 machine is ready, and why not. The stop is armed either way. -->
+            <span class="estop-chip" data-testid="estop-state">Stop ready</span>
           {/if}
           <InfoToggle label="About the software stop">
             {#if estop.software_safe_state === "hooks"}
@@ -1208,7 +1650,12 @@
               </span>
               <InfoToggle label="About uncovered functions">
                 {estop.uncovered_actuating_functions} actuating function(s) the software stop will not
-                drive.
+                drive: a software stop leaves those outputs as they were.
+                {#if estop.uncovered_functions.length}
+                  <span data-testid="estop-uncovered-names">
+                    Not driven by the stop: {estop.uncovered_functions.join(", ")}.
+                  </span>
+                {/if}
               </InfoToggle>
             {/if}
           {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
@@ -1222,6 +1669,19 @@
               which is why setpoints are not used.
             </InfoToggle>
           {/if}
+        {/if}
+        {#if faultUncovered.length}
+          <!-- What a fault in AUTO leaves (anolis 0.9.0), whatever the stop covers. -->
+          <span class="estop-chip field-error" data-testid="fault-coverage">
+            ⚠ {faultUncovered.length} not covered by FAULT
+          </span>
+          <InfoToggle label="About functions a fault leaves">
+            {faultUncovered.length} actuating function(s) no AUTO → FAULT hook drives: a fault in AUTO
+            leaves those outputs as they were.
+            <span data-testid="fault-uncovered-names">
+              Not driven by a fault in AUTO: {faultUncovered.join(", ")}.
+            </span>
+          </InfoToggle>
         {/if}
         {#if stopChain}
           <!-- The observed emergency stop (wb#631): the runtime reads it from a
@@ -1291,7 +1751,7 @@
         <span class="estop-disclaimer">
           Not an emergency stop: use the hardware E-stop
           <InfoToggle label="Why this is not an emergency stop">
-            Not an emergency stop — it commands devices that stay powered, and needs the runtime,
+            Not an emergency stop: it commands devices that stay powered, and needs the runtime,
             providers and bus all working. For any physical hazard use the hardware emergency stop.
             If in doubt, isolate power to the machine.
           </InfoToggle>
@@ -1299,14 +1759,27 @@
       </div>
     </div>
 
+    <!-- Operator panel (wb#727): what the machine is doing and what to do next. -->
+    <div class="operate-section operator-panel">
+      <div class="machine-line machine-line-{machine.state}" data-testid="machine-line">
+        <span>{machine.text}</span>
+        {#if machine.target}
+          {@const target = machine.target}
+          <button type="button" class="btn-secondary btn-sm" onclick={() => goToSection(target)}
+            >{machine.linkLabel}</button
+          >
+        {/if}
+      </div>
+    </div>
+
     {#if trippedKeys.length || tripKey}
-      <!-- Boards whose command watchdog tripped refuse every SET until cleared
+      <!-- Devices whose command watchdog tripped refuse every SET until cleared
            (wb#572). The clear is a sequence the operator confirms step by step. -->
       <div class="operate-section" data-testid="watchdog-trips">
         <h3>Watchdog trips</h3>
         {#if trippedKeys.length}
           <p class="field-note">
-            These boards' command watchdogs tripped, so they refuse every command until cleared.
+            These devices' command watchdogs tripped, so they refuse every command until cleared.
           </p>
           <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
@@ -1340,7 +1813,7 @@
                     disabled={clearRunning}
                     onclick={releaseForTrip}
                   >
-                    Confirm release — re-enables actuation
+                    Confirm release: re-enables actuation
                   </button>
                   <button
                     type="button"
@@ -1385,9 +1858,10 @@
               <li data-testid="trip-step-3">
                 Clear the trip with <code>clear_watchdog_trip</code>.
                 {#if !tripCaps}
-                  <span class="field-note">Loading the board's functions…</span>
+                  <span class="field-note">Loading the device's functions…</span>
                 {:else if !tripClearFn}
-                  <span class="field-error">This board offers no clear_watchdog_trip function.</span
+                  <span class="field-error"
+                    >This device offers no clear_watchdog_trip function.</span
                   >
                 {:else if tripCleared}
                   <span class="field-note">Done: the trip is cleared.</span>
@@ -1418,7 +1892,7 @@
                       disabled={tripRunning}
                       onclick={releaseBrakes}
                     >
-                      Confirm — releases both brakes
+                      Confirm: releases both brakes
                     </button>
                     <button
                       type="button"
@@ -1463,8 +1937,207 @@
       </div>
     {/if}
 
+    {#if readings.length}
+      <!-- The profile's declared readings (wb#728). -->
+      <div class="operate-section" data-testid="operator-readings">
+        <h3>Readings</h3>
+        <ul class="operator-readings">
+          {#each readings as r, i (i)}
+            {@const declared = operator?.readings?.[i]}
+            {@const signal = declared?.signal ?? ""}
+            {@const history = readingHistory[signal] ?? []}
+            {@const range = history.length > 1 ? sparklineRange(history) : null}
+            <li class="operator-reading" data-testid="operator-reading">
+              <span class="operator-reading-label">{r.label}</span>
+              <span class="operator-reading-value">{r.text}</span>
+              <span class="operator-sparkline-row">
+                <svg
+                  class="operator-sparkline"
+                  data-testid="sparkline"
+                  viewBox="0 0 120 24"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                  ><path
+                    d={sparklinePath(history, 120, 24, sparklineMinSpan(declared?.decimals))}
+                  /></svg
+                >
+                {#if range}
+                  <!-- The window's high over its low (wb#747). -->
+                  <span class="operator-sparkline-range" data-testid="sparkline-range">
+                    <span>{range.hi.toFixed(declared?.decimals ?? 2)}</span>
+                    <span>{range.lo.toFixed(declared?.decimals ?? 2)}</span>
+                  </span>
+                {/if}
+              </span>
+              {#if r.note}<span
+                  class="{r.note === 'loading'
+                    ? 'field-note'
+                    : 'field-error'} operator-reading-note">{r.note}</span
+                >{/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if operator?.settings?.length || (operator && failingCalls.length)}
+      <!-- What is set now, per settings group (wb#728): on is scheduled, not
+           running. Nothing here says whether an actuator is moving. Below
+           them, each automation call failing now (anolis#678). -->
+      <div class="operate-section" data-testid="operator-now">
+        <h3>Now</h3>
+        <ul class="operator-now">
+          {#if !statusSettled}
+            <li class="field-note">Loading…</li>
+          {:else}
+            {#each operatorSettingsLines(operator, parameters) as line, i (i)}
+              <li>{line}</li>
+            {/each}
+          {/if}
+          <!-- Keyed by the line: with an index key the text stayed stale
+               when a second event changed it in place. Lines are unique, as
+               the runtime keeps one entry per device and function. -->
+          {#each failingCalls as line (line)}
+            <li class="field-error" data-testid="call-failure">{line}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if run?.start || run?.stop || operator?.actions?.length || operator?.settings?.length}
+      <!-- The profile's run, actions and settings, one section (wb#729,
+           anolis#696, anolis#697): Start run and Stop run, the action
+           buttons, then the declared settings, one Save per group. Headed by
+           run.label, "Run" by default. -->
+      <div class="operate-section" data-testid="operator-run">
+        <h3>{run?.label ?? "Run"}</h3>
+        {#if run?.start || run?.stop}
+          <div class="mode-row">
+            {#if run.start}
+              <button
+                type="button"
+                class="btn-primary"
+                disabled={runBusy}
+                onclick={() => runStartStop("start")}>Start run</button
+              >
+            {/if}
+            {#if run.stop}
+              <button
+                type="button"
+                class="btn-secondary"
+                disabled={runBusy}
+                onclick={() => runStartStop("stop")}>Stop run</button
+              >
+            {/if}
+            {#if runFeedback}
+              <span class={runFeedback.cls} data-testid="run-feedback">{runFeedback.text}</span>
+            {/if}
+          </div>
+          <p class="field-note">
+            Stop run ends the run; the software stop above stays the emergency control.
+          </p>
+        {/if}
+        {#if operator?.actions?.length}
+          <div class="mode-row" data-testid="operator-actions">
+            {#each operator.actions as action, i (i)}
+              <button
+                type="button"
+                class="btn-secondary"
+                disabled={actionBusy}
+                onclick={() => pressAction(action)}>{action.label}</button
+              >
+            {/each}
+            {#if actionFeedback}
+              <span class={actionFeedback.cls} data-testid="action-feedback"
+                >{actionFeedback.text}</span
+              >
+            {/if}
+          </div>
+        {/if}
+        {#if operator?.settings?.length}
+          <div data-testid="operator-settings">
+            <p class="field-note">Settings apply while the automation runs (AUTO).</p>
+            {#if restartNote}
+              <div class="workspace-advisory" data-testid="settings-restarted">
+                The runtime restarted, so the settings are back at their defaults.
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
+                  onclick={() => (restartNote = false)}>OK</button
+                >
+              </div>
+            {/if}
+            {#each operator.settings as group (group.group)}
+              <form
+                class="settings-group"
+                data-testid="settings-group"
+                onsubmit={(e: Event) => {
+                  e.preventDefault();
+                  void saveSettingsGroup(group);
+                }}
+              >
+                <h4>{group.group}</h4>
+                {#each group.items as item (item.parameter)}
+                  {@const param = parameters.find((p) => p.name === item.parameter)}
+                  {@const id = `setting-${item.parameter}`}
+                  <div class="setting-row" data-testid="setting">
+                    <label for={id}>{item.label}</label>
+                    {#if !param}
+                      <span class="field-note"
+                        >{statusSettled ? "not reported by the runtime" : "loading…"}</span
+                      >
+                    {:else if param.type === "bool"}
+                      <input
+                        {id}
+                        type="checkbox"
+                        checked={settingInput(param) === "true"}
+                        onchange={(e: Event) =>
+                          (settingsDraft = {
+                            ...settingsDraft,
+                            [param.name]: String(inputTarget(e).checked),
+                          })}
+                      />
+                    {:else}
+                      <input
+                        {id}
+                        type="text"
+                        inputmode="decimal"
+                        value={settingInput(param)}
+                        oninput={(e: Event) =>
+                          (settingsDraft = {
+                            ...settingsDraft,
+                            [param.name]: inputTarget(e).value,
+                          })}
+                      />
+                    {/if}
+                    {#if item.unit}<span>{item.unit}</span>{/if}
+                    {#if param?.source === "operator"}
+                      <span class="badge ok">changed</span>
+                    {:else if param?.source === "default"}
+                      <span class="badge unknown">default</span>
+                    {/if}
+                    {#if settingsErrors[item.parameter]}
+                      <span class="field-error">{settingsErrors[item.parameter]}</span>
+                    {/if}
+                  </div>
+                {/each}
+                <button type="submit" class="btn-secondary btn-sm">Save</button>
+                {#if settingsFeedback[group.group]}
+                  <span
+                    class={settingsFeedback[group.group].cls}
+                    title={settingsFeedback[group.group].title}
+                    >{settingsFeedback[group.group].text}</span
+                  >
+                {/if}
+              </form>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Mode control -->
-    <div class="operate-section operate-mode-section">
+    <div class="operate-section operate-mode-section" data-testid="mode-section">
       <h3>Mode</h3>
       <div class="mode-row">
         <span>
@@ -1499,86 +2172,20 @@
           {/if}
         {/if}
       </div>
-      {#if mode === "FAULT"}
-        <p class="field-note" data-testid="mode-fault-note">
-          FAULT refuses every device call. Set the mode to MANUAL to recover.
-        </p>
-      {/if}
     </div>
 
-    <!-- Runtime status -->
-    <div class="operate-section">
-      <h3>Runtime Status</h3>
-      {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(
-          runtimeStatusData,
-          estop,
-          startupSafeState,
-          stopChain,
-        )}
-        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
-        {#if health.reasons.length > 0}
-          <span class="operate-meta">{health.reasons.join("; ")}.</span>
-        {/if}
-        <span class="operate-meta">
-          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
-          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime
-          {runtimeStatusData.uptime_seconds}s
-        </span>
-        {#if startupSafeState}
-          {@const startup = summarizeStartupSafeState(startupSafeState)}
-          <span
-            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
-            data-testid="startup-safe-state"
-          >
-            {startup.text}
-          </span>
-          {#if startup.calls.length}
-            <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-              {#each startup.calls as call (call)}
-                <li>{call}</li>
-              {/each}
-            </ul>
-          {/if}
-        {/if}
-      {:else if !statusSettled}
-        <!-- Until the first status reply settles, a missing status is not a
-             fault (wb#623). A failed reply settles too, and falls through. -->
-        <span class="badge unknown">--</span>
-        <span class="operate-meta">Loading runtime status…</span>
-      {:else}
-        <span class="badge unavailable">UNAVAILABLE</span>
-        <span class="operate-meta">Runtime status unavailable.</span>
-      {/if}
-    </div>
-
-    <!-- Event stream status -->
-    <div class="operate-section">
-      <h3>Event Stream</h3>
-      {#if streamStatus.state === "connected"}
-        <span class="badge ok">CONNECTED</span> <span class="operate-meta">SSE stream active.</span>
-      {:else if streamStatus.state === "reconnecting"}
-        <span class="badge unavailable">RECONNECTING</span>
-        <span class="operate-meta"
-          >Attempt {streamStatus.attempts}, retry in {Math.max(
-            1,
-            Math.ceil((streamStatus.delay_ms || 0) / 1000),
-          )}s.</span
-        >
-      {:else if streamStatus.state === "stale"}
-        <span class="badge stale">STALE</span>
-        <span class="operate-meta"
-          >No events for {Math.floor((streamStatus.idle_ms || 0) / 1000)}s.</span
-        >
-      {:else}
-        <span class="badge unavailable">DISCONNECTED</span>
-        <span class="operate-meta">Stream disconnected.</span>
-      {/if}
-    </div>
+    <!-- The runtime's status and the event stream, one section (wb#748). -->
+    <ConnectionSection
+      status={runtimeStatusData}
+      settled={statusSettled}
+      refusal={statusRefusal}
+      health={summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState, stopChain)}
+      startup={startupSafeState ? summarizeStartupSafeState(startupSafeState) : null}
+      stream={summarizeStream(streamStatus)}
+    />
 
     <!-- Provider health -->
-    <div class="operate-section">
+    <div class="operate-section" data-testid="provider-health">
       <h3>Provider Health</h3>
       <ul class="operate-provider-health">
         {#if providerHealth.length === 0}
@@ -1601,188 +2208,191 @@
     </div>
 
     <!-- Devices -->
-    <div class="operate-section operate-devices-layout">
-      <div class="operate-device-list-col">
-        <h3>Devices</h3>
-        <ul class="operate-list">
-          {#if !devicesSettled}
-            <li class="placeholder">Loading devices…</li>
-          {:else if devices.length === 0}
-            <li class="placeholder">No devices found.</li>
-          {:else}
-            {#each devices as device (`${device.provider_id}/${device.device_id}`)}
-              {@const key = `${device.provider_id}/${device.device_id}`}
-              <li class:selected={key === selectedKey}>
-                <button
-                  type="button"
-                  class="operate-device-select"
-                  onclick={() => selectDevice(key)}
-                >
-                  {device.display_name || device.device_id || key} ({key})
-                </button>
-                {#if stopChain?.mismatches.some((m) => m.device === key)}
-                  <!-- In scope, but not behaving as the stop should make it (wb#631). -->
-                  <span class="badge fault" data-testid="device-stop-mismatch"
-                    >STOP NOT REACHING</span
+    <details class="operate-section operate-collapsible" data-testid="devices-section">
+      <summary>Devices</summary>
+      <div class="operate-devices-layout">
+        <div class="operate-device-list-col">
+          <ul class="operate-list">
+            {#if !devicesSettled}
+              <li class="placeholder">Loading devices…</li>
+            {:else if devices.length === 0}
+              <li class="placeholder">No devices found.</li>
+            {:else}
+              {#each devices as device (`${device.provider_id}/${device.device_id}`)}
+                {@const key = `${device.provider_id}/${device.device_id}`}
+                <li class:selected={key === selectedKey}>
+                  <button
+                    type="button"
+                    class="operate-device-select"
+                    onclick={() => selectDevice(key)}
                   >
-                {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
-                  <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
-                  <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
-                {/if}
-                {#if trippedKeys.includes(key)}
-                  <!-- Refuses every command until cleared (wb#572). -->
-                  <span class="badge fault" data-testid="device-watchdog-tripped"
-                    >WATCHDOG TRIPPED</span
-                  >
-                {/if}
-                {#if stopChain?.expectations[key]}
-                  <span class="badge" data-testid="device-stop-expect">
-                    expects {stopChain.expectations[key] === "power_loss"
-                      ? "power loss"
-                      : "estop report"}
-                  </span>
-                {/if}
-              </li>
-            {/each}
-          {/if}
-        </ul>
-      </div>
-
-      <div class="operate-device-detail-col">
-        <h3 id="device-title">
-          {#if selectedKey && getSelectedDevice()}
-            {getSelectedDevice()?.display_name || getSelectedDevice()?.device_id} ({selectedKey})
-          {:else}
-            Device Detail
-          {/if}
-        </h3>
-
-        {#if !selectedKey || !getSelectedDevice()}
-          <p class="placeholder">Select a device to inspect signals and execute functions.</p>
-        {:else}
-          <!-- By name, numbers in order: period1_ms before period2_ms (wb#692). -->
-          {@const signals = [...(deviceStates[selectedKey] ?? [])].sort((a, b) =>
-            (a.signal_id ?? "").localeCompare(b.signal_id ?? "", undefined, { numeric: true }),
-          )}
-          <!-- The first state read, or a failed one, files an entry (wb#623). -->
-          {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
-          {@const capsLoaded = capabilities[selectedKey] !== undefined}
-          {@const caps = capabilities[selectedKey] ?? { functions: [] }}
-
-          {#if !signalsLoaded}
-            <p class="placeholder">Loading signals…</p>
-          {:else if signals.length === 0}
-            <p class="placeholder">No signals available.</p>
-          {:else}
-            <table class="signal-table">
-              <thead><tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr></thead
-              >
-              <tbody>
-                {#each signals as sig (sig.signal_id)}
-                  <tr>
-                    <td>{sig.signal_id || "-"}</td>
-                    <td>{formatValue(sig.value)}</td>
-                    <td>{sig.quality ?? "--"}</td>
-                    <td
-                      >{(sig.timestamp_ms ?? 0) > 0
-                        ? new Date(sig.timestamp_ms ?? 0).toLocaleTimeString()
-                        : "--"}</td
+                    {device.display_name || device.device_id || key} ({key})
+                  </button>
+                  {#if stopChain?.mismatches.some((m) => m.device === key)}
+                    <!-- In scope, but not behaving as the stop should make it (wb#631). -->
+                    <span class="badge fault" data-testid="device-stop-mismatch"
+                      >STOP NOT REACHING</span
                     >
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          {/if}
+                  {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
+                    <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
+                    <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
+                  {/if}
+                  {#if trippedKeys.includes(key)}
+                    <!-- Refuses every command until cleared (wb#572). -->
+                    <span class="badge fault" data-testid="device-watchdog-tripped"
+                      >WATCHDOG TRIPPED</span
+                    >
+                  {/if}
+                  {#if stopChain?.expectations[key]}
+                    <span class="badge" data-testid="device-stop-expect">
+                      expects {stopChain.expectations[key] === "power_loss"
+                        ? "power loss"
+                        : "estop report"}
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            {/if}
+          </ul>
+        </div>
 
-          {#if !capsLoaded}
-            <p class="placeholder">Loading functions…</p>
-          {:else if caps.functions?.length === 0}
-            <p class="placeholder">No callable functions declared.</p>
+        <div class="operate-device-detail-col">
+          <h3 id="device-title">
+            {#if selectedKey && getSelectedDevice()}
+              {getSelectedDevice()?.display_name || getSelectedDevice()?.device_id} ({selectedKey})
+            {:else}
+              Device Detail
+            {/if}
+          </h3>
+
+          {#if !selectedKey || !getSelectedDevice()}
+            <p class="placeholder">Select a device to inspect signals and execute functions.</p>
           {:else}
-            {#each caps.functions as func (func.function_id)}
-              {@const fbKey = `${selectedKey}:${func.function_id}`}
-              <div class="function-card">
-                <h4>{func.display_name || func.name || `Function ${func.function_id}`}</h4>
-                {#if func.description}
-                  <p class="function-description">{func.description}</p>
-                {/if}
-                <form
-                  onsubmit={(e: Event) => {
-                    e.preventDefault();
-                    void callFunction(selectedKey, func, getFuncFormData(selectedKey, func));
-                  }}
+            <!-- By name, numbers in order: period1_ms before period2_ms (wb#692). -->
+            {@const signals = [...(deviceStates[selectedKey] ?? [])].sort((a, b) =>
+              (a.signal_id ?? "").localeCompare(b.signal_id ?? "", undefined, { numeric: true }),
+            )}
+            <!-- The first state read, or a failed one, files an entry (wb#623). -->
+            {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
+            {@const capsLoaded = capabilities[selectedKey] !== undefined}
+            {@const caps = capabilities[selectedKey] ?? { functions: [] }}
+
+            {#if !signalsLoaded}
+              <p class="placeholder">Loading signals…</p>
+            {:else if signals.length === 0}
+              <p class="placeholder">No signals available.</p>
+            {:else}
+              <table class="signal-table">
+                <thead
+                  ><tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr></thead
                 >
-                  {#each func.args ?? [] as arg, ai (ai)}
-                    <div class="arg-row">
-                      <label for="fn-{fbKey}-{ai}">
-                        {arg.name}{arg.required !== false ? " *" : ""}
-                        {#if arg.min !== undefined && arg.max !== undefined}
-                          <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
+                <tbody>
+                  {#each signals as sig (sig.signal_id)}
+                    <tr>
+                      <td>{sig.signal_id || "-"}</td>
+                      <td>{formatValue(sig.value)}</td>
+                      <td>{sig.quality ?? "--"}</td>
+                      <td
+                        >{(sig.timestamp_ms ?? 0) > 0
+                          ? new Date(sig.timestamp_ms ?? 0).toLocaleTimeString()
+                          : "--"}</td
+                      >
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+
+            {#if !capsLoaded}
+              <p class="placeholder">Loading functions…</p>
+            {:else if caps.functions?.length === 0}
+              <p class="placeholder">No callable functions declared.</p>
+            {:else}
+              {#each caps.functions as func (func.function_id)}
+                {@const fbKey = `${selectedKey}:${func.function_id}`}
+                <div class="function-card">
+                  <h4>{func.display_name || func.name || `Function ${func.function_id}`}</h4>
+                  {#if func.description}
+                    <p class="function-description">{func.description}</p>
+                  {/if}
+                  <form
+                    onsubmit={(e: Event) => {
+                      e.preventDefault();
+                      void callFunction(selectedKey, func, getFuncFormData(selectedKey, func));
+                    }}
+                  >
+                    {#each func.args ?? [] as arg, ai (ai)}
+                      <div class="arg-row">
+                        <label for="fn-{fbKey}-{ai}">
+                          {arg.name}{arg.required !== false ? " *" : ""}
+                          {#if arg.min !== undefined && arg.max !== undefined}
+                            <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
+                          {/if}
+                        </label>
+                        {#if arg.type === "bool"}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="checkbox"
+                            checked={Boolean(getFuncFormData(selectedKey, func)[`arg_${ai}`])}
+                            onchange={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
+                          />
+                        {:else if argAllowedValues(arg).length > 0}
+                          <select
+                            id="fn-{fbKey}-{ai}"
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            onchange={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                          >
+                            <option value="">Choose…</option>
+                            {#each argAllowedValues(arg) as av (av)}
+                              <option value={av}>{av}</option>
+                            {/each}
+                          </select>
+                        {:else if arg.type === "double"}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="number"
+                            step="any"
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            oninput={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                          />
+                        {:else}
+                          <input
+                            id="fn-{fbKey}-{ai}"
+                            type="text"
+                            inputmode={arg.type === "int64" || arg.type === "uint64"
+                              ? "numeric"
+                              : "text"}
+                            placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
+                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            oninput={(e: Event) =>
+                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                          />
                         {/if}
-                      </label>
-                      {#if arg.type === "bool"}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="checkbox"
-                          checked={Boolean(getFuncFormData(selectedKey, func)[`arg_${ai}`])}
-                          onchange={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
-                        />
-                      {:else if argAllowedValues(arg).length > 0}
-                        <select
-                          id="fn-{fbKey}-{ai}"
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          onchange={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                      </div>
+                    {/each}
+                    <div class="function-actions">
+                      <button type="submit" class="btn-secondary btn-sm">Execute</button>
+                      {#if functionFeedback[fbKey]?.text}
+                        <span class="function-feedback {functionFeedback[fbKey].cls}"
+                          >{functionFeedback[fbKey].text}</span
                         >
-                          <option value="">Choose…</option>
-                          {#each argAllowedValues(arg) as av (av)}
-                            <option value={av}>{av}</option>
-                          {/each}
-                        </select>
-                      {:else if arg.type === "double"}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="number"
-                          step="any"
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          oninput={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
-                        />
-                      {:else}
-                        <input
-                          id="fn-{fbKey}-{ai}"
-                          type="text"
-                          inputmode={arg.type === "int64" || arg.type === "uint64"
-                            ? "numeric"
-                            : "text"}
-                          placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
-                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
-                          oninput={(e: Event) =>
-                            setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
-                        />
                       {/if}
                     </div>
-                  {/each}
-                  <div class="function-actions">
-                    <button type="submit" class="btn-secondary btn-sm">Execute</button>
-                    {#if functionFeedback[fbKey]?.text}
-                      <span class="function-feedback {functionFeedback[fbKey].cls}"
-                        >{functionFeedback[fbKey].text}</span
-                      >
-                    {/if}
-                  </div>
-                </form>
-              </div>
-            {/each}
+                  </form>
+                </div>
+              {/each}
+            {/if}
           {/if}
-        {/if}
+        </div>
       </div>
-    </div>
+    </details>
 
     <!-- Parameters -->
-    <div class="operate-section">
-      <h3>Parameters</h3>
+    <details class="operate-section operate-collapsible" data-testid="parameters-section">
+      <summary>Parameters</summary>
       {#if parameters.length === 0}
         <p class="placeholder">No parameters available.</p>
       {:else}
@@ -1853,11 +2463,11 @@
           {/each}
         </div>
       {/if}
-    </div>
+    </details>
 
     <!-- Automation status -->
-    <div class="operate-section">
-      <h3>Automation</h3>
+    <details class="operate-section operate-collapsible" data-testid="automation-section">
+      <summary>Automation</summary>
       {#if !automationStatus}
         <p class="placeholder">Automation status unavailable.</p>
       {:else}
@@ -1892,16 +2502,16 @@
         </div>
         <pre class="bt-viewer">{formatBtOutline(behaviorTree)}</pre>
       {/if}
-    </div>
+    </details>
 
     <!-- Event trace -->
-    <div class="operate-section">
-      <h3>Event Trace</h3>
+    <details class="operate-section operate-collapsible" data-testid="event-trace-section">
+      <summary>Event Trace</summary>
       {#if eventTrace.length === 0}
         <p class="placeholder">No events yet.</p>
       {:else}
         <div class="event-items">
-          {#each [...eventTrace].reverse() as ev (ev.timestamp_ms)}
+          {#each [...eventTrace].reverse() as ev (ev.seq)}
             {@const ts = Number.isFinite(Number(ev.timestamp_ms))
               ? new Date(Number(ev.timestamp_ms)).toLocaleTimeString()
               : "--"}
@@ -1914,7 +2524,7 @@
           {/each}
         </div>
       {/if}
-    </div>
+    </details>
 
     <!-- Telemetry: a link, not a frame. install.sh's Grafana refuses framing
          (X-Frame-Options: deny), and drawing it inside Operate is heavy on a

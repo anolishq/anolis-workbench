@@ -9,13 +9,14 @@
   import Operate from "./routes/Operate.svelte";
   import { fetchJson } from "./lib/api";
   import { savedLaunch, type SavedLaunch } from "./lib/canonical";
-  import type {
-    ProjectSummary,
-    ProviderSchemasResponse,
-    RuntimeStatus,
-    ProjectDoc,
-    TemplateSummary,
-    WorkbenchConfig,
+  import {
+    installedProject,
+    type ProjectSummary,
+    type ProviderSchemasResponse,
+    type RuntimeStatus,
+    type ProjectDoc,
+    type TemplateSummary,
+    type WorkbenchConfig,
   } from "./lib/contracts";
   import { describeCrossProjectRunningBanner, evaluateNavigationPrompts } from "./lib/guards";
 
@@ -141,7 +142,16 @@
 
     const navId = ++lastNavigationId;
     if (!historyAlreadySet) {
-      if (replaceHistory) history.replaceState({}, "", route.path);
+      // A reload or popstate of the same page keeps its query string, which a
+      // page may read on load (wb#754); a redirect elsewhere drops it.
+      if (replaceHistory)
+        history.replaceState(
+          {},
+          "",
+          route.path === window.location.pathname
+            ? route.path + window.location.search
+            : route.path,
+        );
       else history.pushState({}, "", route.path);
     }
 
@@ -279,11 +289,18 @@
             showOnboarding = true;
           }
         } catch {
-          // Non-fatal — just show normal home
+          // Non-fatal: show the normal home
         }
       }
 
-      await navigateTo(window.location.pathname, { replaceHistory: true, bypassGuards: true });
+      // A machine with an installed project opens on its Operate (#730). Only
+      // the first load of "/": the Home button still shows the project list.
+      const installed = showOnboarding ? null : installedProject(projects);
+      const start =
+        installed && window.location.pathname === "/"
+          ? `/projects/${encodeURIComponent(installed.name)}/operate`
+          : window.location.pathname;
+      await navigateTo(start, { replaceHistory: true, bypassGuards: true });
       statusInterval = setInterval(() => void refreshStatus(), 2000);
     };
 

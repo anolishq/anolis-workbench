@@ -15,6 +15,312 @@ Historical note:
 
 ### Fixed
 
+- **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
+  refuse `telemetry.influxdb.token`**. From anolis#677 the runtime uses the
+  deprecated flat key, so a token there shadows the target's `INFLUXDB_TOKEN`
+  the same way. The error names the key that is set, and opening an authored
+  project removes either.
+
+## [0.29.0] - 2026-10-31
+
+Upgrade notes:
+
+- **Start run no longer switches groups on.** It runs the groups an
+  operator ticked On, and refuses while none is (anolishq/anolis#701). A
+  profile that relied on Start to switch everything on needs the groups
+  ticked first. Stop run still switches them off.
+- **"Experiment" is now "Run"** in the operator panel (anolishq/anolis#696):
+  the section, Start run and Stop run, and each run is opened and closed in
+  the runtime's run journal. A profile's `operator.experiment` is still read.
+- Needs anolis 0.9.0 or later for `operator.run`, `require.when` and
+  `operator.actions`; older runtimes show the panel without them.
+
+### Added
+
+- **Action buttons in the Run section** (anolishq/anolis#697), from the
+  profile's `operator.actions`, such as "Sample now". A press reads the
+  button's int64 counter parameter from the runtime and writes it plus one;
+  a tree turns each increase into one run, for example with
+  `RequestedPulseWindow`. A press refuses, sending nothing, outside AUTO
+  (the tree counts presses only while it runs), or when the runtime does not
+  report the parameter or it is not int64. Needs anolis 0.9.0, whose profile
+  schema knows `operator.actions`.
+- **The not-covered chip names the functions** (anolishq/anolis#698), with
+  anolis 0.9.0: its ⓘ lists each function the software stop won't drive, as
+  provider/device/function. A second chip, "⚠ N not covered by FAULT", shows
+  whenever a fault in AUTO leaves functions undriven, whatever the stop
+  covers, and its ⓘ names them. An older runtime sends no names: the stop's
+  ⓘ shows the count alone, as before, and the fault chip doesn't show.
+- **A sparkline beside each operator reading** (#747): the reading's last ten
+  minutes, kept in the browser from the state updates and polls Operate
+  already gets, drawn as plain SVG. It starts empty when the page loads (no
+  backfill; long history stays in Grafana), adds a point only when the
+  reading's own timestamp moves, and leaves a gap where the reading was
+  stale, faulted or unavailable. The line spans at least ten steps of the
+  reading's declared decimals (0.1 without them), so a reading moving by its
+  last digit draws near flat, and the window's high and low are labelled
+  beside it.
+- **Import a project folder from the browser's computer** (#749). Home's
+  Import Machine Profile has **Choose folder…**: the browser uploads the
+  folder (`POST /api/projects/import-upload`), and the server writes it to a
+  private staging directory under the data dir, validates and imports it as a
+  path import does, and removes the staging directory. A path that is not a
+  plain relative path, more than 200 files or more than 2 MiB is refused
+  before anything is written. The path field stays for a directory on the
+  workbench's machine.
+
+### Changed
+
+- **The operator panel's Start and Stop open and close a run** (anolishq/anolis#696).
+  Settings and Start/Stop are one section, headed by the profile's
+  `operator.run.label` ("Run" by default), with a line saying the settings
+  apply while the automation runs (AUTO). Start run opens a run in the
+  runtime's journal (`POST /v0/runs`) with the settings' current values
+  before it sets anything, so the run records them and every change after;
+  Stop run closes the open run (`operator_stop`) after it sets the mode.
+  Start refuses, naming the run, while one is already open. Without a run
+  journal (no `runtime.data_dir`) both still run and say the run is not
+  recorded. The profile's `operator.run` is read, and the deprecated
+  `operator.experiment` when `run` is absent. Needs anolis 0.9.0, whose
+  profile schema knows `operator.run`. The machine line reads "Running." in
+  AUTO, where it read "Experiment running.".
+- **Start respects the On switches** (anolishq/anolis#701). Start run no
+  longer sets the profile's `start.enable` parameters true: it runs with the
+  groups the operator ticked On, and refuses ("Refused: nothing is switched
+  on. Tick On for at least one group.") when every one is off. Stop run still
+  switches its `stop.disable` parameters off. A `require` entry with `when`
+  applies only while that parameter is on, so a group left off is not held
+  to its conditions.
+- **A setting an operator changed reads "changed"** (#232), where it read
+  "set"; one at the project's value still reads "default".
+- **Plain wording in the UI** (#746). The UI's text has no em dashes: each
+  is a colon, a full stop or a comma now. The machine line and the trip
+  clear say "device", not "board" ("Device tripped: clear the trip on …").
+  Home's import box suggests `/path/to/projects/my-machine`. A schema
+  select's empty option reads "Select…" or "Default: <title>". Empty cells
+  read "none" (Fleet's template) or "not set" (an imported profile's
+  identity), and Commission's version table leaves a missing version blank
+  beside its note. Text only.
+- **Operate's Runtime Status and Event Stream are one Connection section**
+  (#748). A grid of facts under the health badge: Runtime, Devices, Poll, Up
+  for (a duration, "14 h 55 min", not seconds) and Event stream (Connected,
+  Reconnecting, Quiet or Disconnected). The mode is no longer repeated there.
+  The machine line's "See Runtime Status" link is now "See Connection".
+- **Each thing is said once** (#748). Mode no longer carries its own FAULT
+  note: the machine line says what to do. The software-stop row's chip says
+  "Stop ready", about the stop only, where it said "Ready", or "Not ready"
+  while a device was tripped; the machine line says whether the machine is
+  ready, and why not. In FAULT it says MANUAL once: "In FAULT: set MANUAL to
+  recover (AUTO isn't available from FAULT)." Now says what is happening:
+  each settings group with an enable on or off, and its main value while on
+  ("Stirring: on, Speed 110 / 255"). The rest of the schedule stays in
+  Settings, and a group with no enable is no longer listed in Now.
+
+### Fixed
+
+- **A saved setting no longer flickers back for one poll** (#767). A poll
+  that read the parameters before a Save and landed after it showed the old
+  value until the next poll, 5 s later: a ticked On box unticked, then ticked
+  again. Each parameters read is numbered when it starts, and a reply older
+  than the one shown is dropped.
+- **Operate says it is connecting until the first status arrives** (#754).
+  The machine line said "The runtime is not answering." while the first
+  runtime status was still on its way; it now says "Connecting to the
+  runtime…", and keeps "not answering" for a status request that failed.
+  Until then Readings say "loading", Now says "Loading…", Settings say
+  "loading…", and Start refuses with "still connecting". A reload of a page
+  keeps its query string, which the first navigation used to drop.
+- **Operate's requests through the workbench are faster** (#754). Each
+  proxied request resolved the runtime's address afresh: the launcher's
+  status (every project, and a probe of the installed runtime), the running
+  project, the installed config and the token file. On the rig that was
+  about 0.2 s a request, and Operate's parallel polls queued behind each
+  other. The address and token are now kept until a file they were read from
+  changes, the workbench's own runtime process changes, or the address
+  refuses a request.
+- **The header's status poll is cheaper** (#754). `/api/status` looked for
+  a runtime the workbench did not start by loading each project and the
+  installed config to learn its port, on every 2 s poll: 0.1 to 0.3 s on the
+  rig. The ports are now kept until a file they were read from changes; the
+  probe of each still runs on every poll, so a runtime that stops or starts
+  shows at once.
+- **Operate's settings** (#745). A box ticked and saved no longer flickers
+  back to its old value while the values refresh. Save now says "Applied"
+  while the runtime is in AUTO, where the automation uses the values at once,
+  and "Saved" otherwise, with a tooltip that settings take effect when the
+  automation runs.
+- **"Go to Mode" and the other machine-line links** (#745) land the section
+  below the sticky software-stop row instead of under it.
+- **The "not covered" chip's explanation** (#745) now says what it means: a
+  software stop leaves those outputs as they were.
+
+## [0.28.0] - 2026-10-30
+
+Upgrade notes:
+
+- **Operate opens on an operator panel** (#731, #732). A line on what the
+  machine is doing and what to do next comes first, under the software-stop
+  row, which is unchanged. Mode, Runtime Status, Event Stream and Provider
+  Health follow, always shown. Devices, Parameters, Automation and Event
+  Trace are now each collapsed by default: open one to see it. Nothing was
+  removed.
+- **Opening the workbench goes to the installed machine's Operate** (#733).
+  With an installed project, the first load of `/` redirects to
+  `/projects/<installed>/operate`. The Home button still shows the project
+  list, a direct link to another page stays where it is, and onboarding still
+  comes first. On Home, the installed project is listed first as "this
+  machine"; Create, Import, Check for Updates, Rollback and the Fleet
+  Dashboard move under "Setup", closed when a project is installed. Open on
+  an imported project goes to Operate, not Compose.
+- **Home's heading** (#734) is the installed machine's display name, with "Go
+  to Operate". With no installed project it is "Projects", where it was
+  "Commissioning Workbench".
+- **The operator panel reads the profile's `operator` block** (#736, #737,
+  #738). With the block, Operate shows Readings and Now (a line per settings
+  group), Settings, whose Save writes the group's automation parameters to
+  the runtime, and Start/Stop experiment, which set the declared enable
+  parameters and mode. Start refuses, sending nothing, while the runtime is
+  not answering, the emergency stop is in force, the software stop is
+  latched, the runtime is in FAULT, a board is tripped, a device is lost, or
+  one of the profile's `start.require` conditions does not hold. Without the
+  block, Operate shows none of these.
+- **Now names automation calls that keep failing** (#740), with anolis 0.8.0:
+  each call, its failures in a row and its last error. An older runtime sends
+  no `call_failures`, and Now lists none.
+- **The Event Trace shows every event** (#741). Two events the runtime
+  stamped in the same millisecond broke the trace's rows; both now show.
+- **The pins:** the sim quickstart template pins runtime 0.8.0, and the
+  contract locks move to anolis 0.7.0 (#735), then 0.8.0 (#739). The vendored
+  machine-profile schema accepts the `operator` block and
+  `operator.experiment.start.require`, the runtime-config schema accepts
+  `automation.max_consecutive_call_failures`, and the runtime-http contract
+  describes the `automation_call_failed` event and `call_failures` in
+  `GET /v0/automation/status`.
+
+### Added
+
+- **Operate opens on an operator panel** (#727, part of #232). Its first
+  line says what the machine is doing and what to do next: Ready, Experiment
+  running, stopped by the software stop, in FAULT (set MANUAL, and why AUTO is
+  not offered), a board tripped or a device lost (each named), a latched
+  device that is back and waits for MANUAL → AUTO, the emergency stop in
+  force, or the runtime not answering. A device is called lost only while
+  provider health says it is unreachable. A line about something below it
+  has a button that scrolls to that section. Below the line, watchdog trips,
+  Mode, Runtime Status, Event Stream and Provider Health are always shown;
+  Devices, Parameters, Automation and Event Trace each collapse on their own,
+  closed by default; Telemetry comes last. Nothing was removed. The
+  software-stop row stays above the panel, never collapsed.
+
+- **The operator panel shows the machine's readings** (#728, part of #232).
+  With an `operator` block in the profile (anolis 0.7.0), Readings shows each
+  declared signal large, with its label, unit and declared decimals, and says
+  when it is stale, faulted, unavailable or not reported. Now has a line per
+  settings group with its values; a group holding one of the experiment's
+  enable parameters reads on or off, where on means scheduled, not that its
+  actuator is moving. Both sit above Mode, always shown. Without the block,
+  the panel shows neither.
+
+- **Settings and Start/Stop experiment in the operator panel** (#729, part of
+  #232). Settings shows the profile's declared groups with labels, units and
+  current values, each marked default or set, and saves a group with one
+  Save; a value out of range is refused, naming the limit, and nothing in the
+  group is saved. After a runtime restart, it says once that the settings
+  are back at their defaults. Start experiment sets the declared enable
+  parameters, then the declared mode, by way of MANUAL where the runtime
+  does not allow the move directly; Stop experiment clears them, then sets
+  its mode. Start refuses, with the reason and the fix, while the runtime is
+  not answering, the emergency stop is in force, the software stop is
+  latched, the runtime is in FAULT, a board is tripped or a device is lost.
+  From FAULT it sends nothing: recovering is MANUAL under Mode, once the
+  cause is fixed. The software stop stays the emergency control.
+
+- **Start checks the profile's own conditions** (#729,
+  anolishq/anolis#686). With `operator.experiment.start.require` in the
+  profile, Start reads each named signal when clicked and, after the generic
+  refusals, refuses with the declared message of every condition that does
+  not hold, such as "Release dose pump 1's brake". A reading that is stale,
+  faulted or missing does not count as holding, and the message says so.
+  Profiles carry the list once the workbench vendors the machine-profile
+  schema from the anolis release that adds it.
+
+- **Now names failing automation calls** (#728, anolishq/anolis#678). With
+  anolis 0.8.0, Now lists each device call automation keeps failing, such as
+  "bread0/dcmt1 pulse_motor: failed 2 times in a row; last error: motor1
+  brake engaged", from `call_failures` in the automation status and from each
+  `automation_call_failed` event between polls. A call that has succeeded
+  since is not listed. Now shows with a failing call even when the profile
+  declares no settings. The event trace describes the event.
+
+- **The workbench opens on the machine** (#730, part of #232). With an
+  installed project (#724), opening the workbench goes straight to its
+  Operate; the Home button still shows the project list. Home lists the
+  installed project first as "this machine", and puts Create, Import, updates,
+  rollback and the Fleet Dashboard under "Setup", collapsed when a project is
+  installed. Open on an imported project goes to Operate, not Compose. Home's
+  heading is the installed machine, by its display name, with "Go to
+  Operate"; with no installed project it is "Projects", where it was
+  "Commissioning Workbench".
+
+### Fixed
+
+- **Compose's running-runtime advisory** no longer tells an imported project
+  to save edits it cannot make, and for the installed project says the
+  runtime runs the installed copy instead of "running from this project"
+  (#730).
+- **The Event Trace keeps events stamped in the same millisecond** (#741).
+  Its rows were keyed by the event's `timestamp_ms`, which the runtime sets,
+  so two events from one poll collided: Svelte threw `each_key_duplicate` and
+  the trace dropped the second. Rows are now keyed by arrival.
+
+## [0.27.0] - 2026-10-30
+
+Upgrade notes:
+
+- **On a machine with an install, the workbench now imports the installed
+  project at startup** (#724, part of #722). When `/opt/anolis/manifest.json`
+  exists, a read-only project for `/opt/anolis/projects/<profile>/` appears in
+  the workspace, and is replaced from `/opt/anolis` on every start. Operate
+  reaches the installed runtime through it on the port
+  `/opt/anolis/config/runtime.yaml` sets. A project of your own with that name
+  is kept, and the installed one is imported as `<profile>-installed` beside
+  it. `ANOLIS_WORKBENCH_RUNTIME_URL` still overrides the target when set.
+- **Launch and restart answer an executable that isn't configured with 422,
+  not 409** (#721, Fixes #672). The body carries `code`
+  `runtime_executable_missing` or `provider_executable_missing`. A client that
+  read any 409 from these routes as "a runtime is already running" now gets
+  409 only for a real conflict.
+- **A stop request stops only the named project's runtime** (#716, Fixes
+  #670). `POST /api/projects/<name>/stop` returns 409 naming the running
+  project, and leaves it running, when that runtime belongs to another
+  project. It stopped whichever runtime was running.
+- **The pins:** the sim quickstart template pins runtime 0.6.0, and the
+  contract locks move to anolis 0.6.0 (#714, #715). The vendored runtime-config
+  schema accepts `automation.on_terminal`, and the runtime-http contract
+  describes the function policy's `allowed_modes`, `min_interval_ms` and
+  `requires_lease`, and the tree's terminal states.
+
+### Added
+
+- **The workbench imports the project install.sh put on this machine at
+  startup** (#722). When `/opt/anolis/manifest.json` exists, it imports
+  `/opt/anolis/projects/<profile>/` as a read-only project marked as the
+  installed one, and re-imports it on every start. Operate then reaches the
+  installed runtime on loopback at the port `/opt/anolis/config/runtime.yaml`
+  sets, with no import by hand and no `ANOLIS_WORKBENCH_RUNTIME_URL`, and the
+  import never goes stale after an upgrade (#558). A project of the user's own
+  with that name is kept, and the installed one is imported as
+  `<profile>-installed`. Nothing is imported when the manifest, the runtime
+  config or the project cannot be read.
+
+### Fixed
+
+- **A runtime that refuses the workbench says what to run** (#722). The
+  operate proxy answers the runtime's 401 with a message naming
+  `anolis-provision workbench-service`: to install the token copy when the
+  workbench sent none, or to refresh it when the runtime refused the one it
+  sent. Operate's Runtime Status shows it, and so does "Failed to set mode",
+  where both said only "unauthorized" or "Runtime status unavailable".
 - **`POST /api/projects/<name>/stop` stops only `<name>`'s runtime**
   (Fixes #670). When another project's runtime is running, it returns 409
   naming that project and leaves it running, as restart already did. It
@@ -25,11 +331,24 @@ Historical note:
   <the reason>", and keeps watching the runtime that is still running. It
   swallowed every error, so a refused stop, for another project's runtime or
   for the installed service, showed nothing.
-- **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
-  refuse `telemetry.influxdb.token`**. From anolis#677 the runtime uses the
-  deprecated flat key, so a token there shadows the target's `INFLUXDB_TOKEN`
-  the same way. The error names the key that is set, and opening an authored
-  project removes either.
+- **A launch or restart that fails to start the runtime keeps the previous
+  run's `latest.log`** (#672). The log was emptied before the runtime was
+  started, so the log of the run before was lost.
+- **A restart whose runtime executable is not set, does not exist or is not
+  executable is refused with the runtime still running** (#672). The path was
+  checked only after the running runtime had been stopped, and only for being
+  set, so the refusal, or the failed start that followed, left nothing
+  running.
+- **Launch and restart answer an executable that isn't configured with 422**
+  (Fixes #672), with `code` `runtime_executable_missing` (the runtime path is
+  not set, does not exist or is not executable) or
+  `provider_executable_missing`. They answered 409, the status "a runtime is
+  already running" uses, so a client could not tell a project to fix from a
+  runtime to stop. 409 stays for those conflicts. Both OpenAPI contracts now
+  list the 422 for launch and restart, which they did not for the validation
+  failure that already returned it.
+  Commission shows such a refusal as "Launch failed: <the route's message>"
+  and reads a launch error as busy only when it is that 409.
 
 ## [0.26.0] - 2026-10-29
 

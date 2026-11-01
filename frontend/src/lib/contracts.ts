@@ -77,7 +77,7 @@ export interface ProviderSchemasResponse extends UnknownRecord {
 }
 
 /**
- * Any provider kind the server offers, which is whatever envelopes it serves —
+ * Any provider kind the server offers, which is whatever envelopes it serves:
  * never a fixed set. The literals that used to be unioned here collapsed to
  * `string` anyway, so they typed nothing and only read like an enum somebody
  * had to extend (#285).
@@ -166,7 +166,7 @@ export interface RuntimeHealth extends UnknownRecord {
 }
 
 /**
- * A runtime-config document — the file the runtime itself consumes
+ * A runtime-config document: the file the runtime itself consumes
  * (`config/anolis-runtime.<variant>.yaml`). The workbench edits it directly
  * now; there is no intermediate shadow document.
  */
@@ -191,7 +191,7 @@ export interface ComponentPin extends UnknownRecord {
   version?: string;
 }
 
-/** Parsed `machine-profile.yaml` — the machine's identity and contents. */
+/** Parsed `machine-profile.yaml`: the machine's identity and contents. */
 export interface MachineProfile extends UnknownRecord {
   schema_version?: number;
   machine_id: string;
@@ -207,6 +207,40 @@ export interface MachineProfile extends UnknownRecord {
   } & UnknownRecord;
   safety?: UnknownRecord;
   validation?: UnknownRecord;
+  operator?: OperatorBlock;
+}
+
+/** A signal value Start needs, and the fix shown when it does not hold (anolis#686). */
+export interface StartRequirement {
+  signal: string;
+  equals: boolean | number | string;
+  message: string;
+  /** A bool parameter: the condition applies only while it is true at Start (anolis#701). */
+  when?: string;
+}
+
+/** What Start run and Stop run do (anolis#696). */
+export interface OperatorRun {
+  /** The run section's heading; "Run" when absent. */
+  label?: string;
+  start?: {
+    enable?: string[];
+    mode: string;
+    /** Conditions on signals that must hold before Start runs (anolis#686). */
+    require?: StartRequirement[];
+  };
+  stop?: { disable?: string[]; mode: string };
+}
+
+/** The profile's operator panel presentation (anolis#682); nothing in it is checked. */
+export interface OperatorBlock {
+  readings?: { signal: string; label: string; unit?: string; decimals?: number }[];
+  settings?: { group: string; items: { parameter: string; label: string; unit?: string }[] }[];
+  run?: OperatorRun;
+  /** Buttons, each increasing an int64 counter parameter by one (anolis#697). */
+  actions?: { label: string; parameter: string }[];
+  /** Deprecated alias of run (anolis 0.7.0 and 0.8.0), read when run is absent. */
+  experiment?: OperatorRun;
 }
 
 /**
@@ -221,7 +255,7 @@ export interface ProviderInstance extends UnknownRecord {
 
 /**
  * Dev-launch only. Host binary paths live in the workbench sidecar and are
- * never deployed — a Windows path does not even resemble a deploy token.
+ * never deployed; a Windows path does not even resemble a deploy token.
  */
 export interface HostPaths extends UnknownRecord {
   runtime_executable?: string;
@@ -255,6 +289,17 @@ export function isImportedDoc(doc: ProjectDoc | null): boolean {
   return doc !== null && doc.authored === false;
 }
 
+/** Where install.sh installed this project (#724), or null for any other. */
+export function installedFrom(meta: UnknownRecord | undefined): string | null {
+  const value = meta?.installed_from;
+  return typeof value === "string" && value ? value : null;
+}
+
+/** The project installed on this machine, if the workbench has one (#730). */
+export function installedProject(projects: ProjectSummary[]): ProjectSummary | null {
+  return projects.find((p) => installedFrom(p.meta) !== null) ?? null;
+}
+
 export interface RuntimeStatusCode extends UnknownRecord {
   code?: string;
   message?: string;
@@ -277,13 +322,18 @@ export interface RuntimeApiStatus extends UnknownRecord {
   device_count: number;
   /** Device handles blocked after going unreachable; empty when none. */
   device_loss_latched: string[];
+  /**
+   * The actuating functions no AUTO -> FAULT hook drives, as
+   * provider/device/function (anolis 0.9.0); empty when none or not sent.
+   */
+  fault_uncovered_functions: string[];
 }
 
 /**
  * Which rung of the safe-state ladder a `POST /v0/estop` would run now.
  * "none" = no software safe-state declared (hardware cut only).
  * MUST stay in sync with the `SoftwareSafeState` enum in the vendored
- * runtime-http OpenAPI contract — a unit test guards against drift.
+ * runtime-http OpenAPI contract; a unit test guards against drift.
  */
 export type SoftwareSafeState = "none" | "hooks" | "setpoints" | "zero";
 
@@ -293,6 +343,8 @@ export interface EstopStatus extends UnknownRecord {
   software_safe_state: SoftwareSafeState;
   latched_at_epoch_ms: number | null;
   uncovered_actuating_functions: number;
+  /** The functions that count names, as provider/device/function (anolis 0.9.0); empty before. */
+  uncovered_functions: string[];
 }
 
 /** What the runtime reads the observed emergency stop as (anolis 0.1.53). */
@@ -417,6 +469,8 @@ export interface ParameterDefinition extends UnknownRecord {
   min?: number;
   max?: number;
   allowed_values?: string[];
+  /** Whether the value is the project's default or an operator set it (anolis#681). */
+  source?: "default" | "operator" | string;
 }
 
 export type ExecutionStatus = "idle" | "running" | "blocked" | "failed" | "completed" | "unknown";
@@ -443,6 +497,18 @@ export interface AutomationStatus extends UnknownRecord {
   last_evaluation_at_epoch_ms: number | null;
   run_id: string | null;
   last_error: string | null;
+  /** Empty from a runtime before anolis 0.8.0, which does not send it. */
+  call_failures: AutomationCallFailure[];
+}
+
+/** A device call automation made that was refused or failed this run (anolis#678). */
+export interface AutomationCallFailure {
+  device_handle: string;
+  function: string;
+  /** In a row; 0 once a call has succeeded since. */
+  consecutive_failures: number;
+  last_error: string;
+  last_failure_at_epoch_ms: number;
 }
 
 export interface ProviderSupervision extends UnknownRecord {

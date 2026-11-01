@@ -1,6 +1,7 @@
-// operate-contracts.ts — data extraction / normalization for the Operate workspace
+// operate-contracts.ts: data extraction / normalization for the Operate workspace
 
 import type {
+  AutomationCallFailure,
   AutomationStatus,
   AutomationVersion,
   Device,
@@ -10,7 +11,10 @@ import type {
   ExecutionStatus,
   FunctionArgSpec,
   FunctionSpec,
+  OperatorBlock,
+  OperatorRun,
   ParameterDefinition,
+  StartRequirement,
   ProviderHealth,
   RuntimeApiStatus,
   SoftwareSafeState,
@@ -24,7 +28,7 @@ import type {
 /**
  * Runtime modes accepted by `POST /v0/mode` and reported by `GET /v0/mode`.
  * MUST stay in sync with the `RuntimeMode` enum in the vendored runtime-http
- * OpenAPI contract — a unit test guards against drift.
+ * OpenAPI contract; a unit test guards against drift.
  */
 export const RUNTIME_MODES = ["MANUAL", "AUTO", "IDLE", "FAULT"] as const;
 
@@ -92,6 +96,10 @@ function asObject(v: unknown): UnknownRecord {
 
 function asArray<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === "string";
 }
 
 function toFinite(v: unknown): number | null {
@@ -243,6 +251,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
     device_count: toFinite(r.device_count) ?? 0,
     providers: asArray(r.providers) as RuntimeApiStatus["providers"],
     device_loss_latched: asArray(r.device_loss_latched).map(String),
+    fault_uncovered_functions: asArray(r.fault_uncovered_functions).filter(isString),
   };
 }
 
@@ -269,7 +278,54 @@ export function extractAutomationStatus(payload: unknown): AutomationStatus {
     last_evaluation_at_epoch_ms: toFinite(r.last_evaluation_at_epoch_ms) ?? null,
     run_id: typeof r.run_id === "string" && r.run_id.trim() ? r.run_id : null,
     last_error: typeof r.last_error === "string" && r.last_error.trim() ? r.last_error : null,
+    call_failures: asArray(r.call_failures).map((f) => {
+      const c = asObject(f);
+      return {
+        device_handle: String(c.device_handle ?? ""),
+        function: String(c.function ?? ""),
+        consecutive_failures: toFinite(c.consecutive_failures) ?? 0,
+        last_error: String(c.last_error ?? ""),
+        last_failure_at_epoch_ms: toFinite(c.last_failure_at_epoch_ms) ?? 0,
+      };
+    }),
   };
+}
+
+/**
+ * `call_failures` with an `automation_call_failed` event applied, so a
+ * failure shows between status polls. The event replaces the entry for its
+ * device and function, or adds one. A success sends no event; the next poll
+ * shows it.
+ */
+export function applyCallFailedEvent(
+  failures: AutomationCallFailure[],
+  payload: UnknownRecord,
+): AutomationCallFailure[] {
+  const entry: AutomationCallFailure = {
+    device_handle: String(payload.device_handle ?? ""),
+    function: String(payload.function ?? ""),
+    consecutive_failures: toFinite(payload.consecutive_failures) ?? 0,
+    last_error: String(payload.error ?? ""),
+    last_failure_at_epoch_ms: toFinite(payload.timestamp_ms) ?? 0,
+  };
+  const same = (f: AutomationCallFailure) =>
+    f.device_handle === entry.device_handle && f.function === entry.function;
+  return failures.some(same) ? failures.map((f) => (same(f) ? entry : f)) : [...failures, entry];
+}
+
+/**
+ * A line per automation call failing now (anolis#678): which call, its
+ * failures in a row, and its last error. A call that has succeeded since its
+ * last failure is not failing.
+ */
+export function callFailureLines(failures: AutomationCallFailure[]): string[] {
+  return failures
+    .filter((f) => f.consecutive_failures > 0)
+    .map((f) => {
+      const times =
+        f.consecutive_failures === 1 ? "once" : `${f.consecutive_failures} times in a row`;
+      return `${f.device_handle} ${f.function}: failed ${times}; last error: ${f.last_error}`;
+    });
 }
 
 export function extractAutomationTree(payload: unknown): string {
@@ -341,7 +397,7 @@ export function versionAtLeast(version: string | null | undefined, min: string):
 
 /**
  * Normalize a software-safe-state value. An unrecognized value degrades to the
- * *weakest* claim ("none") — the UI must never advertise a stop rung the runtime
+ * *weakest* claim ("none"): the UI must never advertise a stop rung the runtime
  * did not declare.
  */
 export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
@@ -353,7 +409,7 @@ export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
 
 /**
  * Extract the `estop` block from a `GET /v0/runtime/status` body. Returns null
- * when the block is absent or not an object (the contract keeps it optional) —
+ * when the block is absent or not an object (the contract keeps it optional);
  * the UI must not render a stop control it cannot describe.
  */
 export function extractEstopStatus(payload: unknown): EstopStatus | null {
@@ -368,6 +424,7 @@ export function extractEstopStatus(payload: unknown): EstopStatus | null {
     // toFinite(null) is 0, but an absent latch time must stay null.
     latched_at_epoch_ms: r.latched_at_epoch_ms == null ? null : toFinite(r.latched_at_epoch_ms),
     uncovered_actuating_functions: toFinite(r.uncovered_actuating_functions) ?? 0,
+    uncovered_functions: asArray(r.uncovered_functions).filter(isString),
   };
 }
 
@@ -562,12 +619,12 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
   const parts: string[] = [];
   let ok = true;
 
-  // Never assert "engaged"/"latched" when the latch did not actually engage —
+  // Never assert "engaged"/"latched" when the latch did not actually engage:
   // this defensive branch exists precisely to be honest about a failed stop.
   if (latched) {
     parts.push(`Software stop engaged (${rung}).`);
   } else {
-    parts.push("WARNING: the latch did not engage — the machine may not be safe.");
+    parts.push("WARNING: the latch did not engage. The machine may not be safe.");
     ok = false;
   }
 
@@ -576,7 +633,7 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
       const warning = typeof r.warning === "string" && r.warning.trim() ? r.warning.trim() : "";
       parts.push(
         warning ||
-          "Actuation is latched, but no software safe-state is declared — outputs were NOT driven.",
+          "Actuation is latched, but no software safe-state is declared, so outputs were NOT driven.",
       );
     }
     // When the latch failed, the leading warning already conveys nothing is safe.
@@ -699,4 +756,372 @@ export function renderBtOutline(
     out += renderBtOutline(xmlDoc, children[i], indent + 1, i === children.length - 1);
   }
   return out;
+}
+
+/** Where a machine line's link takes the operator. */
+export type MachineLineTarget = "mode" | "watchdog-trips" | "provider-health" | "runtime-status";
+
+/** The operator panel's one line on what the machine is doing (wb#727). */
+export interface MachineLine {
+  state:
+    | "connecting"
+    | "unavailable"
+    | "emergency_stop"
+    | "stopped"
+    | "fault"
+    | "tripped"
+    | "device_lost"
+    | "device_back"
+    | "running"
+    | "ready";
+  text: string;
+  target: MachineLineTarget | null;
+  linkLabel: string;
+}
+
+/**
+ * The devices the runtime holds as lost (wb#731): `latched` is every handle
+ * the loss latch holds, `lost` those of them unreachable now.
+ */
+export function deviceLosses(
+  status: RuntimeApiStatus,
+  stopChain: StopChainStatus | null,
+  providers: ProviderHealth[],
+): { latched: string[]; lost: string[] } {
+  // A device the emergency stop removed power from is the stop, not a loss (wb#631).
+  const stopped = new Set(stopChain?.expected_losses ?? []);
+  const latched = status.device_loss_latched.filter((handle) => !stopped.has(handle));
+  // The latch holds a device until MANUAL -> AUTO, even once it is back, so
+  // whether it is lost now comes from provider health.
+  const reachable = new Set<string>();
+  for (const provider of providers) {
+    if (provider.state !== "AVAILABLE") continue;
+    for (const device of provider.devices ?? []) {
+      if (device.health === "OK" || device.health === "WARNING") {
+        reachable.add(`${provider.provider_id}/${device.device_id}`);
+      }
+    }
+  }
+  return { latched, lost: latched.filter((handle) => !reachable.has(handle)) };
+}
+
+/** The profile's run block, or its deprecated alias experiment (anolis#696). */
+export function operatorRun(operator: OperatorBlock | undefined): OperatorRun | undefined {
+  return operator?.run ?? operator?.experiment;
+}
+
+/**
+ * Why Start run would not work, with the fix, or "" (wb#729). Only
+ * what Operate reads exactly: a brake has no declaration yet (anolis#686).
+ * FAULT is refused rather than left by way of MANUAL, which would clear the
+ * fault before the operator saw its cause.
+ */
+export function runStartRefusal(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  stopChain: StopChainStatus | null,
+  trippedDevices: string[],
+  providers: ProviderHealth[],
+  faultReason = "",
+): string {
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return "Refused: the runtime is not answering. See Runtime Status, then Start.";
+  }
+  if (stopChain?.state === "in_force") {
+    return "Refused: the emergency stop is in force. Release it, then Start.";
+  }
+  if (estop?.latched) {
+    return "Refused: the software stop is latched. Clear the latch above, then Start.";
+  }
+  if (status.mode === "FAULT") {
+    const why = faultReason ? ` (${faultReason})` : "";
+    return `Refused: the runtime is in FAULT${why}. Set MANUAL under Mode once the cause is fixed, then Start.`;
+  }
+  if (trippedDevices.length) {
+    return `Refused: ${trippedDevices.join(", ")} tripped its command watchdog. Clear the trip under Watchdog trips, then Start.`;
+  }
+  const { lost } = deviceLosses(status, stopChain, providers);
+  if (lost.length) {
+    return `Refused: ${lost.join(", ")} lost. Check its power (see Provider Health), then Start.`;
+  }
+  return "";
+}
+
+/**
+ * The operator panel's one line on what the machine is doing and what to do
+ * next (wb#727). From the status Operate already polls, so it is never staler
+ * than the rest of the page. The first state that holds wins, in this order:
+ * what blocks every action comes before what one device needs.
+ */
+/** The machine line before the first runtime status has settled (wb#754). */
+export const CONNECTING_LINE: MachineLine = {
+  state: "connecting",
+  text: "Connecting to the runtime…",
+  target: null,
+  linkLabel: "",
+};
+
+export function machineLine(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  stopChain: StopChainStatus | null,
+  trippedDevices: string[],
+  providers: ProviderHealth[] = [],
+): MachineLine {
+  const line = (
+    state: MachineLine["state"],
+    text: string,
+    target: MachineLineTarget | null = null,
+    linkLabel = "",
+  ): MachineLine => ({ state, text, target, linkLabel });
+
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return line("unavailable", "The runtime is not answering.", "runtime-status", "See Connection");
+  }
+  if (stopChain?.state === "in_force") {
+    return line("emergency_stop", "Emergency stop in force: release it to continue.");
+  }
+  if (estop?.latched) {
+    return line("stopped", "Stopped by the software stop: clear it to continue.");
+  }
+  if (status.mode === "FAULT") {
+    return line(
+      "fault",
+      "In FAULT: set MANUAL to recover (AUTO isn't available from FAULT).",
+      "mode",
+      "Go to Mode",
+    );
+  }
+  if (trippedDevices.length) {
+    return line(
+      "tripped",
+      `Device tripped: clear the trip on ${trippedDevices.join(", ")}.`,
+      "watchdog-trips",
+      "Clear the trip",
+    );
+  }
+  const { latched, lost } = deviceLosses(status, stopChain, providers);
+  if (lost.length) {
+    return line(
+      "device_lost",
+      `Device lost: check its power (${lost.join(", ")}).`,
+      "provider-health",
+      "See Provider Health",
+    );
+  }
+  if (latched.length) {
+    return line(
+      "device_back",
+      `${latched.join(", ")} came back after a loss. Automation won't drive them until you go MANUAL → AUTO.`,
+      "mode",
+      "Go to Mode",
+    );
+  }
+  if (status.mode === "AUTO") return line("running", "Running.");
+  return line("ready", "Ready.");
+}
+
+/** One of the operator panel's readings (wb#728). */
+export interface OperatorReading {
+  label: string;
+  /** The value with its unit, or "--" when there is none. */
+  text: string;
+  /** Empty while the reading is good, else what is wrong with it. */
+  note: "" | "stale" | "faulted" | "unavailable" | "no reading" | "loading";
+}
+
+export function typedNumber(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  const v = asObject(value);
+  const n =
+    v.type === "double" ? v.double : v.type === "int64" || v.type === "uint64" ? v[v.type] : null;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function typedText(value: unknown): string {
+  const v = asObject(value);
+  if (typeof v.type !== "string")
+    return value === null || value === undefined ? "--" : String(value);
+  const raw = v[v.type === "bytes" ? "base64" : v.type];
+  return raw === undefined ? "--" : String(raw);
+}
+
+/**
+ * The profile's declared readings, from the state Operate holds per device
+ * (wb#728). A reading with declared decimals is rounded to them; without, it
+ * reads as the runtime sent it.
+ */
+export function operatorReadings(
+  operator: OperatorBlock | undefined,
+  deviceStates: Record<string, DeviceStateValue[]>,
+  /** Before the first runtime status: a missing reading is loading (wb#754). */
+  loading = false,
+): OperatorReading[] {
+  return (operator?.readings ?? []).map((r) => {
+    const [providerId, deviceId, signalId] = r.signal.split("/");
+    const sig = deviceStates[`${providerId}/${deviceId}`]?.find((v) => v.signal_id === signalId);
+    if (!sig) return { label: r.label, text: "--", note: loading ? "loading" : "no reading" };
+    const n = typedNumber(sig.value);
+    const value =
+      n !== null && r.decimals !== undefined ? n.toFixed(r.decimals) : typedText(sig.value);
+    const quality = String(sig.quality ?? "OK").toUpperCase();
+    const note: OperatorReading["note"] =
+      quality === "STALE"
+        ? "stale"
+        : quality === "FAULT"
+          ? "faulted"
+          : quality === "UNAVAILABLE"
+            ? "unavailable"
+            : "";
+    return { label: r.label, text: r.unit ? `${value} ${r.unit}` : value, note };
+  });
+}
+
+/**
+ * What is happening per settings group (wb#728, wb#748): a group whose items
+ * include one of run.start's enable parameters reads on or off from
+ * it, and while on, its first other item, its main value. On means
+ * scheduled, not that its actuator is running now. The rest of the schedule
+ * is in Settings, so it is not repeated here, and a group with no enable is
+ * left out.
+ */
+export function operatorSettingsLines(
+  operator: OperatorBlock | undefined,
+  parameters: ParameterDefinition[],
+): string[] {
+  const enables = new Set(operatorRun(operator)?.start?.enable ?? []);
+  const byName = new Map(parameters.map((p) => [p.name, p]));
+  const lines: string[] = [];
+  for (const group of operator?.settings ?? []) {
+    const enable = group.items.find((item) => enables.has(item.parameter));
+    if (!enable) continue;
+    const param = byName.get(enable.parameter);
+    if (!param) {
+      lines.push(`${group.group}: --`);
+      continue;
+    }
+    if (param.value !== true) {
+      lines.push(`${group.group}: off`);
+      continue;
+    }
+    const main = group.items.find((item) => item !== enable);
+    const value = main ? byName.get(main.parameter) : undefined;
+    lines.push(
+      main
+        ? `${group.group}: on, ${main.label} ${value ? String(value.value) : "--"}${main.unit ? ` ${main.unit}` : ""}`
+        : `${group.group}: on`,
+    );
+  }
+  return lines;
+}
+
+/** The "provider/device" a "provider/device/signal" reads from. */
+export function signalDevice(signal: string): string {
+  return signal.split("/").slice(0, 2).join("/");
+}
+
+/** The parameter's value is true; one the runtime does not report is not. */
+function isOn(parameters: ParameterDefinition[], name: string): boolean {
+  return parameters.find((p) => p.name === name)?.value === true;
+}
+
+/**
+ * The run.start.require entries that apply to this Start (anolis#701): those
+ * without `when`, and those whose `when` parameter is on now. Start leaves
+ * the switches as the operator set them.
+ */
+export function applicableRequirements(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): StartRequirement[] {
+  return (start?.require ?? []).filter((r) => r.when === undefined || isOn(parameters, r.when));
+}
+
+/**
+ * Start has nothing to run (anolis#701): the profile lists groups' on
+ * switches in start.enable and every one of them is off. A profile that
+ * lists none can always start.
+ */
+export function nothingSwitchedOn(
+  start: OperatorRun["start"],
+  parameters: ParameterDefinition[],
+): boolean {
+  const switches = start?.enable ?? [];
+  return switches.length > 0 && !switches.some((name) => isOn(parameters, name));
+}
+
+/**
+ * The messages of run.start.require entries that do not hold
+ * (anolis#686), from the state Operate holds per device. A reading that is
+ * missing or not OK cannot show the condition holds, so it does not, and the
+ * message says which.
+ */
+export function unmetStartRequirements(
+  require: StartRequirement[],
+  deviceStates: Record<string, DeviceStateValue[]>,
+): string[] {
+  const unmet: string[] = [];
+  for (const r of require) {
+    const signalId = r.signal.split("/")[2];
+    const sig = deviceStates[signalDevice(r.signal)]?.find((v) => v.signal_id === signalId);
+    if (!sig) {
+      unmet.push(`${r.message} (${r.signal}: no reading)`);
+      continue;
+    }
+    const quality = String(sig.quality ?? "OK").toUpperCase();
+    if (quality !== "OK") {
+      unmet.push(`${r.message} (${r.signal}: reading is ${quality.toLowerCase()})`);
+      continue;
+    }
+    const v = asObject(sig.value);
+    const holds =
+      typeof r.equals === "boolean"
+        ? (v.type === "bool" ? v.bool : sig.value) === r.equals
+        : typeof r.equals === "number"
+          ? typedNumber(sig.value) === r.equals
+          : typedText(sig.value) === r.equals;
+    if (!holds) unmet.push(r.message);
+  }
+  return unmet;
+}
+
+/** Uptime for reading at a glance: the two largest units, "14 h 55 min" (wb#748). */
+export function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const units: [number, string][] = [
+    [Math.floor(s / 86400), "d"],
+    [Math.floor((s % 86400) / 3600), "h"],
+    [Math.floor((s % 3600) / 60), "min"],
+    [s % 60, "s"],
+  ];
+  const first = units.findIndex(([n]) => n > 0);
+  if (first === -1) return "0 s";
+  return units
+    .slice(first, first + 2)
+    .filter(([n]) => n > 0)
+    .map(([n, u]) => `${n} ${u}`)
+    .join(" ");
+}
+
+/** The event stream's state as a label, a badge class and a detail (wb#748). */
+export function summarizeStream(s: {
+  state: string;
+  attempts: number;
+  delay_ms?: number;
+  idle_ms?: number;
+}): { label: string; cls: string; detail: string } {
+  if (s.state === "connected") return { label: "Connected", cls: "ok", detail: "" };
+  if (s.state === "reconnecting")
+    return {
+      label: "Reconnecting",
+      cls: "unavailable",
+      detail: `attempt ${s.attempts}, retry in ${Math.max(1, Math.ceil((s.delay_ms || 0) / 1000))} s`,
+    };
+  if (s.state === "stale")
+    return {
+      label: "Quiet",
+      cls: "stale",
+      detail: `no events for ${formatDuration((s.idle_ms || 0) / 1000)}`,
+    };
+  return { label: "Disconnected", cls: "unavailable", detail: "" };
 }

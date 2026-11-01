@@ -1,5 +1,7 @@
 """Project CRUD and filesystem helpers for Anolis Workbench."""
 
+import base64
+import binascii
 import copy
 import functools
 import json
@@ -7,6 +9,7 @@ import os
 import pathlib
 import re
 import shutil
+import tempfile
 import threading
 from datetime import datetime, timezone
 
@@ -526,7 +529,104 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
         raise ValueError(name_error)
     if project_dir(name).exists():
         raise ValueError(f"Project '{name}' already exists")
+    return _import_verbatim(source, name, {})
 
+
+# Limits on a folder uploaded from the browser (#749). A real project is
+# about 100 KB in under 20 files; anything near these is not one.
+UPLOAD_MAX_FILES = 200
+UPLOAD_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _upload_parts(rel: object) -> tuple[str, ...]:
+    """An uploaded file's path, relative to its folder, as its components.
+    Refuses anything but a plain relative path: absolute, empty, `.`/`..`
+    or empty components, a backslash or a NUL."""
+    if not isinstance(rel, str) or rel == "" or "\\" in rel or "\x00" in rel or rel.startswith("/"):
+        raise ImportValidationError([f"Refused upload path {rel!r}: not a plain relative path"])
+    parts = tuple(rel.split("/"))
+    if any(part in ("", ".", "..") for part in parts):
+        raise ImportValidationError([f"Refused upload path {rel!r}: not a plain relative path"])
+    return parts
+
+
+@_serialized
+def import_uploaded_project(folder: object, files: object, name: str | None = None) -> tuple[dict, list[str]]:
+    """Import a project folder uploaded from the browser (#749).
+
+    `files` holds `{"path", "content"}` entries: a path relative to the folder
+    and the file's bytes in base64. Every entry is checked, and the limits
+    applied, before anything is written. The files go to `project/` in a fresh
+    private directory under the data dir, which is validated and imported as a path
+    import is, then removed whatever happened. The staging directory is the
+    workbench's own, not a caller-supplied path, so the import-root
+    allowlist does not apply to it (as for sync_installed_project).
+    """
+    if not isinstance(folder, str) or validate_name(folder):
+        raise ImportValidationError([f"Refused folder name {folder!r}: 1-64 letters, digits, hyphens or underscores"])
+    if name is None:
+        name = folder
+    name_error = validate_name(name)
+    if name_error:
+        raise ValueError(name_error)
+    if project_dir(name).exists():
+        raise ValueError(f"Project '{name}' already exists")
+    if not isinstance(files, list) or not files:
+        raise ImportValidationError(["The upload has no files"])
+    if len(files) > UPLOAD_MAX_FILES:
+        raise ImportValidationError([f"The upload has {len(files)} files; the limit is {UPLOAD_MAX_FILES}"])
+
+    decoded: dict[tuple[str, ...], bytes] = {}
+    total = 0
+    for entry in files:
+        rel = entry.get("path") if isinstance(entry, dict) else None
+        parts = _upload_parts(rel)
+        if parts in decoded:
+            raise ImportValidationError([f"Refused upload path {rel!r}: given twice"])
+        content = entry.get("content") if isinstance(entry, dict) else None
+        try:
+            data = base64.b64decode(content if isinstance(content, str) else "", validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ImportValidationError([f"Refused upload path {rel!r}: content is not base64"]) from exc
+        total += len(data)
+        if total > UPLOAD_MAX_BYTES:
+            raise ImportValidationError([f"The upload is over {UPLOAD_MAX_BYTES} bytes, the limit"])
+        decoded[parts] = data
+    for parts in decoded:
+        for depth in range(1, len(parts)):
+            if parts[:depth] in decoded:
+                raise ImportValidationError(
+                    [f"Refused upload path {'/'.join(parts[:depth])!r}: both a file and a directory"]
+                )
+
+    staging_root = SYSTEMS_ROOT.parent / "upload-staging"
+    staging_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staging = pathlib.Path(tempfile.mkdtemp(dir=staging_root))
+    try:
+        # A fixed, server-chosen name: the folder's name is only metadata, the
+        # deploy directory name and the default project name.
+        source = staging / "project"
+        base = os.path.realpath(source)
+        for parts, data in decoded.items():
+            target = os.path.normpath(os.path.join(base, *parts))
+            if not target.startswith(base + os.sep):
+                raise ImportValidationError([f"Refused upload path {'/'.join(parts)!r}: outside the folder"])
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "xb") as fh:
+                fh.write(data)
+        return _import_verbatim(source, name, {"imported_from": f"browser upload ({folder})"}, profile_dir_name=folder)
+    finally:
+        paths_module.rmtree_within(staging, staging_root, ignore_errors=True)
+
+
+def _import_verbatim(
+    source: pathlib.Path, name: str, extra_meta: dict, profile_dir_name: str | None = None
+) -> tuple[dict, list[str]]:
+    """Copy a validated machine-profile directory into project `name`, which
+    must not exist yet; `extra_meta` is added to the sidecar's meta.
+    `profile_dir_name`, the deploy directory's name, defaults to the source
+    directory's."""
+    profile_dir_name = profile_dir_name or source.name
     report = machine_profile.validate_project_dir(source, profile_dir_name)
     if not report.ok:
         raise ImportValidationError(report.errors)
@@ -558,6 +658,7 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
             "created": datetime.now(timezone.utc).isoformat(),
             "imported_from": str(source),
             "profile_dir_name": profile_dir_name,
+            **extra_meta,
         }
         sidecar = {
             "schema_version": 1,
@@ -570,6 +671,28 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
         paths_module.rmtree_within(pdir, SYSTEMS_ROOT, ignore_errors=True)
         raise
     return meta, report.warnings
+
+
+def installed_from(name: str) -> str | None:
+    """The install prefix project `name` was synced from, if it is the
+    installed machine's project (#722)."""
+    sidecar = _read_sidecar(project_dir(name))
+    value = _meta_of(sidecar).get("installed_from") if isinstance(sidecar, dict) else None
+    return value if isinstance(value, str) else None
+
+
+@_serialized
+def sync_installed_project(source: pathlib.Path, name: str, prefix: pathlib.Path) -> tuple[dict, list[str]]:
+    """Import `source` as project `name`, the installed machine's project,
+    replacing an earlier sync of it (#722). `source` is the workbench's own
+    reading of the install prefix, not a caller-supplied path, so it skips the
+    import-root allowlist. Never replaces a project that is not such a sync."""
+    pdir = project_dir(name)
+    if pdir.exists():
+        if installed_from(name) is None:
+            raise ValueError(f"Project '{name}' already exists and is not the installed project")
+        paths_module.rmtree_within(pdir, SYSTEMS_ROOT)
+    return _import_verbatim(source, name, {"installed_from": str(prefix)})
 
 
 @_serialized

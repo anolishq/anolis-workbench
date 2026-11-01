@@ -74,8 +74,17 @@ the install copies that token alone into
 user, so Operate can reach a runtime that requires the token on loopback.
 The workbench sends it only to a runtime on this machine. It keeps the
 token out of the environment of the processes it starts, but a program it
-launches runs as the same user and can still read the file. To remove the
-workbench service and the copy, and keep the runtime:
+launches runs as the same user and can still read the file.
+
+On a machine with an install (`/opt/anolis/manifest.json`), the workbench
+imports the installed project from `/opt/anolis/projects/<profile>/` each
+time it starts, so Operate reaches the installed runtime with no import by
+hand, at the port `/opt/anolis/config/runtime.yaml` sets. The import is
+read-only and is replaced on every start, so it always matches what is
+installed. A project of your own with the same name is kept, and the
+installed one is imported as `<profile>-installed` beside it.
+
+To remove the workbench service and the token copy, and keep the runtime:
 
 ```sh
 anolis-provision workbench-service --uninstall

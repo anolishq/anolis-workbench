@@ -56,6 +56,7 @@ _SERVE = """
 from anolis_workbench.server import app
 app.verify_environment = lambda: None
 app.projects_module.cleanup_stale_running_files = lambda: None
+app.installed_project.sync = lambda *args: None
 app.main(host="127.0.0.1", port=0, open_browser=False)
 """
 

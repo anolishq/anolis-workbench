@@ -24,7 +24,7 @@
   --state-nominal: #374151;
   --state-nominal-bg: #f3f4f6;
 
-  /* UI feedback colors (user action results — intentionally muted) */
+  /* UI feedback colors (user action results, intentionally muted) */
   --feedback-ok: #1a6b3d;
   --feedback-error: #9f1239;
 }
@@ -206,6 +206,16 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
   margin-top: 16px;
+}
+
+.home-setup {
+  margin-top: 24px;
+}
+
+.home-setup > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
 }
 
 .home-card {
@@ -1484,6 +1494,114 @@ body {
 }
 
 /* ─── Software e-stop (wb#236) ──────────────────────────────────────────── */
+
+/* The operator panel (wb#727): one line on what the machine is doing. */
+.operator-panel .machine-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.machine-line-ready,
+.machine-line-running {
+  color: var(--feedback-ok);
+}
+
+.machine-line-stopped,
+.machine-line-tripped,
+.machine-line-device_lost,
+.machine-line-unavailable {
+  color: var(--state-warning);
+}
+
+.machine-line-fault,
+.machine-line-emergency_stop {
+  color: var(--state-fault);
+}
+
+/* The declared readings, large (wb#728). */
+.operator-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.operator-reading {
+  display: flex;
+  flex-direction: column;
+}
+
+.operator-reading-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.operator-reading-value {
+  font-size: 2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The reading's last ten minutes (wb#747). */
+.operator-sparkline {
+  width: 120px;
+  height: 24px;
+}
+.operator-sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.operator-sparkline-range {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 24px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.operator-sparkline path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.operator-now {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* The declared settings, one form per group (wb#729). */
+.settings-group {
+  margin-bottom: 12px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+
+.setting-row label {
+  min-width: 8em;
+}
+
+.operate-collapsible > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}
 
 .operate-estop-section {
   border-color: #fca5a5;

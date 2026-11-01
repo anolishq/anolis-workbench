@@ -233,6 +233,21 @@ def _runtime_alive(bind: str, port: int, timeout_s: float = 0.5) -> bool:
         return False
 
 
+def installed_runtime_target(name: str) -> tuple[str, int] | None:
+    """(host, port) of the installed runtime when project `name` is the
+    installed machine's project (#722): loopback, on the http.port of the
+    runtime config install.sh left in that prefix. None for any other project,
+    or when that config cannot be read."""
+    from anolis_workbench.core import installed_project
+    from anolis_workbench.core import projects as projects_module
+
+    prefix = projects_module.installed_from(name)
+    if prefix is None:
+        return None
+    port = installed_project.installed_runtime_port(pathlib.Path(prefix))
+    return None if port is None else ("127.0.0.1", port)
+
+
 def _discover_external_runtime() -> dict | None:
     """Detect a runtime the workbench did not launch (e.g. one installed as a
     systemd service by install.sh) by probing each known project's configured
@@ -243,15 +258,85 @@ def _discover_external_runtime() -> dict | None:
     started its runtime. Such a runtime is reported managed=False/external=True,
     so stop()/restart() (which only act on workbench-launched processes) leave
     it untouched — it is owned by systemd, not the workbench.
+
+    The probe runs on every call, so a runtime that stops or starts shows at
+    once; only the ports to probe are kept between calls (wb#754).
     """
+    for project, bind, port in _external_candidates():
+        if _runtime_alive(bind, port):
+            return {
+                "running": True,
+                "project": project,
+                "pid": None,
+                "managed": False,
+                "external": True,
+            }
+    return None
+
+
+# The ports _discover_external_runtime probes, with the key they were read
+# under (wb#754): (key, prefixes, candidates). Finding them loads every
+# project's document and the installed config, which on a Pi made each
+# /api/status poll 0.1-0.3 s.
+_candidates: tuple[tuple, tuple[str, ...], list[tuple[str, str, int]]] | None = None
+
+
+def _stat(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _candidates_key(prefixes: tuple[str, ...]) -> tuple:
+    """Stats of what the candidates were read from: each project's top-level
+    files and config/, and each installed prefix's runtime config."""
+    files: list[tuple] = []
+    try:
+        projects = sorted((e for e in os.scandir(paths_module.SYSTEMS_ROOT) if e.is_dir()), key=lambda e: e.name)
+    except OSError:
+        projects = []
+    for project in projects:
+        for directory in (project.path, os.path.join(project.path, "config")):
+            try:
+                entries = sorted((e for e in os.scandir(directory) if e.is_file()), key=lambda e: e.name)
+            except OSError:
+                continue
+            files.extend((e.path, _stat(e.path)) for e in entries)
+    for prefix in prefixes:
+        path = os.path.join(prefix, "config", "runtime.yaml")
+        files.append((path, _stat(path)))
+    return tuple(files)
+
+
+def _external_candidates() -> list[tuple[str, str, int]]:
+    """(project, bind, port) for each project whose runtime would be on
+    loopback, in project order: the installed project where install.sh's
+    health probe looks (#722), any other at its active variant's http port."""
+    global _candidates
+    cached = _candidates
+    if cached is not None and cached[0] == _candidates_key(cached[1]):
+        return cached[2]
+
     systems_dir = paths_module.SYSTEMS_ROOT
     if not systems_dir.exists():
-        return None
+        _candidates = None
+        return []
 
     from anolis_workbench.core import projects as projects_module
 
+    candidates: list[tuple[str, str, int]] = []
+    prefixes: list[str] = []
     for project_dir in sorted(systems_dir.iterdir()):
         if not project_dir.is_dir():
+            continue
+        prefix = projects_module.installed_from(project_dir.name)
+        if prefix is not None:
+            prefixes.append(prefix)
+        installed = installed_runtime_target(project_dir.name)
+        if installed is not None:
+            candidates.append((project_dir.name, *installed))
             continue
         try:
             document = projects_module.get_project(project_dir.name)
@@ -274,15 +359,9 @@ def _discover_external_runtime() -> dict | None:
         port = http.get("port")
         if not isinstance(port, int):
             continue
-        if _runtime_alive(bind, port):
-            return {
-                "running": True,
-                "project": project_dir.name,
-                "pid": None,
-                "managed": False,
-                "external": True,
-            }
-    return None
+        candidates.append((project_dir.name, bind, port))
+    _candidates = (_candidates_key(tuple(prefixes)), tuple(prefixes), candidates)
+    return candidates
 
 
 def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
@@ -585,6 +664,18 @@ def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pat
 # ---------------------------------------------------------------------------
 
 
+class LaunchConfigError(RuntimeError):
+    """An executable the project names is not set or cannot be run (#672).
+
+    The routes answer it with 422 and `code`, not with the 409 a runtime that
+    is already running gets: the caller has a project to fix, not one to stop.
+    """
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class LaunchValidationError(RuntimeError):
     """The project fails the blocking validation preflight runs (#414)."""
 
@@ -620,38 +711,52 @@ def _launch_locked(name: str, system: dict, project_dir: pathlib.Path) -> None:
     _spawn(name, system, project_dir, launch_config)
 
 
+def _runtime_command(system: dict, launch_config: str) -> list[str]:
+    host = canonical.host_paths({"host_paths": system.get("host_paths")})
+    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
+    if runtime_exe is None:
+        raise LaunchConfigError(
+            "Runtime executable path is missing (set it in the project's host paths).",
+            code="runtime_executable_missing",
+        )
+    # Checked here, not left to Popen, so restart() can refuse it before it
+    # stops the running runtime (#672).
+    if not runtime_exe.is_file() or not os.access(runtime_exe, os.X_OK):
+        raise LaunchConfigError(
+            f"Runtime executable '{runtime_exe}' does not exist or is not executable "
+            "(set it in the project's host paths).",
+            code="runtime_executable_missing",
+        )
+    return [str(runtime_exe), "--config", launch_config]
+
+
 def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: str) -> None:
     """Start the runtime on `launch_config` and publish it as the tracked process.
 
     A failure after the runtime has started stops it again, so nothing runs
     that the workbench does not track (#671).
     """
-    host = canonical.host_paths({"host_paths": system.get("host_paths")})
-    runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
-    if runtime_exe is None:
-        raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
-    cmd = [str(runtime_exe), "--config", launch_config]
+    cmd = _runtime_command(system, launch_config)
 
-    # Prepare log file (overwrite)
-    log_path = project_dir / "logs" / "latest.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=str(paths_module.DATA_ROOT),
+        bufsize=1,
+        text=True,
+        env=child_env(),
+    )
 
+    log_file = None
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=str(paths_module.DATA_ROOT),
-            bufsize=1,
-            text=True,
-            env=child_env(),
-        )
-    except BaseException:
-        log_file.close()
-        raise
+        # Overwritten only once the runtime has started, so a launch that fails
+        # to start keeps the previous run's log (#672). The runtime's output
+        # waits in its pipe until the reader thread copies it here.
+        log_path = project_dir / "logs" / "latest.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "w", buffering=1, encoding="utf-8")
 
-    try:
         # Write running.json
         running_data = {
             "pid": proc.pid,
@@ -681,7 +786,8 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        log_file.close()
+        if log_file is not None:
+            log_file.close()
         raise
 
 
@@ -773,6 +879,8 @@ def _restart_locked(name: str, project_dir: pathlib.Path) -> None:
     # never handed to the runtime (it may lack runtime.data_dir, #562). Before
     # stop(), so a project that cannot render leaves the runtime running.
     launch_config = str(materialize_launch_config(project_dir, system))
+    # And one with no runtime executable to start, too (#672).
+    _runtime_command(system, launch_config)
 
     _stop_locked()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
@@ -966,7 +1074,10 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
         pid = entry.get("id")
         executable = provider_paths.get(pid, {}).get("executable") if isinstance(pid, str) else None
         if not executable:
-            raise RuntimeError(f"No host executable configured for provider '{pid}' (set it in the project's paths).")
+            raise LaunchConfigError(
+                f"No host executable configured for provider '{pid}' (set it in the project's paths).",
+                code="provider_executable_missing",
+            )
         entry["command"] = str(_resolve_executable_path(executable) or executable)
         rel = profile_providers.get(pid, {}).get("config") if isinstance(pid, str) else None
         if isinstance(rel, str):

@@ -3,7 +3,7 @@
   import { commandKind } from "./canonical";
 
   /**
-   * ProfileForm.svelte — the machine's identity and its component pins.
+   * ProfileForm.svelte: the machine's identity and its component pins.
    *
    * Pins are AUTHORED data (#255). Nothing in the deploy or export path
    * resolves them from the network any more: before this, a deploy pinned
@@ -23,7 +23,7 @@
 
   const profile = $derived(doc.profile);
 
-  /** Every kind any variant actually runs — these are the pins install.sh needs. */
+  /** Every kind any variant actually runs: these are the pins install.sh needs. */
   const requiredKinds = $derived(
     Array.from(
       new Set(
@@ -46,7 +46,7 @@
    * install.sh fetches a binary for EVERY entry in components.providers and
    * fails the whole bundle when an asset is missing, so a stale pin is not
    * cosmetic. It is kept rather than auto-removed because the pin carries
-   * `repo` — a fork or an air-gapped mirror — but it needs a way out.
+   * `repo` (a fork or an air-gapped mirror), but it needs a way out.
    */
   const stalePins = $derived(
     Object.keys(doc.profile?.components?.providers ?? {})

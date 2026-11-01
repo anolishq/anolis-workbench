@@ -88,7 +88,7 @@ const deviceItem = (key: string) => screen.getByRole('button', { name: new RegEx
 /** Clear the latch with the two-step clear. */
 async function clearLatch(): Promise<void> {
   await fireEvent.click(within(row()).getByRole('button', { name: 'Clear latch…' }));
-  await fireEvent.click(within(row()).getByRole('button', { name: 'Confirm clear — re-enables actuation' }));
+  await fireEvent.click(within(row()).getByRole('button', { name: 'Confirm clear: re-enables actuation' }));
 }
 
 describe('Operate.svelte — the observed emergency stop (#631)', () => {

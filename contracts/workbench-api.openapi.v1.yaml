@@ -132,6 +132,79 @@ paths:
         "500":
           $ref: "#/components/responses/Error500"
 
+  /api/projects/import-upload:
+    post:
+      summary: Import a machine-profile project folder uploaded from the browser
+      description: >-
+        For a browser on another computer than the workbench server (#749).
+        The server writes the files to a private staging directory under the
+        data dir, validates and imports them as /api/projects/import does,
+        and removes the staging directory. Every path is checked before
+        anything is written: it must be relative to the folder, with no
+        empty, "." or ".." component, backslash or NUL. At most 200 files
+        and 2 MiB of content; the body may be up to 4 MiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [folder, files]
+              properties:
+                folder:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
+                  description: >-
+                    The uploaded folder's name: the project's directory name
+                    when deployed, and the default project name.
+                files:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path:
+                        type: string
+                        description: Relative to the folder, "/"-separated.
+                      content:
+                        type: string
+                        description: The file's bytes, base64.
+                    additionalProperties: false
+                name:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
+                  description: Workspace project name (defaults to the folder name)
+              additionalProperties: false
+      responses:
+        "201":
+          description: Project imported
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, format, warnings]
+                properties:
+                  name:
+                    type: string
+                  format:
+                    type: string
+                    enum: [machine-profile]
+                  meta:
+                    type: object
+                    additionalProperties: true
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/Error400"
+        "409":
+          $ref: "#/components/responses/Error409"
+        "500":
+          $ref: "#/components/responses/Error500"
+
   /api/projects/{name}:
     get:
       summary: Get project document
@@ -369,7 +442,8 @@ paths:
       summary: Launch runtime
       description: >-
         Launches the anolis-runtime subprocess for the project. Fails with 409
-        if a runtime is already running.
+        if a runtime is already running, and with 422 if the project fails
+        validation or an executable it names is not set or cannot be run.
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -388,6 +462,8 @@ paths:
           $ref: "#/components/responses/Error404"
         "409":
           $ref: "#/components/responses/Error409"
+        "422":
+          $ref: "#/components/responses/Error422Launch"
         "500":
           $ref: "#/components/responses/Error500"
 
@@ -423,7 +499,9 @@ paths:
       summary: Restart runtime
       description: >-
         Stops then relaunches the runtime for the project. Fails with 409 if
-        the project is not currently running.
+        the project is not currently running, and with 422, before anything is
+        stopped, if the project fails validation or an executable it names is
+        not set or cannot be run.
       parameters:
         - $ref: "#/components/parameters/ProjectName"
       requestBody:
@@ -442,6 +520,8 @@ paths:
           $ref: "#/components/responses/Error404"
         "409":
           $ref: "#/components/responses/Error409"
+        "422":
+          $ref: "#/components/responses/Error422Launch"
         "500":
           $ref: "#/components/responses/Error500"
 
@@ -635,6 +715,16 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    Error422Launch:
+      description: >-
+        The project cannot be started as saved. Either it fails validation
+        (`errors` lists the messages), or an executable it names is not set or
+        cannot be run (`code` is runtime_executable_missing or
+        provider_executable_missing). Nothing was started or stopped.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LaunchRefusedResponse"
     Error500:
       description: Unexpected backend error
       content:
@@ -655,6 +745,24 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+
+    LaunchRefusedResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Set when an executable the project names is not set or cannot be run.
+          enum: [runtime_executable_missing, provider_executable_missing]
+        errors:
+          type: array
+          description: Validation messages, when the project fails validation.
+          items:
+            type: string
+      additionalProperties: true
 
     OkResponse:
       type: object

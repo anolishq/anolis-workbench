@@ -195,6 +195,16 @@ def test_vendored_schema_validates_the_safety_block() -> None:
     assert canonical.runtime_config_errors(doc) == []
 
 
+def test_vendored_schema_knows_max_consecutive_call_failures() -> None:
+    """anolis 0.8.0's limit on a failing automation call (anolis#678)."""
+    doc = _runtime_doc(automation={"enabled": False, "max_consecutive_call_failures": 5})
+    assert canonical.runtime_config_errors(doc) == []
+
+    doc["automation"]["max_consecutive_call_failures"] = 0
+    paths = {e.split(":", 1)[0] for e in canonical.runtime_config_errors(doc)}
+    assert "automation.max_consecutive_call_failures" in paths
+
+
 # ---------------------------------------------------------------------------
 # Profile building
 # ---------------------------------------------------------------------------
@@ -231,6 +241,57 @@ def test_build_profile_with_variants_and_safety_is_schema_valid() -> None:
     assert machine_profile.schema_errors(profile) == []
     assert profile["safety"] == {"estop_topology": "power_cut"}
     assert canonical.pinned_kinds(profile) == {"bread"}
+
+
+def test_vendored_profile_schema_knows_start_require() -> None:
+    """anolis 0.8.0's conditions on the operator panel's Start (anolis#686)."""
+    profile = canonical.build_profile(
+        machine_id="rig-a",
+        display_name="Rig A",
+        providers={"bread0": canonical.provider_config_relpath("bread", "bread0")},
+    )
+    require = {"signal": "bread0/dcmt0/motor1_brake", "equals": False, "message": "Release the brake"}
+    profile["operator"] = {"experiment": {"start": {"mode": "AUTO", "require": [require]}}}
+    assert machine_profile.schema_errors(profile) == []
+
+    del require["message"]
+    assert machine_profile.schema_errors(profile) != []
+
+
+def test_vendored_profile_schema_knows_operator_run_and_when() -> None:
+    """anolis 0.9.0's operator.run (anolis#696) and require.when (anolis#701)."""
+    profile = canonical.build_profile(
+        machine_id="rig-a",
+        display_name="Rig A",
+        providers={"bread0": canonical.provider_config_relpath("bread", "bread0")},
+    )
+    require = {
+        "signal": "bread0/dcmt0/motor1_brake",
+        "equals": False,
+        "message": "Release the brake",
+        "when": "sample_enable",
+    }
+    run = {"label": "Run", "start": {"mode": "AUTO", "enable": ["sample_enable"], "require": [require]}}
+    profile["operator"] = {"run": run}
+    assert machine_profile.schema_errors(profile) == []
+
+    profile["operator"]["experiment"] = run
+    assert machine_profile.schema_errors(profile) != []
+
+
+def test_vendored_profile_schema_knows_operator_actions() -> None:
+    """anolis 0.9.0's operator.actions buttons (anolis#697)."""
+    profile = canonical.build_profile(
+        machine_id="rig-a",
+        display_name="Rig A",
+        providers={"bread0": canonical.provider_config_relpath("bread", "bread0")},
+    )
+    action = {"label": "Sample now", "parameter": "sample_requests"}
+    profile["operator"] = {"actions": [action]}
+    assert machine_profile.schema_errors(profile) == []
+
+    del action["label"]
+    assert machine_profile.schema_errors(profile) != []
 
 
 # ---------------------------------------------------------------------------

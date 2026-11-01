@@ -491,7 +491,15 @@
       startCommissionHealthPolling();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      actionError = msg.toLowerCase().includes("already running")
+      // Busy only on a 409: a 422 is a project to fix and must never read as
+      // busy, whatever its message says (#672). Other 409s, such as an
+      // imported project's, are not a running runtime either, so the 409 must
+      // also be the route's "already running" one.
+      const busy =
+        err instanceof ApiResponseError &&
+        err.status === 409 &&
+        msg.toLowerCase().includes("already running");
+      actionError = busy
         ? "Launch blocked: runtime is already active. Stop current runtime before launching this project."
         : `Launch failed: ${msg}`;
     } finally {
@@ -950,7 +958,7 @@
     {/if}
     {#if imported}
       <div class="workspace-advisory">
-        Imported machine profile — carried verbatim; dev-launch and preflight are not available.
+        Imported machine profile, carried verbatim. Dev-launch and preflight are not available.
         Deploy it with install.sh (Deploy to device or Export Bundle below, or the provision CLI).
       </div>
     {:else if !commissionRunningForCurrent}
@@ -1017,7 +1025,7 @@
       <!-- Running state -->
       <div class="launch-running-bar">
         <span class="running-label">
-          Running — {projectName} on port {launchPort ?? "?"}
+          Running {projectName} on port {launchPort ?? "?"}
         </span>
         <span class="health-badge {healthStatus}">
           {healthStatus === "healthy"
@@ -1329,8 +1337,8 @@
           {#each targetRows(check) as row, i (i)}
             <tr class:target-version-warning={row.verdict !== "ok" && row.verdict !== "fresh"}>
               <td>{row.name}</td>
-              <td>{row.pinned ?? "—"}</td>
-              <td>{row.installed ?? "—"}</td>
+              <td>{row.pinned ?? ""}</td>
+              <td>{row.installed ?? ""}</td>
               <td>{VERDICT_TEXT[row.verdict] ?? row.verdict}</td>
             </tr>
           {/each}

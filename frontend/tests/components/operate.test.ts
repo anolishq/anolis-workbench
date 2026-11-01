@@ -50,10 +50,10 @@ async function openStopDetails() {
 }
 
 describe("Operate.svelte — the safe-state note (#346)", () => {
-  it('names the runtime version in Runtime Status, and the rung and its file behind the ⓘ', async () => {
+  it('names the runtime version in Connection, and the rung and its file behind the ⓘ', async () => {
     renderOperate(status({ software_safe_state: 'setpoints', uncovered_actuating_functions: 0 }));
 
-    expect(await screen.findByText(/Runtime v0\.1\.44 \| Mode MANUAL/)).toBeInTheDocument();
+    expect(await screen.findByText('v0.1.44')).toBeInTheDocument();
     await openStopDetails();
     expect(screen.getByText(/Latches actuation, then drives the declared safe setpoints/)).toBeInTheDocument();
     const fix = screen.getByTestId('safe-state-fix');
@@ -85,7 +85,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
       await openStopDetails();
 
       expect(
-        await screen.findByText(`${n} actuating function(s) the software stop will not drive.`),
+        await screen.findByText(`${n} actuating function(s) the software stop will not drive: a software stop leaves those outputs as they were.`),
       ).toBeInTheDocument();
     });
 
@@ -331,7 +331,7 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
   it('shows nothing when the runtime does not report it', async () => {
     renderOperate(status(ESTOP, '0.1.44'));
 
-    await screen.findByText(/Runtime v0\.1\.44 \| Mode MANUAL/);
+    await screen.findByText('v0.1.44');
     expect(screen.queryByTestId('startup-safe-state')).not.toBeInTheDocument();
     expect(screen.queryByText(/startup/i)).not.toBeInTheDocument();
   });
@@ -642,7 +642,7 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
     });
 
     const latch = await screen.findByTestId('other-project-latch');
-    expect(latch).toHaveTextContent('SAFE-STATE ENGAGED — actuation latched');
+    expect(latch).toHaveTextContent('SAFE-STATE ENGAGED: actuation latched');
     expect(screen.queryByRole('button', { name: /Clear latch/ })).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole('link', { name: "demo's Operate view" }));
@@ -776,7 +776,7 @@ describe('Operate.svelte — a status reply older than the last stop or clear (#
     await waitFor(() => expect(reads).toHaveLength(2));
 
     reads[0].resolve(status({ ...ESTOP, latched: false }, '0.1.44', { uptime_seconds: 4242 }));
-    expect(await screen.findByText(/Uptime 4242s/)).toBeInTheDocument();
+    expect(await screen.findByText('1 h 10 min')).toBeInTheDocument();
 
     expect(screen.getByText(LATCHED)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear latch…' })).toBeInTheDocument();
@@ -810,7 +810,7 @@ describe('Operate.svelte — a status reply older than the last stop or clear (#
     await waitFor(() => expect(reads).toHaveLength(3));
 
     reads[1].resolve(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }, '0.1.44', { uptime_seconds: 4242 }));
-    expect(await screen.findByText(/Uptime 4242s/)).toBeInTheDocument();
+    expect(await screen.findByText('1 h 10 min')).toBeInTheDocument();
 
     expect(screen.queryByText(LATCHED)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
@@ -883,7 +883,7 @@ describe('Operate.svelte — the Mode card without the automation layer (#582)',
   it('keeps Set Mode when /v0/mode fails for another reason, and shows the runtime-status mode', async () => {
     renderWithMode(() => jsonResponse(502, { error: 'Runtime proxy failed: timed out' }));
 
-    expect(await screen.findByText(/Uptime 1s/)).toBeInTheDocument();
+    expect(await screen.findByText('1 s')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('mode-badge')).toHaveTextContent('MANUAL'));
     expect(screen.getByRole('button', { name: 'Set Mode' })).toBeInTheDocument();
     expect(screen.queryByTestId('mode-fixed')).not.toBeInTheDocument();
@@ -998,5 +998,23 @@ describe('Operate.svelte — a device_removed event (#516)', () => {
     runtime.devices = [DEV0, DEV1];
     await vi.advanceTimersByTimeAsync(5000);
     await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0', 'dev0']));
+  });
+});
+
+describe('Operate.svelte — a runtime that refuses the workbench (#722)', () => {
+  const told =
+    'The runtime requires a token and the workbench has no token for it. Run `anolis-provision workbench-service` on this machine to install one.';
+
+  it('says why Runtime Status is unavailable, in the words the proxy gives', async () => {
+    renderOperate(jsonResponse(401, { status: { code: 'UNAUTHENTICATED', message: told } }));
+
+    expect(await screen.findByText(told)).toBeInTheDocument();
+    expect(screen.queryByText('Runtime status unavailable.')).not.toBeInTheDocument();
+  });
+
+  it('still says only "unavailable" for a failure that is not a refusal', async () => {
+    renderOperate(jsonResponse(502, { error: 'Bad gateway' }));
+
+    expect(await screen.findByText('Runtime status unavailable.')).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import urllib.error
@@ -10,6 +11,7 @@ import urllib.parse
 import urllib.request
 
 from anolis_workbench.core import launcher as launcher_module
+from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core import workbench_service
 
@@ -109,6 +111,14 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     except FileNotFoundError:
         return None, f"Running project '{active_project}' not found", 500
 
+    global _last_target
+    installed = launcher_module.installed_runtime_target(active_project)
+    if installed is not None:
+        # The installed machine's project: install.sh's copy of the config,
+        # not the project's variant, is what the runtime runs (#722).
+        _last_target = f"http://{installed[0]}:{installed[1]}"
+        return _last_target, None, 200
+
     # The proxy target comes from the variant that is actually running (#255).
     # Reading a fixed default here would silently point Operate at :8080 while
     # the runtime listens elsewhere — and the launcher WOULD report it running,
@@ -132,12 +142,90 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     if not isinstance(port, int) or isinstance(port, bool):
         return None, "Runtime port is invalid", 500
 
-    global _last_target
     _last_target = f"http://{host}:{port}"
     return _last_target, None, 200
 
 
-def _open(runtime_base: str, method: str, raw_path: str, body: bytes | None, handler, wants_stream: bool):
+# The resolved target and token (wb#754): (key, target, token). Resolving
+# reads the launcher's status (every project, and a probe of an external
+# runtime), the running project and the token file, about 0.2 s on a Pi, and
+# Operate sends its polls in parallel, so they queued behind each other. It is
+# kept until the key changes, or until the target refuses a request.
+_resolved: tuple[tuple, str, str] | None = None
+
+
+def _stat(path: os.PathLike | str) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _resolution_key() -> tuple:
+    """What the resolution was read from, cheaply: the overrides, the
+    launcher's own process, each project's top-level files (running.json, the
+    sidecar, its profile) and config/, each installed prefix's runtime config,
+    and the token file. Stats only; no file is read."""
+    with launcher_module._state_lock:
+        proc = launcher_module._state["process"]
+        launched = (proc.pid if proc is not None and proc.poll() is None else None, launcher_module._state["project"])
+    files: list[tuple] = []
+    for root in sorted({str(paths_module.SYSTEMS_ROOT), str(projects_module.SYSTEMS_ROOT)}):
+        try:
+            projects = sorted((e for e in os.scandir(root) if e.is_dir()), key=lambda e: e.name)
+        except OSError:
+            continue
+        for project in projects:
+            for directory in (project.path, os.path.join(project.path, "config")):
+                try:
+                    entries = sorted((e for e in os.scandir(directory) if e.is_file()), key=lambda e: e.name)
+                except OSError:
+                    continue
+                files.extend((e.path, _stat(e.path)) for e in entries)
+    for prefix in _resolved_prefixes:
+        path = os.path.join(prefix, "config", "runtime.yaml")
+        files.append((path, _stat(path)))
+    files.append(("token", _stat(workbench_service.RUNTIME_TOKEN_FILE)))
+    overrides = (runtime_url_override(), os.environ.get("ANOLIS_WORKBENCH_RUNTIME_TOKEN", ""))
+    return (overrides, launched, tuple(files))
+
+
+# The installed prefixes the last resolution found, whose runtime configs the
+# key watches; read from the sidecars once per resolution, not per request.
+_resolved_prefixes: tuple[str, ...] = ()
+
+
+def _resolve() -> tuple[str | None, str, str | None, int]:
+    """(target, token, error, status) for a proxied request, from the cache
+    while its key holds."""
+    global _resolved, _resolved_prefixes
+    key = _resolution_key()
+    cached = _resolved
+    if cached is not None and cached[0] == key:
+        return cached[1], cached[2], None, 200
+    base, error, status_code = _runtime_base()
+    if base is None:
+        _resolved = None
+        return None, "", error, status_code
+    prefixes: list[str] = []
+    try:
+        names = sorted(e.name for e in os.scandir(projects_module.SYSTEMS_ROOT) if e.is_dir())
+    except OSError:
+        names = []
+    for name in names:
+        prefix = projects_module.installed_from(name)
+        if prefix is not None:
+            prefixes.append(prefix)
+    token = runtime_token(base)
+    if tuple(prefixes) != _resolved_prefixes:
+        _resolved_prefixes = tuple(prefixes)
+        key = _resolution_key()
+    _resolved = (key, base, token)
+    return base, token, None, 200
+
+
+def _open(runtime_base: str, token: str, method: str, raw_path: str, body: bytes | None, handler, wants_stream: bool):
     headers: dict[str, str] = {}
     for key in ("Content-Type", "Accept", "Last-Event-ID"):
         value = handler.headers.get(key)
@@ -146,7 +234,6 @@ def _open(runtime_base: str, method: str, raw_path: str, body: bytes | None, han
 
     # Bearer auth; never logged. The runtime may require the token on
     # loopback too; runtime_token() hands the copied one only to this machine.
-    token = runtime_token(runtime_base)
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
@@ -156,13 +243,33 @@ def _open(runtime_base: str, method: str, raw_path: str, body: bytes | None, han
     return urllib.request.urlopen(req, timeout=15)
 
 
+def _unauthorized_body(token_sent: bool) -> bytes:
+    """The runtime's own error shape, saying what to run (#722). The runtime
+    says only "unauthorized", which Operate showed as it stood."""
+    if token_sent:
+        message = (
+            "The runtime refused the workbench's token. Run `anolis-provision workbench-service` "
+            "on this machine to refresh the copy after a token rotation, or correct "
+            "ANOLIS_WORKBENCH_RUNTIME_TOKEN if it is set."
+        )
+    else:
+        message = (
+            "The runtime requires a token and the workbench has no token for it. Run "
+            "`anolis-provision workbench-service` on this machine to install one, or set "
+            "ANOLIS_WORKBENCH_RUNTIME_TOKEN for a runtime on another machine."
+        )
+    return json.dumps({"status": {"code": "UNAUTHENTICATED", "message": message}}).encode("utf-8")
+
+
 def proxy_runtime(handler, method: str, raw_path: str) -> None:
+    global _resolved
     is_stop = method == "POST" and raw_path.split("?")[0] == "/v0/estop"
     remembered = _last_target if is_stop and not runtime_url_override() else None
     if remembered is not None:
         runtime_base = remembered
+        token = runtime_token(remembered)
     else:
-        resolved, error, status_code = _runtime_base()
+        resolved, token, error, status_code = _resolve()
         if resolved is None:
             handler._json(status_code, {"error": error or "Runtime unavailable"})
             return
@@ -177,21 +284,21 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
 
     try:
         try:
-            response_ctx = _open(runtime_base, method, raw_path, body, handler, wants_stream)
+            response_ctx = _open(runtime_base, token, method, raw_path, body, handler, wants_stream)
         except urllib.error.HTTPError:
             raise
         except urllib.error.URLError:
-            if remembered is None:
-                raise
-            # Nothing answers at the remembered target: the runtime stopped,
-            # or another project's now runs. Resolve it as any request would.
-            resolved, error, status_code = _runtime_base()
+            # Nothing answers at the remembered or cached target: the runtime
+            # stopped, or another project's now runs. Resolve it afresh.
+            _resolved = None
+            resolved, token, error, status_code = _resolve()
             if resolved is None:
                 handler._json(status_code, {"error": error or "Runtime unavailable"})
                 return
-            if resolved == remembered:
+            if resolved == runtime_base:
                 raise
-            response_ctx = _open(resolved, method, raw_path, body, handler, wants_stream)
+            runtime_base = resolved
+            response_ctx = _open(resolved, token, method, raw_path, body, handler, wants_stream)
 
         with response_ctx as response:
             handler.send_response(int(response.status))
@@ -225,6 +332,8 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
             handler.wfile.write(data)
     except urllib.error.HTTPError as exc:
         body_data = exc.read()
+        if exc.code == 401:
+            body_data = _unauthorized_body(bool(token))
         handler.send_response(int(exc.code))
         for key, value in exc.headers.items():
             lower = key.lower()

@@ -37,6 +37,7 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
    - `400` invalid project names
    - `404` unknown project
    - `409` launch conflict, or a stop or restart naming a project other than the running one
+   - `422` launch or restart of a project that fails validation (`errors[]` of strings) or names an executable that is not set or cannot be run (`code` `runtime_executable_missing` or `provider_executable_missing`)
    - `500` backend failure
 
 ### Runtime/Path Decoupling
@@ -67,4 +68,4 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 1. Additive response fields are allowed.
 2. Existing fields must keep semantics.
-3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline. No check enforces this: the OpenAPI validator checks document structure and that the seven operations exist, not their status codes against the implementation. `contracts/composer-control.openapi.v1.yaml` does not list the `422` launch and restart validation failure or the `409` imported-project refusal on preflight and stop, and its `ErrorResponse.errors` schema requires object items with `source`, `code`, `path` and `message`, which matches the save and import validation failures but not the `422` response, which returns strings.
+3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline. No check enforces this: the OpenAPI validator checks document structure and that the seven operations exist, not their status codes against the implementation. `contracts/composer-control.openapi.v1.yaml` lists the `422` launch and restart validation failure, with string `errors`, and the `409` on stop, but not the `409` imported-project refusal on preflight.
