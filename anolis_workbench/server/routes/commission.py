@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import pathlib
 import tempfile
+import uuid
 
 from anolis_workbench.core import exporter as exporter_module
 from anolis_workbench.core import launcher as launcher_module
 from anolis_workbench.core import projects as projects_module
+
+# Fixed for the life of this server process. An open Operate page compares it
+# with the one it first saw, to notice the workbench restarted or was upgraded
+# under it (#777).
+_INSTANCE = uuid.uuid4().hex
+
+
+def _package_version() -> str | None:
+    try:
+        return importlib.metadata.version("anolis-workbench")
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _reject_imported(handler, name: str, action: str) -> bool:
@@ -43,6 +57,8 @@ def status(handler, *, host: str, port: int) -> None:
     }
     payload["workbench"] = {
         "version": 1,
+        "package_version": _package_version(),
+        "instance": _INSTANCE,
     }
     handler._json(200, payload)
 

@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Operate notices the workbench was upgraded or restarted under an open
+  page** (#777). `/api/status` now names the package version and an instance
+  fixed for the life of the server process. A page compares the first it saw
+  with each later one; when they differ it asks for a reload, and refuses
+  Start run and action presses until then, because it still runs the older
+  code and project. Stop run, mode changes and the software stop still work.
+
 ## [0.30.0] - 2026-11-01
 
 Upgrade notes:

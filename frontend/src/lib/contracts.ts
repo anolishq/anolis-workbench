@@ -41,6 +41,10 @@ export interface RuntimeStatus extends UnknownRecord {
   } & UnknownRecord;
   workbench?: {
     version: number;
+    /** The installed package version; null when the server can't read it (#777). */
+    package_version?: string | null;
+    /** Fixed for the life of the server process (#777). */
+    instance?: string;
   } & UnknownRecord;
 }
 

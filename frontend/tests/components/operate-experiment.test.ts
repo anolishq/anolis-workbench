@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/sve
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Operate from "../../src/routes/Operate.svelte";
+import { resetWorkbenchInstance } from "../../src/lib/workbench-instance";
 import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
 
 // wb#729: the operator panel's settings, the declared groups with labels,
@@ -65,10 +66,13 @@ function fakeRuntime(
     switches?: Record<string, boolean>;
     /** Provider ids the runtime status reports (wb#771). */
     providers?: string[];
+    /** The workbench instance each /api/status names, the last repeating (#777). */
+    instances?: string[];
   } = {},
 ) {
   let mode = opts.mode ?? "IDLE";
   const uptimes = [...(opts.uptimes ?? [100])];
+  const instances = [...(opts.instances ?? [])];
   const params: Param[] = [
     { name: "dose1_enable", type: "bool", value: false, source: "default" },
     { name: "dose1_interval_s", type: "int64", value: 20, source: "operator", min: 1, max: 86400 },
@@ -124,7 +128,14 @@ function fakeRuntime(
         }
         return jsonResponse(200, { status: { code: "OK" } });
       }
-      if (path === "/api/status") return jsonResponse(200, RUNNING);
+      if (path === "/api/status") {
+        if (!instances.length) return jsonResponse(200, RUNNING);
+        const instance = instances.length > 1 ? instances.shift() : instances[0];
+        return jsonResponse(200, {
+          ...RUNNING,
+          workbench: { version: 1, package_version: instance === "a" ? "0.30.0" : "0.31.0", instance },
+        });
+      }
       if (path === "/v0/runtime/status") {
         if (opts.down) return jsonResponse(503, { status: { code: "UNAVAILABLE" } });
         const uptime = uptimes.length > 1 ? uptimes.shift() : uptimes[0];
@@ -223,6 +234,7 @@ function fakeRuntime(
 }
 
 afterEach(() => {
+  resetWorkbenchInstance();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -887,5 +899,53 @@ describe("Operate.svelte — the operator's action buttons (anolis#697)", () => 
     await waitFor(() =>
       expect(screen.getByTestId("action-feedback")).toHaveTextContent("Sample now: requested."),
     );
+  });
+});
+
+// #777: an Operate page loaded before the workbench restarted (an upgrade, a
+// re-imported project) runs the old code with the old project. It says so and
+// refuses Start run and action presses until reloaded; stopping still works.
+describe("Operate.svelte — a page older than the workbench serving it (#777)", () => {
+  const WITH_ACTION = { ...OPERATOR, actions: [{ label: "Sample now", parameter: "sample_requests" }] };
+  const runButton = (name: string) =>
+    within(screen.getByTestId("operator-run")).getByRole("button", { name });
+
+  it("asks for a reload once the workbench instance changes, and refuses Start and presses", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rt = fakeRuntime({ mode: "AUTO", operator: WITH_ACTION, instances: ["a", "b"] });
+    await screen.findByTestId("operator-run");
+    expect(screen.queryByTestId("workbench-stale")).toBeNull();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    const banner = await screen.findByTestId("workbench-stale");
+    expect(banner).toHaveTextContent("0.31.0");
+    expect(within(banner).getByRole("button", { name: "Reload" })).toBeInTheDocument();
+
+    await fireEvent.click(within(screen.getByTestId("operator-actions")).getByRole("button", { name: "Sample now" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent("Reload this page first"),
+    );
+    await fireEvent.click(runButton("Start run"));
+    await waitFor(() => expect(screen.getByTestId("run-feedback")).toHaveTextContent("Reload this page first"));
+    expect(rt.posts).toEqual([]);
+  });
+
+  it("still stops a run from a stale page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rt = fakeRuntime({ mode: "AUTO", openRun: true, instances: ["a", "b"] });
+    await screen.findByTestId("operator-run");
+    await vi.advanceTimersByTimeAsync(5000);
+    await screen.findByTestId("workbench-stale");
+
+    await fireEvent.click(runButton("Stop run"));
+    await waitFor(() => expect(rt.runs[0].state).toBe("closed"));
+  });
+
+  it("says nothing while the instance stays the same", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fakeRuntime({ mode: "AUTO", operator: WITH_ACTION, instances: ["a"] });
+    await screen.findByTestId("operator-run");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(screen.queryByTestId("workbench-stale")).toBeNull();
   });
 });
