@@ -145,6 +145,25 @@ with `install.sh --local`, or deploy online with `anolis-provision
 install|remote`. The roles and both paths are in
 `docs/commissioning-handoff-runbook.md`.
 
+Import a provider's config schema the workbench doesn't package, offline:
+
+```sh
+anolis-provider-foo --config-schema > foo-0.1.0.json
+anolis-workbench provider import foo-0.1.0.json
+anolis-workbench provider list
+```
+
+The file is the provider's `--config-schema` envelope. A project that pins
+that kind at that version is validated against it; one pinning the packaged
+version keeps the packaged schema. An import is refused if it isn't a valid
+JSON Schema, uses `$ref`, lacks a semver `provider_version`, or would replace
+a packaged envelope. An import of the same kind and version with other
+content needs `--replace`. Imports live in `schemas/providers/` next to the
+projects directory: `~/.anolis/schemas/providers/` by default, or next to
+`ANOLIS_DATA_DIR` when it is set. They are per user, so run the import as the
+user the workbench runs as. `provider list` also names any import that fails to
+load, which the workbench skips.
+
 `anolis-provision install --variant <key>` (and `remote --variant <key>`)
 installs that runtime variant, a key of the project's `runtime_profiles`, as
 Deploy does; without it,
