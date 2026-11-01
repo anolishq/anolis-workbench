@@ -22,6 +22,7 @@ import {
   extractRuntimeStatus,
   extractStartupSafeState,
   extractStopChain,
+  startupFailuresUntripped,
   normalizeArgSpec,
   normalizeFunctionArgs,
   normalizeFunctionSpecs,
@@ -980,5 +981,61 @@ describe("formatDuration and summarizeStream (wb#748)", () => {
     expect(summarizeStream({ state: "reconnecting", attempts: 3, delay_ms: 1500 }).detail).toBe("attempt 3, retry in 2 s");
     expect(summarizeStream({ state: "stale", attempts: 0, idle_ms: 75000 }).detail).toBe("no events for 1 min 15 s");
     expect(summarizeStream({ state: "disconnected", attempts: 0 }).label).toBe("Disconnected");
+  });
+});
+
+describe("startupFailuresUntripped (wb#769)", () => {
+  const startup = extractStartupSafeState({
+    startup_safe_state: {
+      on_startup: "safe_state",
+      ran: true,
+      software_safe_state: "hooks",
+      safe_state_achieved: false,
+      failed_actions: [
+        { device_handle: "bread0/dcmt0", function: "set_mode", success: false, error: "WATCHDOG_TRIP" },
+        { device_handle: "bread0/rlht0", function: "set_mode", success: false, error: "WATCHDOG_TRIP" },
+      ],
+    },
+  });
+  const health = (metrics: Record<string, Record<string, string> | undefined>) =>
+    extractProvidersHealth({
+      providers: [
+        {
+          provider_id: "bread0",
+          devices: Object.entries(metrics).map(([device_id, m]) => ({
+            device_id,
+            reported: m ? { metrics: m } : undefined,
+          })),
+        },
+      ],
+    });
+
+  it("is true only when every failed call's device reports watchdog_tripped false", () => {
+    if (!startup) throw new Error("fixture did not parse");
+    const clear = { watchdog_tripped: "false" };
+    expect(startupFailuresUntripped(startup, health({ dcmt0: clear, rlht0: clear }))).toBe(true);
+    expect(startupFailuresUntripped(startup, health({ dcmt0: clear, rlht0: { watchdog_tripped: "true" } }))).toBe(false);
+  });
+
+  it("makes no claim for a device without the metric, or not reported at all", () => {
+    if (!startup) throw new Error("fixture did not parse");
+    expect(startupFailuresUntripped(startup, health({ dcmt0: { watchdog_tripped: "false" }, rlht0: {} }))).toBe(false);
+    expect(startupFailuresUntripped(startup, health({ dcmt0: { watchdog_tripped: "false" } }))).toBe(false);
+    expect(startupFailuresUntripped(startup, [])).toBe(false);
+  });
+
+  it("makes no claim when no call failed (only skipped ones)", () => {
+    const skippedOnly = extractStartupSafeState({
+      startup_safe_state: {
+        on_startup: "safe_state",
+        ran: true,
+        software_safe_state: "hooks",
+        safe_state_achieved: false,
+        failed_actions: [],
+        skipped_actions: [{ device_handle: "bread0/dcmt0", function: "set_mode", reason: "absent" }],
+      },
+    });
+    if (!skippedOnly) throw new Error("fixture did not parse");
+    expect(startupFailuresUntripped(skippedOnly, health({ dcmt0: { watchdog_tripped: "false" } }))).toBe(false);
   });
 });

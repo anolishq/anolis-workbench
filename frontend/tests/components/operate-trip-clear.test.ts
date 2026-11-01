@@ -49,6 +49,7 @@ function fakeRuntime(
     mode?: string;
     automation?: boolean;
     tripped?: Record<string, boolean>;
+    startup?: Record<string, unknown>;
     onCall?: (body: Record<string, unknown>) => Response | null;
   } = {},
 ) {
@@ -80,6 +81,7 @@ function fakeRuntime(
             latched_at_epoch_ms: rt.latched ? 1_700_000_000_000 : null,
             uncovered_actuating_functions: 0,
           },
+          ...(opts.startup ? { startup_safe_state: opts.startup } : {}),
         });
       if (path === "/v0/mode") {
         if (!rt.automation)
@@ -298,6 +300,49 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
         body: { provider_id: "bread0", device_id: "rlht0", function_id: 7, args: {} },
       },
     ]);
+  });
+
+  // wb#769: the runtime reports what safety.on_startup did until it restarts,
+  // so after the trips that refused it are cleared, the warning must say it
+  // is about the start, and that the devices no longer report a trip.
+  const refusedAtStartup = {
+    on_startup: "safe_state",
+    ran: true,
+    software_safe_state: "hooks",
+    safe_state_achieved: false,
+    failed_actions: ["dcmt0", "rlht0"].map((id) => ({
+      device_handle: `bread0/${id}`,
+      function: "set_mode",
+      success: false,
+      error: "SET command refused: WATCHDOG_TRIP",
+    })),
+  };
+
+  it("says the startup warning is about the start, while the boards are still tripped (wb#769)", async () => {
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: true, rlht0: true },
+      startup: refusedAtStartup,
+    });
+    const chip = await screen.findByTestId("estop-startup");
+    await screen.findByTestId("watchdog-trips");
+    expect(chip).toHaveTextContent("⚠ At startup, safe state not achieved");
+    expect(chip).not.toHaveTextContent("no trip reported now");
+  });
+
+  it("says no trip is reported now once every refused board is cleared (wb#769)", async () => {
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: false, rlht0: false },
+      startup: refusedAtStartup,
+    });
+    const chip = await screen.findByTestId("estop-startup");
+    await waitFor(() => expect(chip).toHaveTextContent("· no trip reported now"));
+    await fireEvent.click(screen.getByRole("button", { name: "About the startup safe state" }));
+    expect(screen.getByText(/stays until it restarts; a restart re-applies the safe state/)).toBeInTheDocument();
+    expect(screen.getByText(/None of the devices whose calls failed reports a watchdog trip now/)).toBeInTheDocument();
   });
 
   it("shows a refused clear and leaves the step to retry", async () => {

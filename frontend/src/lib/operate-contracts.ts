@@ -138,6 +138,29 @@ export function watchdogTrippedDevices(providers: ProviderHealth[]): string[] {
   return out;
 }
 
+/**
+ * Whether every device a failed startup call named now reports the
+ * `watchdog_tripped` health metric as "false" (wb#769). The startup report
+ * holds until the runtime restarts; this says whether the devices it names
+ * still report a trip. An absent metric makes no claim.
+ */
+export function startupFailuresUntripped(
+  s: StartupSafeStateStatus,
+  providers: ProviderHealth[],
+): boolean {
+  if (s.failed_actions.length === 0) return false;
+  const tripped = new Map<string, unknown>();
+  for (const provider of providers) {
+    for (const device of provider.devices ?? []) {
+      tripped.set(
+        `${provider.provider_id}/${device.device_id}`,
+        device.reported?.metrics?.watchdog_tripped,
+      );
+    }
+  }
+  return s.failed_actions.every((a) => tripped.get(a.device_handle) === "false");
+}
+
 export function extractCapabilities(payload: unknown): DeviceCapabilities {
   const root = asObject(payload);
   const caps = asObject(root.capabilities);
