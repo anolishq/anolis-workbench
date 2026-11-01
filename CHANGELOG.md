@@ -13,6 +13,20 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-01
+
+Upgrade notes:
+
+- **Deploy, bundle and save refuse a flat `telemetry.influx_token`**, as
+  they already refused `telemetry.influxdb.token`. From anolis 0.10.0 the
+  runtime uses the flat key, so a token there would shadow the target's
+  `INFLUXDB_TOKEN`. Opening an authored project removes it.
+- **Start run sends a `tag_scope`** naming every provider the runtime
+  reports. A run's telemetry export now seeds its flat signals; the series it
+  contains are unchanged.
+- Needs anolis 0.10.0 for `operator.actions[].require`: earlier releases'
+  machine-profile schema doesn't know it.
+
 ### Added
 
 - **Conditions checked before an action press** (anolishq/anolis#707). An
@@ -29,6 +43,8 @@ Historical note:
   flat signals with their value at its start only when the run has a
   `tag_scope`, and the scope also filters the export, so a run started from
   Operate now exports seeded, and no series is left out.
+- **The sim-quickstart template and the anolis contract locks pin anolis
+  0.10.0** (from 0.9.0, by way of 0.9.2).
 
 ### Fixed
 
