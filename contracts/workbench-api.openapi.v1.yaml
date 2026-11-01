@@ -970,6 +970,15 @@ components:
           properties:
             version:
               type: integer
+            package_version:
+              type: string
+              nullable: true
+              description: The installed anolis-workbench package version; null when it can't be read.
+            instance:
+              type: string
+              description: >-
+                An id fixed for the life of the server process. A page that sees it change was loaded
+                from an earlier process, possibly an earlier version or project (#777).
           additionalProperties: true
       additionalProperties: true
 

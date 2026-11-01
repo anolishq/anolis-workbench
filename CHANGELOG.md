@@ -24,8 +24,17 @@ Historical note:
   refused. **Upgrade note:** the brake-release step was hard-coded for any
   device with a two-bool `set_brake`. Without a profile entry it is gone:
   brakes a trip engaged stay engaged until released from the device's
-  functions. Needs an anolis release whose profile schema knows
+  functions. Needs anolis 0.10.1, whose profile schema knows
   `operator.trip_recovery` (anolishq/anolis#719).
+
+### Fixed
+
+- **Operate notices the workbench was upgraded or restarted under an open
+  page** (#777). `/api/status` now names the package version and an instance
+  fixed for the life of the server process. A page compares the first it saw
+  with each later one; when they differ it asks for a reload, and refuses
+  Start run and action presses until then, because it still runs the older
+  code and project. Stop run, mode changes and the software stop still work.
 
 ## [0.30.0] - 2026-11-01
 
