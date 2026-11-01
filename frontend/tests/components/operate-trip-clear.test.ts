@@ -25,6 +25,12 @@ const CAPS: Record<string, unknown> = {
           args: [bool("motor1_brake"), bool("motor2_brake")],
         },
         { function_id: 6, name: "clear_watchdog_trip", category: "CONFIG", args: [] },
+        {
+          function_id: 3,
+          name: "set_mode",
+          category: "CONFIG",
+          args: [{ name: "mode", type: "string", required: true }],
+        },
       ],
     },
   },
@@ -36,6 +42,24 @@ const CAPS: Record<string, unknown> = {
   },
 };
 const CLEAR_ID: Record<string, number> = { dcmt0: 6, rlht0: 7 };
+
+// The machine profile declares what follows the clear (wb#750); the panel
+// knows nothing about brakes itself.
+const BRAKES_AFTER_CLEAR = {
+  trip_recovery: [
+    {
+      device: "bread0/dcmt0",
+      after_clear: [
+        {
+          label: "Release both brakes",
+          function: "set_brake",
+          args: { motor1_brake: false, motor2_brake: false },
+          confirm: true,
+        },
+      ],
+    },
+  ],
+};
 
 interface Post {
   path: string;
@@ -50,6 +74,8 @@ function fakeRuntime(
     automation?: boolean;
     tripped?: Record<string, boolean>;
     startup?: Record<string, unknown>;
+    /** The profile's operator block; default: dcmt0's brakes released after the clear. */
+    operator?: Record<string, unknown> | null;
     onCall?: (body: Record<string, unknown>) => Response | null;
   } = {},
 ) {
@@ -128,9 +154,10 @@ function fakeRuntime(
       return jsonResponse(200, {});
     }),
   );
-  render(Operate, {
-    props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
-  });
+  const doc = createProjectDocument("demo");
+  const operator = opts.operator === undefined ? BRAKES_AFTER_CLEAR : opts.operator;
+  if (operator) doc.profile = { ...doc.profile, operator };
+  render(Operate, { props: { projectName: "demo", system: doc, runtimeStatus: RUNNING } });
   return rt;
 }
 
@@ -216,7 +243,7 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     // 4. The brakes: an actuating call, so it takes two clicks too.
     await press(4, "Release both brakes…");
     expect(actionPosts(rt)).toHaveLength(3);
-    await press(4, "Confirm: releases both brakes");
+    await press(4, "Confirm: Release both brakes");
     await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
 
     expect(actionPosts(rt)).toEqual([
@@ -253,10 +280,99 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     );
     await press(3, "Clear the trip");
     await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
-    await press(4, "Leave the brakes on");
+    await press(4, "Skip");
 
     expect(step(4)).toHaveTextContent("Skipped");
     expect(actionPosts(rt).filter((p) => p.body?.function_id === 2)).toEqual([]);
+  });
+
+  // wb#750: nothing after the clear is hard-coded.
+  it("offers no step after the clear without a profile entry, though the device has set_brake", async () => {
+    const rt = fakeRuntime({ latched: false, mode: "MANUAL", operator: null });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+
+    expect(within(panel()).queryByTestId("trip-step-4")).not.toBeInTheDocument();
+    expect(panel()).toHaveTextContent("command it again");
+    expect(actionPosts(rt).map((p) => p.body?.function_id)).toEqual([6]);
+  });
+
+  it("runs the profile's steps in order, typing each argument from the function's spec", async () => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [
+              { label: "Back to open loop", function: "set_mode", args: { mode: "open_loop" } },
+              { label: "Release both brakes", function: "set_brake", args: { motor1_brake: false, motor2_brake: false } },
+            ],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    // In order: the second waits for the first.
+    expect(await within(step(5)).findByRole("button", { name: "Release both brakes" })).toBeDisabled();
+    await press(4, "Back to open loop");
+    await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
+    await press(5, "Release both brakes");
+    await waitFor(() => expect(step(5)).toHaveTextContent("Done"));
+
+    expect(actionPosts(rt).slice(1).map((p) => p.body?.args)).toEqual([
+      { mode: { type: "string", string: "open_loop" } },
+      { motor1_brake: { type: "bool", bool: false }, motor2_brake: { type: "bool", bool: false } },
+    ]);
+  });
+
+  it("refuses a step whose argument the function doesn't take, and sends nothing", async () => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [{ label: "Release", function: "set_brake", args: { brake1: false } }],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    await press(4, "Release");
+
+    expect(await within(step(4)).findByText(/set_brake takes no argument brake1/)).toBeInTheDocument();
+    expect(actionPosts(rt).map((p) => p.body?.function_id)).toEqual([6]);
+  });
+
+  it("says so when the device has no function the profile names", async () => {
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: false, rlht0: true },
+      operator: {
+        trip_recovery: [
+          { device: "bread0/rlht0", after_clear: [{ label: "Release", function: "set_brake" }] },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/rlht0…" }),
+    );
+    expect(await within(step(4)).findByText("This device offers no set_brake function.")).toBeInTheDocument();
   });
 
   it("skips MANUAL when the runtime has no automation layer, and never posts a mode", async () => {
