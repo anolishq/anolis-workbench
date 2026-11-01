@@ -22,8 +22,10 @@ Upgrade notes:
   runtime uses the flat key, so a token there would shadow the target's
   `INFLUXDB_TOKEN`. Opening an authored project removes it.
 - **Start run sends a `tag_scope`** naming every provider the runtime
-  reports. A run's telemetry export now seeds its flat signals; the series it
-  contains are unchanged.
+  reports. A run's telemetry export now also contains the signals that did
+  not change during the run, each seeded with its value at the start; none
+  are dropped. On the reference rig a 51 s stirring run exported 24 series;
+  without the scope, the same run exported 4.
 - Needs anolis 0.10.0 for `operator.actions[].require`: earlier releases'
   machine-profile schema doesn't know it.
 
