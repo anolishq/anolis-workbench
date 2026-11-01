@@ -27,6 +27,7 @@ const LATCHED: EstopStatus = {
   software_safe_state: "hooks",
   latched_at_epoch_ms: 1,
   uncovered_actuating_functions: 0,
+  uncovered_functions: [],
 };
 
 function chain(state: StopChainStatus["state"], expected_losses: string[] = []): StopChainStatus {

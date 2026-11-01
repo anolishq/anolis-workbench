@@ -311,6 +311,11 @@ export interface RuntimeApiStatus extends UnknownRecord {
   device_count: number;
   /** Device handles blocked after going unreachable; empty when none. */
   device_loss_latched: string[];
+  /**
+   * The actuating functions no AUTO -> FAULT hook drives, as
+   * provider/device/function (anolis 0.9.0); empty when none or not sent.
+   */
+  fault_uncovered_functions: string[];
 }
 
 /**
@@ -327,6 +332,8 @@ export interface EstopStatus extends UnknownRecord {
   software_safe_state: SoftwareSafeState;
   latched_at_epoch_ms: number | null;
   uncovered_actuating_functions: number;
+  /** The functions that count names, as provider/device/function (anolis 0.9.0); empty before. */
+  uncovered_functions: string[];
 }
 
 /** What the runtime reads the observed emergency stop as (anolis 0.1.53). */

@@ -15,6 +15,12 @@ Historical note:
 
 ### Added
 
+- **The not-covered chip names the functions** (anolishq/anolis#698), with
+  anolis 0.9.0: its ⓘ lists each function the software stop won't drive, as
+  provider/device/function. A second chip, "⚠ N not covered by FAULT", shows
+  whenever a fault in AUTO leaves functions undriven, whatever the stop
+  covers, and its ⓘ names them. An older runtime sends no names: the stop's
+  ⓘ shows the count alone, as before, and the fault chip doesn't show.
 - **A sparkline beside each operator reading** (#747): the reading's last ten
   minutes, kept in the browser from the state updates and polls Operate
   already gets, drawn as plain SVG. It starts empty when the page loads (no
