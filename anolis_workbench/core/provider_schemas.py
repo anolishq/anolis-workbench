@@ -107,9 +107,17 @@ def _load_imports() -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, st
                     raise provider_import.ImportRefused(
                         f"it declares {kind} {version}, which disagrees with its file name"
                     )
-            except (provider_import.ImportRefused, OSError) as exc:
-                errors[name] = str(exc)
-                logger.warning("Skipping imported provider schema %s: %s", directory / name, exc)
+            except Exception as exc:  # noqa: BLE001 — any failure skips the file, never the caller
+                errors[name] = str(exc) or type(exc).__name__
+                logger.warning("Skipping imported provider schema %s: %s", directory / name, errors[name])
+                continue
+            packaged = _load_envelopes().get(kind)
+            if packaged is not None and packaged.get("provider_version") == version:
+                # A later workbench packages this version: its CI-verified
+                # envelope wins over the local import, which would otherwise
+                # shadow it for every project pinning it.
+                errors[name] = f"superseded by the packaged envelope for {kind} {version}"
+                logger.info("Imported provider schema %s is %s", directory / name, errors[name])
                 continue
             envelopes[(kind, version)] = envelope
         _imports_cache = (stamp, envelopes, errors)
@@ -119,6 +127,11 @@ def _load_imports() -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, st
 def import_errors() -> dict[str, str]:
     """{file name: reason} for each imported envelope that was skipped."""
     return dict(_load_imports()[1])
+
+
+def packaged_kinds() -> list[str]:
+    """Provider kinds the workbench packages, ignoring imports."""
+    return sorted(_load_envelopes())
 
 
 def packaged_envelope(kind: str) -> dict[str, Any] | None:

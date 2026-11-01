@@ -327,3 +327,167 @@ def test_a_project_save_validates_an_imported_kind_against_its_import(tmp_path):
     refused = errors({})
     assert [e["code"] for e in refused] == ["provider.schema"]
     assert "port" in refused[0]["message"]
+
+
+# --- from the adversarial review of #788 -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        # json.loads takes these, and the route's json.dumps writes them back
+        # as bare NaN/Infinity, which no browser can parse.
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0",'
+            ' "schema": {"type": "number", "minimum": NaN}}',
+            "finite",
+        ),
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0",'
+            ' "schema": {"type": "number", "maximum": Infinity}}',
+            "finite",
+        ),
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0",'
+            ' "schema": {"type": "number", "maximum": 1e999}}',
+            "finite",
+        ),
+        # re.compile raises OverflowError, not re.error.
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0",'
+            ' "schema": {"type": "string", "pattern": "a{4294967296}"}}',
+            "JSON Schema",
+        ),
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0",'
+            ' "schema": {"type": "object", "patternProperties": {"a{4294967296}": {}}}}',
+            "JSON Schema",
+        ),
+        # The decoder recurses before the depth check sees anything.
+        ("[" * 50000, "JSON"),
+        # $ matches before a trailing newline.
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo\\n", "provider_version": "1.0.0",'
+            ' "schema": {}}',
+            "kind",
+        ),
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0\\n",'
+            ' "schema": {}}',
+            "semver",
+        ),
+        # A long prerelease makes a file name over 255 bytes.
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "1.0.0-'
+            + "a" * 300
+            + '", "schema": {}}',
+            "too long \\(more than",
+        ),
+        (
+            '{"config_schema_version": 1, "provider": "anolis-provider-' + "f" * 100 + '", "provider_version":'
+            ' "1.0.0", "schema": {}}',
+            "too long \\(more than",
+        ),
+    ],
+)
+def test_review_cases_are_refused_cleanly(tmp_path, _imports_dir, raw, reason):
+    path = tmp_path / "bad.json"
+    path.write_text(raw, encoding="utf-8")
+    with pytest.raises(provider_import.ImportRefused, match=reason):
+        provider_import.import_file(path)
+    assert not _imports_dir.exists() or list(_imports_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "0.3.0",'
+        ' "schema": {"type": "string", "pattern": "a{4294967296}"}}',
+        "[" * 50000,
+        '{"config_schema_version": 1, "provider": "anolis-provider-foo", "provider_version": "0.3.0",'
+        ' "schema": {"type": "number", "minimum": NaN}}',
+    ],
+)
+def test_no_file_on_disk_breaks_a_save_startup_or_the_listing(tmp_path, _imports_dir, raw):
+    from anolis_workbench.core import projects
+    from anolis_workbench.server import app
+
+    provider_import.import_file(_write(tmp_path, _envelope("foo", "0.1.0")))
+    _imports_dir.joinpath("foo@0.3.0.config-schema.json").write_text(raw, encoding="utf-8")
+
+    # A save of a project that uses only a packaged kind.
+    sim = provider_schemas.get_envelope("sim")
+    assert sim is not None
+    errors = projects._validate_canonical_provider_configs({"providers": {"sim0": {"kind": "sim", "config": {}}}})
+    assert all(e["code"] != "provider.unknown_kind" for e in errors)
+    app.verify_environment()
+    assert [e.file for e in provider_import.list_imports() if e.error] == ["foo@0.3.0.config-schema.json"]
+    json.loads(json.dumps(provider_schemas.all_envelopes(), allow_nan=False))
+
+
+def test_an_import_of_a_version_later_packaged_is_superseded(monkeypatch, tmp_path):
+    """A workbench upgrade that packages an already-imported version wins."""
+    provider_import.import_file(_write(tmp_path, _envelope("sim", "9.9.9", extra_field="only_in_import")))
+    resolution = provider_schemas.resolve("sim", "9.9.9")
+    assert resolution is not None and resolution.source == "sideloaded"
+
+    packaged = dict(provider_schemas._load_envelopes())
+    upgraded = json.loads(json.dumps(packaged["sim"]))
+    upgraded["provider_version"] = "9.9.9"
+    monkeypatch.setattr(provider_schemas, "_envelope_cache", {**packaged, "sim": upgraded})
+    provider_schemas._reset_imports_cache()
+
+    resolution = provider_schemas.resolve("sim", "9.9.9")
+    assert resolution is not None and resolution.source == "packaged"
+    assert "only_in_import" not in resolution.envelope["schema"].get("properties", {})
+    assert "superseded" in provider_schemas.import_errors()["sim@9.9.9.config-schema.json"]
+
+
+def test_the_startup_check_still_needs_packaged_envelopes(monkeypatch, tmp_path):
+    from anolis_workbench.server import app
+
+    provider_import.import_file(_write(tmp_path, _envelope("foo", "0.1.0")))
+    monkeypatch.setattr(provider_schemas.paths_module, "PROVIDER_SCHEMAS_DIR", tmp_path / "empty")
+    provider_schemas._envelope_cache = None
+    with pytest.raises(SystemExit):
+        app.verify_environment()
+
+
+def test_a_concurrent_import_of_the_same_version_does_not_overwrite(monkeypatch, tmp_path, _imports_dir):
+    """Import B lands while A is between its check and its write."""
+    a = _write(tmp_path, _envelope("foo", "0.1.0"), "a.json")
+    b = _write(tmp_path, _envelope("foo", "0.1.0", extra_field="b"), "b.json")
+    real = provider_import._write_temp
+    raced = {"done": False}
+
+    def write(directory, name, raw):
+        if not raced["done"]:
+            raced["done"] = True
+            provider_import.import_file(b)
+        return real(directory, name, raw)
+
+    monkeypatch.setattr(provider_import, "_write_temp", write)
+    with pytest.raises(provider_import.ImportRefused, match="--replace"):
+        provider_import.import_file(a)
+    stored = json.loads((_imports_dir / "foo@0.1.0.config-schema.json").read_text(encoding="utf-8"))
+    assert "b" in stored["schema"]["properties"]
+    entry = next(e for e in provider_import.list_imports() if e.file == "foo@0.1.0.config-schema.json")
+    assert entry.origin == str(b.resolve())
+
+
+def test_prereleases_order_as_semver():
+    key = provider_import.semver_key
+    assert key("1.0.0-rc.10") > key("1.0.0-rc.2")
+    assert key("1.0.0-alpha") < key("1.0.0-alpha.1") < key("1.0.0-beta") < key("1.0.0")
+    assert key("1.0.0-2") < key("1.0.0-a")
+
+
+def test_a_sidecar_for_other_content_is_not_believed(tmp_path, _imports_dir):
+    provider_import.import_file(_write(tmp_path, _envelope("foo", "0.1.0")))
+    sidecar = _imports_dir / "foo@0.1.0.source.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["sha256"] = "0" * 64
+    data["origin"] = "/somewhere/else.json"
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    (entry,) = provider_import.list_imports()
+    assert entry.origin is None and entry.imported_at_utc is None and entry.error is None
