@@ -342,7 +342,11 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await waitFor(() => expect(chip).toHaveTextContent("· no trip reported now"));
     await fireEvent.click(screen.getByRole("button", { name: "About the startup safe state" }));
     expect(screen.getByText(/stays until it restarts; a restart re-applies the safe state/)).toBeInTheDocument();
-    expect(screen.getByText(/None of the devices whose calls failed reports a watchdog trip now/)).toBeInTheDocument();
+    // One text node per sentence, so read the whole detail: the space between them is easy to lose (wb#773).
+    const detail = screen.getByText(/stays until it restarts/).closest("[id]") as HTMLElement;
+    expect(detail.textContent?.replace(/\s+/g, " ")).toContain(
+      "a restart re-applies the safe state. None of the devices whose calls failed reports a watchdog trip now.",
+    );
   });
 
   it("shows a refused clear and leaves the step to retry", async () => {
