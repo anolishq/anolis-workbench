@@ -30,6 +30,14 @@ Historical note:
   imported version supersedes the import. A running workbench sees an import
   without a restart, and skips (and `provider list` names) an import that
   fails to load instead of failing.
+- **`anolis-workbench provider remove <kind>@<version>`** (#786, part of
+  #286): remove an imported schema. It refuses while a project pins that
+  kind at that version and uses it, or can't be read to tell, naming the
+  projects, unless `--force`. A packaged version, or one never imported, is
+  refused with the reason. A running workbench sees the removal without a
+  restart. Saving a project whose pinned kind has no schema now names the
+  missing `<kind>@<version>` and says to import it with
+  `anolis-workbench provider import`.
 
 ## [0.31.0] - 2026-11-01
 
