@@ -23,6 +23,12 @@ Historical note:
 
 ### Fixed
 
+- **Operate's startup safe-state warning says it is about the start**
+  (#769). It read "Startup safe state not achieved" until the runtime
+  restarted, even after the trips that caused it were cleared. It now reads
+  "At startup, safe state not achieved", adds "no trip reported now" once
+  every device whose call failed reports `watchdog_tripped` false, and its
+  detail says a restart re-applies the safe state.
 - **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
   refuse `telemetry.influxdb.token`**. From anolis#677 the runtime uses the
   deprecated flat key, so a token there shadows the target's `INFLUXDB_TOKEN`
