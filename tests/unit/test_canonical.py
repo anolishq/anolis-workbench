@@ -314,6 +314,26 @@ def test_vendored_profile_schema_knows_action_require() -> None:
     assert machine_profile.schema_errors(profile) != []
 
 
+def test_vendored_profile_schema_knows_trip_recovery() -> None:
+    """anolis 0.10.1's operator.trip_recovery (anolis-workbench#750)."""
+    profile = canonical.build_profile(
+        machine_id="rig-a",
+        display_name="Rig A",
+        providers={"bread0": canonical.provider_config_relpath("bread", "bread0")},
+    )
+    step = {
+        "label": "Release both brakes",
+        "function": "set_brake",
+        "args": {"motor1_brake": False, "motor2_brake": False},
+        "confirm": True,
+    }
+    profile["operator"] = {"trip_recovery": [{"device": "bread0/dcmt0", "after_clear": [step]}]}
+    assert machine_profile.schema_errors(profile) == []
+
+    del step["label"]
+    assert machine_profile.schema_errors(profile) != []
+
+
 # ---------------------------------------------------------------------------
 # Round-trip: read/write a canonical project
 # ---------------------------------------------------------------------------
