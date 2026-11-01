@@ -425,6 +425,7 @@
     ensureEventStream();
 
     const epoch = estopEpoch;
+    const paramsSeq = ++paramsReadSeq;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
       fetchJson<UnknownRecord>("/v0/mode"),
       fetchJson<UnknownRecord>("/v0/providers/health"),
@@ -473,16 +474,31 @@
     startupSafeState =
       rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
     stopChain = rtRes.status === "fulfilled" ? extractStopChain(rtRes.value) : stopChain;
-    parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
+    applyParameters(
+      paramsSeq,
+      parRes.status === "fulfilled" ? extractParameters(parRes.value) : [],
+    );
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
     callFailures = automationStatus?.call_failures ?? [];
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
   }
 
+  // A poll reads the parameters, then waits on other requests before showing
+  // them; a Save in between refreshes with newer values. Each read is numbered
+  // when it starts, and a reply older than the one shown is dropped (wb#767).
+  let paramsReadSeq = 0;
+  let paramsShownSeq = 0;
+  function applyParameters(seq: number, value: ParameterDefinition[]): void {
+    if (seq < paramsShownSeq) return;
+    paramsShownSeq = seq;
+    parameters = value;
+  }
+
   async function refreshParametersOnly(): Promise<void> {
+    const seq = ++paramsReadSeq;
     try {
       const p = await fetchJson<UnknownRecord>("/v0/parameters");
-      parameters = extractParameters(p);
+      applyParameters(seq, extractParameters(p));
     } catch {
       /* best-effort */
     }
