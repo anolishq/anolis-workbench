@@ -13,6 +13,20 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **What follows a watchdog-trip clear comes from the machine profile**
+  (#750). Operate's guided clear still offers the provider SDK's reserved
+  `clear_watchdog_trip` on any tripped device. The steps after it are the
+  profile's `operator.trip_recovery` entry for that device, in order: each
+  can be skipped, and a `confirm` step takes a second click. Arguments are
+  typed from the function's spec, and one the function doesn't take is
+  refused. **Upgrade note:** the brake-release step was hard-coded for any
+  device with a two-bool `set_brake`. Without a profile entry it is gone:
+  brakes a trip engaged stay engaged until released from the device's
+  functions. Needs an anolis release whose profile schema knows
+  `operator.trip_recovery` (anolishq/anolis#719).
+
 ## [0.30.0] - 2026-11-01
 
 Upgrade notes:

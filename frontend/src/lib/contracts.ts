@@ -227,6 +227,23 @@ export interface OperatorAction {
   require?: StartRequirement[];
 }
 
+/** What follows clear_watchdog_trip on one device (anolis-workbench#750). */
+export interface TripRecovery {
+  /** provider/device */
+  device: string;
+  after_clear: TripRecoveryStep[];
+}
+
+export interface TripRecoveryStep {
+  label: string;
+  /** A function on the same device. */
+  function: string;
+  /** Arguments by name, as plain values; typed from the function's spec. */
+  args?: Record<string, boolean | number | string>;
+  /** A second click before the call, for a step that actuates. */
+  confirm?: boolean;
+}
+
 /** What Start run and Stop run do (anolis#696). */
 export interface OperatorRun {
   /** The run section's heading; "Run" when absent. */
@@ -247,6 +264,8 @@ export interface OperatorBlock {
   run?: OperatorRun;
   /** Buttons, each increasing an int64 counter parameter by one (anolis#697). */
   actions?: OperatorAction[];
+  /** Steps offered after a device's watchdog-trip clear (anolis-workbench#750). */
+  trip_recovery?: TripRecovery[];
   /** Deprecated alias of run (anolis 0.7.0 and 0.8.0), read when run is absent. */
   experiment?: OperatorRun;
 }

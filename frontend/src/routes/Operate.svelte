@@ -183,9 +183,11 @@
   const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
   let tripKey = $state<string>("");
   let tripCleared = $state<boolean>(false);
-  let tripBrakes = $state<"" | "released" | "left">("");
+  // Each profile step after the clear, by index: done or skipped (wb#750).
+  let tripSteps = $state<Record<number, "done" | "skipped">>({});
   // The release and the brakes take two clicks, as the stop card's clear does.
-  let tripArmed = $state<"" | "release" | "brakes">("");
+  // "release", or the index of a confirm step waiting for its second click.
+  let tripArmed = $state<"" | "release" | number>("");
   let tripRunning = $state<boolean>(false);
   let tripError = $state<{ step: number; text: string } | null>(null);
   let devices = $state<Device[]>([]);
@@ -733,20 +735,18 @@
   const tripClearFn = $derived(
     tripCaps?.functions.find((f) => f.name === "clear_watchdog_trip") ?? null,
   );
-  // bread's DCMT: the trip engaged both brakes, released by set_brake(false, false).
-  const tripBrakeFn = $derived(
-    tripCaps?.functions.find(
-      (f) =>
-        f.name === "set_brake" && f.args?.length === 2 && f.args.every((a) => a.type === "bool"),
-    ) ?? null,
+  // What follows the clear is the machine profile's (wb#750), not hard-coded.
+  const tripRecoverySteps = $derived(
+    operator?.trip_recovery?.find((r) => r.device === tripKey)?.after_clear ?? [],
   );
+  const tripStepsSettled = $derived(tripRecoverySteps.every((_, i) => tripSteps[i] !== undefined));
   const tripReleased = $derived(estop !== null && !estop.latched);
   const tripManual = $derived(modeFixedReason !== "" || mode === "MANUAL");
 
   async function openTripClear(key: string): Promise<void> {
     tripKey = key;
     tripCleared = false;
-    tripBrakes = "";
+    tripSteps = {};
     tripArmed = "";
     tripError = null;
     if (capabilities[key]) return;
@@ -787,12 +787,30 @@
     await setMode();
   }
 
-  /** POSTs one call for the device being cleared; false, with the error shown, if refused. */
-  async function callForTrip(stepNumber: number, func: FunctionSpec): Promise<boolean> {
+  /**
+   * POSTs one call for the device being cleared, with the step's arguments
+   * typed from the function's spec; false, with the error shown, if refused.
+   */
+  async function callForTrip(
+    stepNumber: number,
+    func: FunctionSpec,
+    named: Record<string, boolean | number | string> = {},
+  ): Promise<boolean> {
     const [providerId, deviceId] = tripKey.split("/");
     tripError = null;
     tripRunning = true;
     try {
+      const specArgs = func.args ?? [];
+      const unknown = Object.keys(named).filter((n) => !specArgs.some((a) => a.name === n));
+      if (unknown.length) {
+        throw new Error(`${func.name} takes no argument ${unknown.join(", ")}`);
+      }
+      // buildArgsPayload reads a form by position; the profile names them.
+      const form: Record<string, unknown> = {};
+      specArgs.forEach((a, i) => {
+        const v = named[a.name];
+        if (v !== undefined) form[`arg_${i}`] = a.type === "bool" ? v : String(v);
+      });
       await fetchJson<UnknownRecord>("/v0/call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -800,8 +818,7 @@
           provider_id: providerId,
           device_id: deviceId,
           function_id: func.function_id,
-          // No form: every bool argument goes as false.
-          args: buildArgsPayload(func, {}),
+          args: buildArgsPayload(func, form),
         }),
       });
       return true;
@@ -824,14 +841,18 @@
     }
   }
 
-  async function releaseBrakes(): Promise<void> {
-    if (!tripBrakeFn) return;
-    if (tripArmed !== "brakes") {
-      tripArmed = "brakes";
+  async function runTripStep(index: number): Promise<void> {
+    const step = tripRecoverySteps[index];
+    const func = tripCaps?.functions.find((f) => f.name === step?.function);
+    if (!step || !func) return;
+    if (step.confirm && tripArmed !== index) {
+      tripArmed = index;
       return;
     }
     tripArmed = "";
-    if (await callForTrip(4, tripBrakeFn)) tripBrakes = "released";
+    if (await callForTrip(4 + index, func, step.args ?? {})) {
+      tripSteps = { ...tripSteps, [index]: "done" };
+    }
   }
 
   // ── Function call ──────────────────────────────────────────────────────────
@@ -1904,22 +1925,29 @@
                 {/if}
                 {#if tripError?.step === 3}<span class="field-error">{tripError.text}</span>{/if}
               </li>
-              {#if tripBrakeFn}
-                <li data-testid="trip-step-4">
-                  Release both brakes with <code>set_brake(false, false)</code>. The trip engaged
-                  them; released, the motors turn when commanded.
-                  {#if tripBrakes === "released"}
-                    <span class="field-note">Done: both brakes are released.</span>
-                  {:else if tripBrakes === "left"}
-                    <span class="field-note">Skipped: the brakes stay on.</span>
-                  {:else if tripArmed === "brakes"}
+              {#each tripRecoverySteps as tstep, i (i)}
+                {@const tfunc = tripCaps?.functions.find((f) => f.name === tstep.function)}
+                {@const ready =
+                  tripCleared && tripRecoverySteps.slice(0, i).every((_, j) => tripSteps[j])}
+                <li data-testid={`trip-step-${4 + i}`}>
+                  {tstep.label} (<code>{tstep.function}</code>).
+                  {#if !tripCaps}
+                    <span class="field-note">Loading the device's functions…</span>
+                  {:else if !tfunc}
+                    <span class="field-error">This device offers no {tstep.function} function.</span
+                    >
+                  {:else if tripSteps[i] === "done"}
+                    <span class="field-note">Done.</span>
+                  {:else if tripSteps[i] === "skipped"}
+                    <span class="field-note">Skipped.</span>
+                  {:else if tripArmed === i}
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
                       disabled={tripRunning}
-                      onclick={releaseBrakes}
+                      onclick={() => runTripStep(i)}
                     >
-                      Confirm: releases both brakes
+                      Confirm: {tstep.label}
                     </button>
                     <button
                       type="button"
@@ -1932,25 +1960,26 @@
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
-                      disabled={!tripCleared || tripRunning}
-                      onclick={releaseBrakes}
+                      disabled={!ready || tripRunning}
+                      onclick={() => runTripStep(i)}
                     >
-                      Release both brakes…
+                      {tstep.label}{tstep.confirm ? "…" : ""}
                     </button>
                     <button
                       type="button"
                       class="btn-secondary btn-sm"
-                      disabled={!tripCleared || tripRunning}
-                      onclick={() => (tripBrakes = "left")}
+                      disabled={!ready || tripRunning}
+                      onclick={() => (tripSteps = { ...tripSteps, [i]: "skipped" })}
                     >
-                      Leave the brakes on
+                      Skip
                     </button>
                   {/if}
-                  {#if tripError?.step === 4}<span class="field-error">{tripError.text}</span>{/if}
+                  {#if tripError?.step === 4 + i}<span class="field-error">{tripError.text}</span
+                    >{/if}
                 </li>
-              {/if}
+              {/each}
             </ol>
-            {#if tripCleared && (!tripBrakeFn || tripBrakes)}
+            {#if tripCleared && tripStepsSettled}
               <p class="field-note">
                 {tripKey}: the clear resumes nothing. Commands sent while it was tripped were
                 ignored, so command it again.
