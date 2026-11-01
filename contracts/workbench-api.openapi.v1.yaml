@@ -374,6 +374,39 @@ paths:
                 type: object
                 additionalProperties: true
 
+  /api/provider-schemas/resolve:
+    post:
+      summary: Resolve each provider kind at a machine's pins
+      description: >-
+        Takes `{"pins": {kind: version}}` and returns `{schema_version,
+        providers, resolution}`. `providers` has every available kind, packaged
+        or imported, with the envelope its pin resolves to (an exact import,
+        else the packaged envelope, else a kind's highest import); `resolution`
+        maps each kind to `{source, exact, pinned_version, envelope_version,
+        sha256}`. The composer asks again whenever a pin changes, so its forms
+        and checks match what a save validates against (#784).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pins]
+              properties:
+                pins:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200":
+          description: Envelopes and resolutions, one per available kind
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: "The body is not {\"pins\": {kind: version}} with string versions"
+
   # ── Commission track ───────────────────────────────────────────────────────
 
   /api/status:

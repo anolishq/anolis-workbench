@@ -81,18 +81,6 @@
     onChanged();
   }
 
-  /**
-   * The provider version the vendored envelope was generated from, when it
-   * says. A config edited here is checked against THAT contract, so a pin
-   * naming a different version is checked against the wrong one (#283).
-   */
-  function skewFor(kind: string): string | null {
-    const envelopeVersion = providerSchemas?.providers?.[kind]?.provider_version;
-    const pinned = doc.profile?.components?.providers?.[kind]?.version?.trim();
-    if (!envelopeVersion || !pinned || envelopeVersion === pinned) return null;
-    return envelopeVersion;
-  }
-
   function setProviderPin(kind: string, version: string): void {
     const c = components();
     c.providers ??= {};
@@ -104,14 +92,24 @@
   }
 </script>
 
+<!-- The server's verdict (#784): which envelope this kind's pin resolved to.
+     Precedence lives only in provider_schemas.resolve, never here. -->
 {#snippet skewNote(kind: string)}
-  {@const envelopeVersion = skewFor(kind)}
-  {#if envelopeVersion}
+  {@const resolved = providerSchemas?.resolution?.[kind]}
+  {#if resolved && !resolved.exact && resolved.envelope_version}
     <div class="bus-note note-warning" data-testid={`schema-skew-${kind}`}>
       Config forms and validation for <code>{kind}</code> use the schema published by
-      <strong>{kind} {envelopeVersion}</strong>, but this machine pins
+      <strong>{kind} {resolved.envelope_version}</strong>, but this machine pins
       <strong>{profile?.components?.providers?.[kind]?.version}</strong>. If the config contract
       changed between them, this machine's provider may reject a config accepted here.
+    </div>
+  {/if}
+  {#if resolved?.source === "sideloaded"}
+    <div class="bus-note" data-testid={`schema-imported-${kind}`}>
+      Imported, unverified: <code>{kind}</code>'s config schema for {resolved.envelope_version} was imported
+      on this host, not packaged with the workbench{resolved.sha256
+        ? ` (sha256 ${resolved.sha256.slice(0, 12)})`
+        : ""}.
     </div>
   {/if}
 {/snippet}
