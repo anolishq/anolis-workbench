@@ -288,3 +288,19 @@ def test_cli_packaged_exits_one(capsys):
     version = provider_schemas._load_envelopes()["sim"]["provider_version"]
     assert cli_main.main(["provider", "remove", f"sim@{version}"]) == 1
     assert "packaged" in capsys.readouterr().err
+
+
+def test_the_scan_reads_projects_and_never_migrates_one(tmp_path, _imports_dir):
+    """A legacy system.json project can't be read without migrating it, so it
+    counts as can't-tell, and the scan leaves it exactly as it was."""
+    _import(tmp_path, "foo", "0.1.0")
+    legacy = projects.SYSTEMS_ROOT / "legacy"
+    legacy.mkdir(parents=True)
+    fixture = pathlib.Path(__file__).parent.parent / "fixtures" / "v2-templates" / "sim-quickstart.json"
+    (legacy / "system.json").write_bytes(fixture.read_bytes())
+    before = sorted(p.name for p in legacy.iterdir())
+
+    with pytest.raises(provider_import.RemoveRefused, match="legacy"):
+        provider_import.remove_import("foo@0.1.0")
+    assert sorted(p.name for p in legacy.iterdir()) == before
+    assert (legacy / "system.json").read_bytes() == fixture.read_bytes()

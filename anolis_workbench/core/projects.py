@@ -350,12 +350,23 @@ def list_projects() -> list:
 
 def projects_pinning(kind: str, version: str) -> tuple[list[str], list[str]]:
     """Projects whose profile pins `kind` at `version` and that use that kind,
-    and projects that can't be read to tell (#786)."""
+    and projects that can't be read to tell (#786).
+
+    Read only: unlike list_projects, it never migrates a legacy system.json
+    project, which therefore counts as can't-tell.
+    """
     pinning: list[str] = []
     unreadable: list[str] = []
-    for entry in list_projects():
-        name = entry["name"]
-        if entry["format"] != FORMAT_MACHINE_PROFILE:
+    if not SYSTEMS_ROOT.exists():
+        return pinning, unreadable
+    for pdir in sorted(SYSTEMS_ROOT.iterdir()):
+        if not pdir.is_dir():
+            continue
+        fmt = _dir_format(pdir, migrate=False)
+        if fmt is None:
+            continue
+        name = pdir.name
+        if fmt != FORMAT_MACHINE_PROFILE:
             unreadable.append(name)
             continue
         try:
