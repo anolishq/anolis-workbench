@@ -69,6 +69,8 @@ function fakeRuntime(
     { name: "impeller_pwm", type: "int64", value: 80, source: "default", min: 0, max: 100 },
   ];
   const posts: Post[] = [];
+  // A poll's GET /v0/parameters held after reading, to land after a Save (#767).
+  let holdNextRead: Promise<void> | null = null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -119,6 +121,13 @@ function fakeRuntime(
       }
       if (path === "/v0/mode") return jsonResponse(200, { status: { code: "OK" }, mode });
       if (path === "/v0/parameters") {
+        if (holdNextRead) {
+          const held = holdNextRead;
+          holdNextRead = null;
+          const read = structuredClone(params);
+          await held;
+          return jsonResponse(200, { status: { code: "OK" }, parameters: read });
+        }
         if (opts.refreshAfterSave && posts.some((p) => p.path === "/v0/parameters"))
           await opts.refreshAfterSave;
         return jsonResponse(200, { status: { code: "OK" }, parameters: params });
@@ -161,7 +170,16 @@ function fakeRuntime(
   const doc = createProjectDocument("demo");
   if (opts.operator !== null) doc.profile = { ...doc.profile, operator: opts.operator ?? OPERATOR };
   render(Operate, { props: { projectName: "demo", system: doc, runtimeStatus: RUNNING } });
-  return { posts, mode: () => mode };
+  return {
+    posts,
+    mode: () => mode,
+    /** Holds the next GET /v0/parameters with the values as read; returns its release. */
+    holdNextParametersRead: () => {
+      let release = () => {};
+      holdNextRead = new Promise<void>((r) => (release = r));
+      return () => release();
+    },
+  };
 }
 
 afterEach(() => {
@@ -248,6 +266,26 @@ describe("Operate.svelte — the operator panel's settings (#729)", () => {
     expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
     release();
     expect(await within(group("Dose 1")).findByText("Saved")).toBeInTheDocument();
+    expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
+  });
+
+  it("keeps a saved box ticked when a poll that read before the Save lands after it (#767)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rt = fakeRuntime();
+    await waitFor(() => expect(within(row("Dose 1", "Every")).getByRole("textbox")).toHaveValue("20"));
+
+    // The next poll reads the parameters now, before the Save, and lands later.
+    const release = rt.holdNextParametersRead();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await fireEvent.click(within(row("Dose 1", "On")).getByRole("checkbox"));
+    await fireEvent.click(within(group("Dose 1")).getByRole("button", { name: "Save" }));
+    expect(await within(group("Dose 1")).findByText("Saved")).toBeInTheDocument();
+    expect(paramPosts(rt.posts)).toEqual([{ name: "dose1_enable", value: true }]);
+    expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
+
+    release();
+    await vi.advanceTimersByTimeAsync(100);
     expect(within(row("Dose 1", "On")).getByRole("checkbox")).toBeChecked();
   });
 
