@@ -816,4 +816,76 @@ describe("Operate.svelte — the operator's action buttons (anolis#697)", () => 
     await screen.findByTestId("operator-run");
     expect(screen.queryByTestId("operator-actions")).toBeNull();
   });
+  // anolis#707: an action carries Start's require entries, checked at the press.
+  const REQUIRING_ACTION = {
+    ...OPERATOR,
+    actions: [
+      {
+        label: "Sample now",
+        parameter: "sample_requests",
+        require: [
+          { signal: "bread0/dcmt0/motor1_brake", equals: false, message: "Release the sample pump's brake" },
+          {
+            signal: "bread0/dcmt0/motor2_brake",
+            equals: false,
+            message: "Release the second pump's brake",
+            when: "dose1_enable",
+          },
+        ],
+      },
+    ],
+  };
+  const pump = (one: boolean, two: boolean, quality = "OK") => ({
+    "bread0/dcmt0": [
+      { signal_id: "motor1_brake", value: { type: "bool", bool: one }, quality },
+      { signal_id: "motor2_brake", value: { type: "bool", bool: two }, quality },
+    ],
+  });
+
+  it("refuses a press while a required signal does not hold, and increases nothing (anolis#707)", async () => {
+    const rt = fakeRuntime({ mode: "AUTO", operator: REQUIRING_ACTION, states: pump(true, true) });
+    await press("Sample now");
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent(
+        "Refused: Release the sample pump's brake.",
+      ),
+    );
+    // dose1_enable is off, so the second entry does not apply.
+    expect(screen.getByTestId("action-feedback")).not.toHaveTextContent("second pump");
+    expect(paramPosts(rt)).toEqual([]);
+  });
+
+  it("applies an entry's when at the press (anolis#707)", async () => {
+    const rt = fakeRuntime({
+      mode: "AUTO",
+      operator: REQUIRING_ACTION,
+      states: pump(false, true),
+      switches: { dose1_enable: true },
+    });
+    await press("Sample now");
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent(
+        "Refused: Release the second pump's brake.",
+      ),
+    );
+    expect(paramPosts(rt)).toEqual([]);
+  });
+
+  it("refuses when a required signal's reading is not OK (anolis#707)", async () => {
+    const rt = fakeRuntime({ mode: "AUTO", operator: REQUIRING_ACTION, states: pump(false, false, "STALE") });
+    await press("Sample now");
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent("reading is stale"),
+    );
+    expect(paramPosts(rt)).toEqual([]);
+  });
+
+  it("presses once every required signal holds (anolis#707)", async () => {
+    const rt = fakeRuntime({ mode: "AUTO", operator: REQUIRING_ACTION, states: pump(false, true) });
+    await press("Sample now");
+    await waitFor(() => expect(paramPosts(rt)).toEqual([{ name: "sample_requests", value: 5 }]));
+    await waitFor(() =>
+      expect(screen.getByTestId("action-feedback")).toHaveTextContent("Sample now: requested."),
+    );
+  });
 });

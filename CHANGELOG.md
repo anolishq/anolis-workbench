@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- **Conditions checked before an action press** (anolishq/anolis#707). An
+  `operator.actions` entry's `require` list, with the same entries as
+  `run.start.require`, is checked at each press after a fresh read of the
+  parameters its `when`s name. The press is refused, increasing nothing,
+  with each unmet message. Needs anolis 0.10.0, whose profile schema knows
+  `actions[].require`.
+
 ### Changed
 
 - **Start run scopes the run to every provider the runtime reports**

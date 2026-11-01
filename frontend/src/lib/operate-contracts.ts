@@ -1049,15 +1049,15 @@ function isOn(parameters: ParameterDefinition[], name: string): boolean {
 }
 
 /**
- * The run.start.require entries that apply to this Start (anolis#701): those
- * without `when`, and those whose `when` parameter is on now. Start leaves
- * the switches as the operator set them.
+ * The require entries that apply now, for a Start (anolis#701) or an action
+ * press (anolis#707): those without `when`, and those whose `when` parameter
+ * is on. Start leaves the switches as the operator set them.
  */
-export function applicableRequirements(
-  start: OperatorRun["start"],
+export function applicableRequirements<T extends { require?: StartRequirement[] }>(
+  checked: T | undefined,
   parameters: ParameterDefinition[],
 ): StartRequirement[] {
-  return (start?.require ?? []).filter((r) => r.when === undefined || isOn(parameters, r.when));
+  return (checked?.require ?? []).filter((r) => r.when === undefined || isOn(parameters, r.when));
 }
 
 /**
