@@ -13,6 +13,14 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
+  refuse `telemetry.influxdb.token`**. From anolis#677 the runtime uses the
+  deprecated flat key, so a token there shadows the target's `INFLUXDB_TOKEN`
+  the same way. The error names the key that is set, and opening an authored
+  project removes either.
+
 ## [0.29.0] - 2026-10-31
 
 Upgrade notes:
