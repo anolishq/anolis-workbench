@@ -19,6 +19,7 @@
     DeviceStateValue,
     EstopStatus,
     FunctionSpec,
+    OperatorAction,
     ParameterDefinition,
     ProjectDoc,
     ProviderHealth,
@@ -991,7 +992,7 @@
    * RequestedPulseWindow, and only while the automation runs, so a press
    * outside AUTO is refused rather than counted toward a later start.
    */
-  async function pressAction(action: { label: string; parameter: string }): Promise<void> {
+  async function pressAction(action: OperatorAction): Promise<void> {
     actionFeedback = null;
     if (mode !== "AUTO") {
       actionFeedback = {
@@ -1003,6 +1004,17 @@
     actionBusy = true;
     try {
       await refreshParametersOnly();
+      // Checked as Start checks its own (anolis#707), after the refresh a
+      // `when` reads.
+      const require = applicableRequirements(action, parameters);
+      if (require.length) {
+        await loadDeviceStates(require.map((r) => signalDevice(r.signal)));
+        const unmet = unmetStartRequirements(require, deviceStates);
+        if (unmet.length) {
+          actionFeedback = { text: `Refused: ${unmet.join("; ")}.`, cls: "field-error" };
+          return;
+        }
+      }
       const param = parameters.find((p) => p.name === action.parameter);
       if (!param) {
         actionFeedback = {

@@ -294,6 +294,26 @@ def test_vendored_profile_schema_knows_operator_actions() -> None:
     assert machine_profile.schema_errors(profile) != []
 
 
+def test_vendored_profile_schema_knows_action_require() -> None:
+    """anolis 0.10.0's operator.actions[].require (anolis#707)."""
+    profile = canonical.build_profile(
+        machine_id="rig-a",
+        display_name="Rig A",
+        providers={"bread0": canonical.provider_config_relpath("bread", "bread0")},
+    )
+    entry = {
+        "signal": "bread0/dcmt0/motor1_brake",
+        "equals": False,
+        "message": "Release the sample pump's brake",
+        "when": "sample_enable",
+    }
+    profile["operator"] = {"actions": [{"label": "Sample now", "parameter": "sample_requests", "require": [entry]}]}
+    assert machine_profile.schema_errors(profile) == []
+
+    del entry["message"]
+    assert machine_profile.schema_errors(profile) != []
+
+
 # ---------------------------------------------------------------------------
 # Round-trip: read/write a canonical project
 # ---------------------------------------------------------------------------

@@ -219,6 +219,14 @@ export interface StartRequirement {
   when?: string;
 }
 
+/** A button that increases its int64 counter parameter by one (anolis#697). */
+export interface OperatorAction {
+  label: string;
+  parameter: string;
+  /** Conditions on signals that must hold before a press (anolis#707). */
+  require?: StartRequirement[];
+}
+
 /** What Start run and Stop run do (anolis#696). */
 export interface OperatorRun {
   /** The run section's heading; "Run" when absent. */
@@ -238,7 +246,7 @@ export interface OperatorBlock {
   settings?: { group: string; items: { parameter: string; label: string; unit?: string }[] }[];
   run?: OperatorRun;
   /** Buttons, each increasing an int64 counter parameter by one (anolis#697). */
-  actions?: { label: string; parameter: string }[];
+  actions?: OperatorAction[];
   /** Deprecated alias of run (anolis 0.7.0 and 0.8.0), read when run is absent. */
   experiment?: OperatorRun;
 }
