@@ -89,6 +89,11 @@
     formatValue,
     removeDevice,
   } from "../lib/operate-events";
+  import {
+    describeWorkbenchChange,
+    noteWorkbenchInstance,
+    type WorkbenchChange,
+  } from "../lib/workbench-instance";
 
   let {
     projectName,
@@ -414,6 +419,8 @@
       modeBadgeClass = "unknown";
       return;
     }
+    const newer = noteWorkbenchInstance(status);
+    if (newer !== null) staleWorkbench = newer;
     // Operate stopped (or unmounted) while this poll was in flight: opening the
     // event stream now would leave one that nothing closes (wb#551).
     if (pollTimer === null) return;
@@ -980,6 +987,11 @@
   // (anolis#681): a falling uptime is a restart, said once until dismissed.
   // Kept across Operate stopping, so a restart from Commission counts too.
   let restartNote = $state<boolean>(false);
+  // The workbench restarted or was upgraded after this page loaded (#777);
+  // null while it's the one the page loaded from.
+  let staleWorkbench = $state<WorkbenchChange | null>(null);
+  const STALE_REFUSAL =
+    "Refused: the workbench was updated or restarted after this page loaded. Reload this page first.";
   let lastUptime: number | null = null;
   let runBusy = $state<boolean>(false);
   let runFeedback = $state<{ text: string; cls: string } | null>(null);
@@ -994,6 +1006,10 @@
    */
   async function pressAction(action: OperatorAction): Promise<void> {
     actionFeedback = null;
+    if (staleWorkbench !== null) {
+      actionFeedback = { text: STALE_REFUSAL, cls: "field-error" };
+      return;
+    }
     if (mode !== "AUTO") {
       actionFeedback = {
         text: `Refused: ${action.label} runs only in AUTO. Start the run first.`,
@@ -1162,6 +1178,11 @@
     const step = kind === "start" ? start : stop;
     if (!step) return;
     runFeedback = null;
+    // Stopping always works from any page; starting needs the current code.
+    if (kind === "start" && staleWorkbench !== null) {
+      runFeedback = { text: STALE_REFUSAL, cls: "field-error" };
+      return;
+    }
     if (kind === "start" && !statusSettled) {
       // Not "not answering": the first status has not arrived yet (wb#754).
       runFeedback = {
@@ -1788,6 +1809,16 @@
 
     <!-- Operator panel (wb#727): what the machine is doing and what to do next. -->
     <div class="operate-section operator-panel">
+      {#if staleWorkbench !== null}
+        <div class="workspace-advisory" data-testid="workbench-stale">
+          The workbench was {describeWorkbenchChange(staleWorkbench)} after this page loaded, so the page
+          may be running older code or an older project. Reload it before starting a run or pressing an
+          action; Stop run, the mode and the software stop still work.
+          <button type="button" class="btn-secondary" onclick={() => location.reload()}
+            >Reload</button
+          >
+        </div>
+      {/if}
       <div class="machine-line machine-line-{machine.state}" data-testid="machine-line">
         <span>{machine.text}</span>
         {#if machine.target}

@@ -8,6 +8,7 @@
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
   import { fetchJson } from "./lib/api";
+  import { noteWorkbenchInstance } from "./lib/workbench-instance";
   import { savedLaunch, type SavedLaunch } from "./lib/canonical";
   import {
     installedProject,
@@ -210,6 +211,8 @@
   async function refreshStatus(): Promise<void> {
     try {
       const status = await fetchJson<RuntimeStatus>("/api/status");
+      // Records the workbench instance this page loaded from (#777).
+      noteWorkbenchInstance(status);
       runtimeStatus = status;
       const nowRunningForCurrent =
         Boolean(status?.running) && status?.active_project === projectName;
