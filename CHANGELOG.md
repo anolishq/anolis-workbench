@@ -13,8 +13,22 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **Start run scopes the run to every provider the runtime reports**
+  (#771), with no device or signal narrower. telemetry-export seeds a run's
+  flat signals with their value at its start only when the run has a
+  `tag_scope`, and the scope also filters the export, so a run started from
+  Operate now exports seeded, and no series is left out.
+
 ### Fixed
 
+- **Operate's startup safe-state warning says it is about the start**
+  (#769). It read "Startup safe state not achieved" until the runtime
+  restarted, even after the trips that caused it were cleared. It now reads
+  "At startup, safe state not achieved", adds "no trip reported now" once
+  every device whose call failed reports `watchdog_tripped` false, and its
+  detail says a restart re-applies the safe state.
 - **Deploy, bundle and save refuse a flat `telemetry.influx_token` as they
   refuse `telemetry.influxdb.token`**. From anolis#677 the runtime uses the
   deprecated flat key, so a token there shadows the target's `INFLUXDB_TOKEN`

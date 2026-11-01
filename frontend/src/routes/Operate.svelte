@@ -1214,10 +1214,18 @@
           const param = parameters.find((p) => p.name === item.parameter);
           if (param) params[param.name] = param.value;
         }
+        // Every provider, nothing narrower: a scope turns on telemetry-export's
+        // seeding, and it also filters the export (wb#771).
+        const providerIds = [
+          ...new Set((runtimeStatusData?.providers ?? []).map((p) => p.provider_id)),
+        ].sort();
+        const tagScope = providerIds.length
+          ? { tag_scope: { provider_ids: providerIds, device_ids: [], signal_ids: [] } }
+          : {};
         const opened = await fetchJson<UnknownRecord>("/v0/runs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ params }),
+          body: JSON.stringify({ params, ...tagScope }),
         });
         const id = (opened.run as UnknownRecord | undefined)?.run_id;
         recorded = typeof id === "string" ? ` Recorded as run ${id}.` : "";
