@@ -1747,7 +1747,7 @@
             </span>
             <InfoToggle label="About the startup safe state">
               {startup.text} This is from the runtime's last start and stays until it restarts; a restart
-              re-applies the safe state.{#if untripped}{" "}None of the devices whose calls failed
+              re-applies the safe state.{#if untripped}&nbsp;None of the devices whose calls failed
                 reports a watchdog trip now.{/if}
             </InfoToggle>
           {/if}
