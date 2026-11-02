@@ -73,15 +73,22 @@
   let folderInput = $state<HTMLInputElement | null>(null);
 
   // ── Update state ──────────────────────────────────────────────────────────
+  // The workbench doesn't upgrade itself (#535): the check says what to run.
+  interface UpgradeInstructions {
+    install: string;
+    command: string | null;
+    restart: string | null;
+    note: string;
+  }
   interface UpdateCheckResult {
     current_version: string;
     latest_version: string | null;
     update_available: boolean;
     error: string | null;
+    upgrade?: UpgradeInstructions;
   }
   let updateInfo = $state<UpdateCheckResult | null>(null);
   let updateChecking = $state<boolean>(false);
-  let updateRunning = $state<boolean>(false);
   let updateFeedback = $state<string>("");
   let updateIsError = $state<boolean>(false);
 
@@ -225,38 +232,6 @@
       updateIsError = true;
     } finally {
       updateChecking = false;
-    }
-  }
-
-  async function doUpdate() {
-    updateRunning = true;
-    updateFeedback = "";
-    updateIsError = false;
-    try {
-      const res = await fetchJson<{
-        success: boolean;
-        version?: string;
-        error?: string;
-        warning?: string | null;
-      }>("/api/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      if (res.success) {
-        updateFeedback = `Updated to v${res.version ?? "latest"}. Restart workbench to apply.`;
-        if (res.warning) updateFeedback += ` ${res.warning}`;
-        updateInfo = null;
-      } else {
-        updateFeedback = `Update failed: ${res.error ?? "unknown error"}`;
-        if (res.warning) updateFeedback += ` ${res.warning}`;
-        updateIsError = true;
-      }
-    } catch (err) {
-      updateFeedback = `Update failed: ${err instanceof Error ? err.message : String(err)}`;
-      updateIsError = true;
-    } finally {
-      updateRunning = false;
     }
   }
 
@@ -478,16 +453,6 @@
           >
             {updateChecking ? "Checking…" : "Check for Updates"}
           </button>
-          {#if updateInfo?.update_available}
-            <button
-              type="button"
-              class="btn-primary btn-sm"
-              disabled={updateRunning}
-              onclick={doUpdate}
-            >
-              {updateRunning ? "Updating…" : `Update to v${updateInfo.latest_version}`}
-            </button>
-          {/if}
           <button
             type="button"
             class="btn-secondary btn-sm"
@@ -504,6 +469,18 @@
           >
             {updateFeedback}
           </p>
+        {/if}
+        {#if updateInfo?.update_available && updateInfo.upgrade}
+          <div class="system-feedback" data-testid="upgrade-instructions">
+            {#if updateInfo.upgrade.command}
+              <pre><code
+                  >{updateInfo.upgrade.command}{updateInfo.upgrade.restart
+                    ? `\n${updateInfo.upgrade.restart}`
+                    : ""}</code
+                ></pre>
+            {/if}
+            <p>{updateInfo.upgrade.note}</p>
+          </div>
         {/if}
         {#if rollbackFeedback}
           <p

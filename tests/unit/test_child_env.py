@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from anolis_workbench.core import child_env as child_env_module
-from anolis_workbench.core import executor, launcher, package_validator, updater
+from anolis_workbench.core import executor, launcher, package_validator
 
 FAKE_TOKEN = "fake-runtime-token-for-tests-0000"
 
@@ -76,16 +76,6 @@ def test_ssh_executor(secrets: None, monkeypatch: pytest.MonkeyPatch) -> None:
     ssh.run(["true"])
     ssh.write_file("/tmp/x", b"")
     assert len(spawn.envs) == 2
-    _assert_scrubbed(spawn)
-
-
-def test_updater(secrets: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    script = tmp_path / "install.sh"
-    script.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(updater, "download_install_script", lambda version: (script, None))
-    spawn = _Spawn()
-    monkeypatch.setattr(updater.subprocess, "run", spawn)
-    updater.perform_update("0.0.1")
     _assert_scrubbed(spawn)
 
 

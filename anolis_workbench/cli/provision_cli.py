@@ -314,20 +314,11 @@ def _parse_args() -> argparse.Namespace:
     )
 
     # --- update subcommand ---
-    update_parser = subparsers.add_parser(
+    # Kept so scripts that call it still work; the workbench no longer
+    # upgrades itself (#535), so it says what to run, as check-update does.
+    subparsers.add_parser(
         "update",
-        help="Download and install the latest version.",
-    )
-    update_parser.add_argument(
-        "--install-prefix",
-        type=Path,
-        default=DEFAULT_INSTALL_PREFIX,
-        help="Binary install prefix (default: /opt/anolis).",
-    )
-    update_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be done without executing.",
+        help="Show how to upgrade this workbench (the same as check-update).",
     )
 
     return parser.parse_args()
@@ -984,8 +975,8 @@ def _run_workbench_service(args: argparse.Namespace) -> int:
 
 
 def _run_check_update() -> int:
-    """Check for available updates."""
-    from anolis_workbench.core.updater import check_for_update
+    """Say whether a newer workbench is out, and how to upgrade this install (#535)."""
+    from anolis_workbench.core.updater import check_for_update, upgrade_instructions
 
     status = check_for_update()
     print(f"  Current version: {status.current_version}")
@@ -995,56 +986,18 @@ def _run_check_update() -> int:
         return 0
 
     print(f"  Latest version:  {status.latest_version}")
-    if status.update_available:
-        print(f"\n  ⬆️  Update available: {status.current_version} → {status.latest_version}")
-        print("     Run install.sh or re-run anolis-provision install to update.")
-    else:
-        print("\n  ✓ You are on the latest version.")
-    return 0
-
-
-def _run_update(args: argparse.Namespace) -> int:
-    """Download and install the latest version."""
-    from anolis_workbench.core.updater import check_for_update, perform_update
-
-    print("Anolis Provision — Update")
-    print()
-
-    status = check_for_update()
-    print(f"  Current version: {status.current_version}")
-
-    if status.error:
-        print(f"  ⚠️  {status.error}")
-        return 1
-
     if not status.update_available:
-        print(f"  Latest version:  {status.latest_version}")
-        print("\n  ✓ Already up to date.")
+        print("\n  ✓ You are on the latest version.")
         return 0
 
-    print(f"  Latest version:  {status.latest_version}")
-    print(f"\n  ⬆️  Updating {status.current_version} → {status.latest_version}...")
-    if args.dry_run:
-        print("  Mode: DRY RUN")
-
-    assert status.latest_version is not None  # guaranteed when update_available is True
-    result = perform_update(
-        target_version=status.latest_version,
-        install_prefix=args.install_prefix,
-        dry_run=args.dry_run,
-    )
-
-    if result.success:
-        if args.dry_run:
-            print(f"\n  {result.error}")
-        else:
-            print(f"\n  ✅ Updated to v{result.version}")
-        _print_install_sh_warning(result.warning)
-        return 0
-    else:
-        print(f"\n  ❌ Update failed: {result.error}", file=sys.stderr)
-        _print_install_sh_warning(result.warning)
-        return 1
+    upgrade = upgrade_instructions(status.latest_version)
+    print(f"\n  ⬆️  Update available: {status.current_version} → {status.latest_version}")
+    if upgrade.command:
+        print(f"     {upgrade.command}")
+    if upgrade.restart:
+        print(f"     {upgrade.restart}")
+    print(f"     {upgrade.note}")
+    return 0
 
 
 def main() -> int:
@@ -1086,7 +1039,7 @@ def main() -> int:
         return _run_check_update()
 
     if args.command == "update":
-        return _run_update(args)
+        return _run_check_update()
 
     print(f"Command '{args.command}' is not yet implemented.", file=sys.stderr)
     return 2

@@ -1,22 +1,21 @@
-"""Update detection and self-update: compare installed version against latest GitHub release."""
+"""Update detection: compare the installed version against the latest GitHub release,
+and say how to upgrade this install (#535). Nothing is downloaded or run."""
 
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
 import logging
 import os
-import platform
-import stat
-import subprocess
-import tempfile
+import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import requests
 
-from anolis_workbench.core.child_env import child_env
-from anolis_workbench.core.release_verify import ReleaseVerificationError, verify_install_sh
+from anolis_workbench.core.workbench_service import SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -91,96 +90,57 @@ def check_for_update() -> UpdateStatus:
     )
 
 
-@dataclass
-class UpdateResult:
-    success: bool
-    version: Optional[str] = None
-    error: Optional[str] = None
-    # Set when install.sh ran without a SHA256SUMS line to check it against.
-    warning: Optional[str] = None
+@dataclass(frozen=True)
+class UpgradeInstructions:
+    """How to upgrade the workbench this process runs from (#535).
 
-
-def _detect_arch() -> str:
-    """Map platform.machine() to the arch string used in release assets."""
-    machine = platform.machine()
-    if machine in ("aarch64", "arm64"):
-        return "arm64"
-    return "x86_64"
-
-
-def download_install_script(version: str) -> tuple[Path, Optional[str]]:
-    """Download install.sh from the given release version to a temp file and check it.
-
-    Returns the script's path and, when the release's SHA256SUMS has no line
-    for it, the warning to show. Raises ReleaseVerificationError when it does
-    not match, or SHA256SUMS cannot be fetched.
+    The workbench doesn't upgrade itself: it says what to run. `command` is a
+    shell command, or None for the desktop app, whose note names the release
+    to download; `restart` is the command that restarts it afterwards, when
+    that is known.
     """
-    url = f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/install.sh"
-    resp = requests.get(url, timeout=60, allow_redirects=True)
-    resp.raise_for_status()
-    warning = verify_install_sh(GITHUB_REPO, version, resp.content)
 
-    tmp = tempfile.NamedTemporaryFile(prefix="anolis-install-", suffix=".sh", delete=False)
-    tmp.write(resp.content)
-    tmp.close()
-    os.chmod(tmp.name, os.stat(tmp.name).st_mode | stat.S_IXUSR | stat.S_IXGRP)
-    return Path(tmp.name), warning
+    # "pipx", "uv-tool", "pip" (a venv or a plain interpreter) or "desktop"
+    install: str
+    command: Optional[str]
+    restart: Optional[str]
+    note: str
 
 
-def perform_update(
-    target_version: str,
-    install_prefix: Optional[Path] = None,
-    dry_run: bool = False,
-) -> UpdateResult:
-    """Download and execute the install script for the target version.
+def _has_pip() -> bool:
+    """True when this interpreter can run `-m pip`; uv makes venvs without it."""
+    return importlib.util.find_spec("pip") is not None
 
-    This downloads install.sh from the release and executes it with sudo.
-    The install script handles downloading binaries and updating in place.
-    """
-    url = f"https://github.com/{GITHUB_REPO}/releases/download/v{target_version}/install.sh"
-    cmd_preview = f"curl -fsSL {url} | sudo bash"
-    if install_prefix:
-        cmd_preview += f" -s -- --prefix {install_prefix}"
 
-    if dry_run:
-        return UpdateResult(
-            success=True,
-            version=target_version,
-            error=f"DRY RUN: would execute: {cmd_preview}",
+def upgrade_instructions(version: Optional[str]) -> UpgradeInstructions:
+    """What upgrades this install to `version`, or to the latest when None."""
+    if getattr(sys, "frozen", False):
+        # The desktop app's frozen sidecar: a new build replaces the app.
+        where = (
+            f"https://github.com/{GITHUB_REPO}/releases/tag/v{version}"
+            if version
+            else f"https://github.com/{GITHUB_REPO}/releases/latest"
         )
+        return UpgradeInstructions("desktop", None, None, f"Install the new desktop build from {where}.")
 
-    try:
-        script, warning = download_install_script(target_version)
-    except requests.RequestException as exc:
-        return UpdateResult(success=False, error=f"Failed to download install script: {exc}")
-    except ReleaseVerificationError as exc:
-        return UpdateResult(success=False, error=f"Install script not verified: {exc}")
+    prefix = Path(sys.prefix)
+    requirement = f"anolis-workbench=={version}" if version else "anolis-workbench"
+    python = shlex.quote(sys.executable)
+    if prefix.parent.name == "venvs" and "pipx" in prefix.parts:
+        install, command = "pipx", "pipx upgrade anolis-workbench"
+    elif prefix.parent.name == "tools" and "uv" in prefix.parts:
+        install, command = "uv-tool", "uv tool upgrade anolis-workbench"
+    elif _has_pip():
+        install, command = "pip", f"{python} -m pip install --upgrade {requirement}"
+    else:
+        install, command = "pip", f"uv pip install --python {python} --upgrade {requirement}"
 
-    cmd = ["sudo", str(script)]
-    if install_prefix:
-        cmd.extend(["--prefix", str(install_prefix)])
-
-    try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            env=child_env(),
-        )
-        logger.info("Update output: %s", result.stdout)
-        return UpdateResult(success=True, version=target_version, warning=warning)
-    except subprocess.CalledProcessError as exc:
-        return UpdateResult(
-            success=False,
-            error=f"Install script failed (exit {exc.returncode}): {exc.stderr[:500]}",
-            warning=warning,
-        )
-    except subprocess.TimeoutExpired:
-        return UpdateResult(success=False, error="Install script timed out (5 min)", warning=warning)
-    finally:
-        try:
-            script.unlink()
-        except OSError:
-            pass
+    # systemd sets INVOCATION_ID for the processes of a unit it runs, which is
+    # how `anolis-provision workbench-service` runs the workbench.
+    if os.environ.get("INVOCATION_ID"):
+        restart: Optional[str] = f"sudo systemctl restart {SERVICE_NAME.removesuffix('.service')}"
+        note = "Run the command, then restart the workbench service."
+    else:
+        restart = None
+        note = "Run the command, then restart the workbench."
+    return UpgradeInstructions(install, command, restart, note)

@@ -13,6 +13,21 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Self-update says how to upgrade instead of failing** (#535). It
+  downloaded an `install.sh` that no workbench release publishes and ran it
+  under `sudo`, so the Home view's "Update to vX" and
+  `anolis-provision update` failed every time. The update check now names the
+  command that upgrades the install it runs from: `pipx upgrade
+  anolis-workbench`, `uv tool upgrade anolis-workbench`, the venv's own
+  `pip install --upgrade anolis-workbench==X` (`uv pip install` for a venv
+  without pip), or, for the desktop app, the release to download,
+  plus `sudo systemctl restart anolis-workbench` when the workbench runs as
+  that service. Nothing is downloaded or run. `POST /api/update` answers 410
+  with that command, and `anolis-provision update` prints it, as
+  `check-update` does.
+
 ## [0.32.0] - 2026-11-01
 
 ### Added

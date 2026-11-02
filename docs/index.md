@@ -86,7 +86,7 @@ password works only for this machine.
 | Command | Use |
 | --- | --- |
 | `anolis-workbench` | Start the workbench server |
-| `anolis-provision` | Install on this machine (`install`), over SSH (`remote`), to several hosts (`fleet`), or build an offline bundle (`bundle`); install the workbench as a service (`workbench-service`, `--uninstall` to remove it); also `rollback`, `update` and `check-update` |
+| `anolis-provision` | Install on this machine (`install`), over SSH (`remote`), to several hosts (`fleet`), or build an offline bundle (`bundle`); install the workbench as a service (`workbench-service`, `--uninstall` to remove it); also `rollback`, and `check-update` (or `update`), which says whether a newer workbench is out and the command that upgrades this install |
 | `anolis-package` | Build a handoff package from a project |
 | `anolis-validate` | Validate a handoff package |
 
