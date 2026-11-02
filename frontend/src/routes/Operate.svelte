@@ -2413,7 +2413,11 @@
                         <label for="fn-{fbKey}-{ai}">
                           {arg.name}{arg.required !== false ? " *" : ""}
                           {#if arg.min !== undefined && arg.max !== undefined}
-                            <span class="constraint-hint">[{arg.min} to {arg.max}]</span>
+                            <span class="constraint-hint"
+                              >[{arg.min} to {arg.max}{arg.unit ? ` ${arg.unit}` : ""}]</span
+                            >
+                          {:else if arg.unit}
+                            <span class="constraint-hint">[{arg.unit}]</span>
                           {/if}
                         </label>
                         {#if arg.type === "bool"}
