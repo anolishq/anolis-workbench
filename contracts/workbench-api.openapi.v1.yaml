@@ -409,6 +409,57 @@ paths:
         "400":
           description: "The body is not {\"pins\": {kind: version}} with string versions"
 
+  /api/provider-schemas/import:
+    post:
+      summary: Import a provider config schema envelope
+      description: >-
+        The body is a provider's `--config-schema` envelope file, as bytes, so
+        the recorded sha256 is the file's. The checks and refusals are
+        `anolis-workbench provider import`'s, and a running workbench offers
+        the kind at once (#787). Like every request, a cross-origin one is
+        refused with 403.
+      parameters:
+        - name: replace
+          in: query
+          required: false
+          description: "`1` or `true` to replace an import of the same kind and version with other content."
+          schema: { type: string }
+        - name: repo
+          in: query
+          required: false
+          description: The repository a deploy fetches this provider from, as owner/name (#785).
+          schema: { type: string }
+        - name: filename
+          in: query
+          required: false
+          description: The uploaded file's name, recorded as the import's origin.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: "`{kind, version, status, sha256, repo}`; status is imported, replaced, repo updated, unchanged or already packaged"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kind, version, status, sha256]
+                properties:
+                  kind: { type: string }
+                  version: { type: string }
+                  status: { type: string }
+                  sha256: { type: string }
+                  repo: { type: [string, "null"] }
+        "400":
+          description: "`{error}`: an empty or oversized body, or the import's refusal, worded as the CLI's"
+        "403":
+          description: A cross-origin request
+
   # ── Commission track ───────────────────────────────────────────────────────
 
   /api/status:
