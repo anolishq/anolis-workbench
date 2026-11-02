@@ -82,11 +82,12 @@ def test_every_kind_resolves_at_its_pin(tmp_path):
         "pinned_version": "0.1.0",
         "envelope_version": "0.1.0",
         "sha256": sha,
+        "repo": "anolishq/anolis-provider-sim",
     }
     assert "only_in_0_1_0" in body["providers"]["sim"]["schema"]["properties"]
 
     bread = body["resolution"]["bread"]
-    assert bread["source"] == "packaged" and bread["exact"] and bread["sha256"] is None
+    assert bread["source"] == "packaged" and bread["exact"] and bread["sha256"] is None and bread["repo"] is None
 
 
 def test_an_unpinned_or_other_pin_gets_the_packaged_envelope(tmp_path):

@@ -45,6 +45,14 @@ Historical note:
   restart. Saving a project whose pinned kind has no schema now names the
   missing `<kind>@<version>` and says to import it with
   `anolis-workbench provider import`.
+- **An imported kind deploys from its own repository** (#785, part of
+  #286). `provider import --repo <owner>/<name>` records the repository a
+  deploy fetches that provider's release from, defaulting to
+  `anolishq/anolis-provider-<kind>`; `provider list` shows it, and
+  re-importing the same file with another `--repo` updates only the repo.
+  `POST /api/provider-schemas/resolve` returns it as `resolution.<kind>.repo`
+  (null for a packaged envelope), and Compose seeds a new pin's repo from it.
+  The README says what such a release must publish.
 
 ## [0.31.0] - 2026-11-01
 

@@ -286,9 +286,7 @@ def resolve_pins(pins: dict[str, str]) -> dict[str, Any]:
     """
     from anolis_workbench.core import provider_import
 
-    import_sha = {
-        (entry.kind, entry.version): entry.sha256 for entry in provider_import.list_imports() if not entry.error
-    }
+    imports = {(entry.kind, entry.version): entry for entry in provider_import.list_imports() if not entry.error}
     providers: dict[str, dict[str, Any]] = {}
     resolution: dict[str, dict[str, Any]] = {}
     for kind in available_kinds():
@@ -302,8 +300,16 @@ def resolve_pins(pins: dict[str, str]) -> dict[str, Any]:
             "exact": result.exact,
             "pinned_version": result.pinned_version,
             "envelope_version": result.envelope_version,
-            "sha256": import_sha.get((kind, result.envelope_version)) if result.source == "sideloaded" else None,
+            "sha256": None,
+            # Where a deploy fetches this provider from (#785): an import's
+            # recorded repo; None for a packaged kind, whose repo the composer
+            # already knows.
+            "repo": None,
         }
+        if result.source == "sideloaded":
+            entry = imports.get((kind, result.envelope_version))
+            resolution[kind]["sha256"] = entry.sha256 if entry else None
+            resolution[kind]["repo"] = (entry.repo if entry else None) or provider_import.default_repo(kind)
     return {"providers": providers, "resolution": resolution}
 
 

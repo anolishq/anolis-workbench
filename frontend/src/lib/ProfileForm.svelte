@@ -84,8 +84,13 @@
   function setProviderPin(kind: string, version: string): void {
     const c = components();
     c.providers ??= {};
+    // A new pin of an imported kind deploys from the repo its import recorded
+    // (#785); a pin that already names a repo keeps it.
     c.providers[kind] = {
-      repo: c.providers[kind]?.repo ?? `anolishq/anolis-provider-${kind}`,
+      repo:
+        c.providers[kind]?.repo ??
+        providerSchemas?.resolution?.[kind]?.repo ??
+        `anolishq/anolis-provider-${kind}`,
       version: version.trim(),
     };
     onChanged();

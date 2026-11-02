@@ -26,12 +26,13 @@ def _provider(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         try:
-            result = provider_import.import_file(pathlib.Path(args.file), replace=args.replace)
+            result = provider_import.import_file(pathlib.Path(args.file), replace=args.replace, repo=args.repo)
         except provider_import.ImportRefused as exc:
             print(f"error: not imported: {exc}", file=sys.stderr)
             return 1
         where = f" into {result.path}" if result.path else ""
-        print(f"{result.kind} {result.version}: {result.status} (sha256 {result.sha256[:12]}){where}")
+        fetched = f", deploys from {result.repo}" if result.repo else ""
+        print(f"{result.kind} {result.version}: {result.status} (sha256 {result.sha256[:12]}{fetched}){where}")
         return 0
 
     if args.provider_command == "remove":
@@ -65,7 +66,7 @@ def _provider(args: argparse.Namespace) -> int:
             continue
         sha = (entry.sha256 or "?")[:12]
         print(
-            f"{entry.kind} {entry.version}  sha256 {sha}  from {entry.origin or '?'}  "
+            f"{entry.kind} {entry.version}  sha256 {sha}  repo {entry.repo or '?'}  from {entry.origin or '?'}  "
             f"imported {entry.imported_at_utc or '?'}"
         )
     return 0
@@ -113,6 +114,12 @@ def main(argv: list[str] | None = None) -> int | None:
         "--replace",
         action="store_true",
         help="Replace an import of the same kind and version with different content.",
+    )
+    import_cmd.add_argument(
+        "--repo",
+        metavar="OWNER/NAME",
+        help="The GitHub repository a deploy fetches this provider's release from "
+        "(default: the one recorded for this import, else anolishq/anolis-provider-<kind>).",
     )
     provider_commands.add_parser("list", help="List imported provider schemas, and any that fail to load.")
     remove_cmd = provider_commands.add_parser(
