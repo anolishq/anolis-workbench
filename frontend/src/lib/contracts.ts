@@ -501,6 +501,8 @@ export interface FunctionArgSpec extends UnknownRecord {
   required: boolean;
   min?: number | string;
   max?: number | string;
+  /** The value's engineering unit, as the provider declares it (e.g. "pH"). */
+  unit?: string;
   allowed_values?: Array<string | number>;
 }
 

@@ -13,6 +13,19 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **The packaged ezo config schema is anolis-provider-ezo 0.5.0's**, so a
+  project pinning ezo 0.5.0 no longer shows the schema-version note in
+  Compose. The schema changes only the `hardware.timeout_ms` description.
+
+### Fixed
+
+- **A function argument's hint in Operate names its unit**, as the provider
+  declares it: `reference_ph [0 to 14 pH]` on an EZO pH probe's `calibrate`,
+  or the unit alone (`[°C]`) when the argument has no range. The unit was
+  dropped when the capabilities were read.
+
 ## [0.33.0] - 2026-11-01
 
 Upgrade notes:

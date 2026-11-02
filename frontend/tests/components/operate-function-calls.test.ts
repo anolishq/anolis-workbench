@@ -1,11 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { describe, expect, it, vi } from "vitest";
 
-import Operate from '../../src/routes/Operate.svelte';
-import { createProjectDocument, jsonResponse, pathFromInput } from './helpers';
+import Operate from "../../src/routes/Operate.svelte";
+import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
 
-const RUNNING = { running: true, active_project: 'demo' };
-const DEVICES = { devices: [{ provider_id: 'bread0', device_id: 'dcmt0', display_name: 'Motor' }] };
+const RUNNING = { running: true, active_project: "demo" };
+const DEVICES = { devices: [{ provider_id: "bread0", device_id: "dcmt0", display_name: "Motor" }] };
 const CAPS = {
   capabilities: {
     signals: [],
@@ -14,36 +14,36 @@ const CAPS = {
       // READ, so CONFIG (bread's setpoints) is actuating too.
       {
         function_id: 1,
-        name: 'set_open_loop',
-        category: 'ACTUATE',
+        name: "set_open_loop",
+        category: "ACTUATE",
         actuating: true,
-        args: { motor1_pwm: { type: 'int64', required: true } },
+        args: { motor1_pwm: { type: "int64", required: true } },
       },
       {
         function_id: 2,
-        name: 'set_mode',
-        category: 'CONFIG',
+        name: "set_mode",
+        category: "CONFIG",
         actuating: true,
-        args: { mode: { type: 'string', required: true } },
+        args: { mode: { type: "string", required: true } },
       },
       {
         function_id: 3,
-        name: 'set_setpoint',
-        category: 'CONFIG',
+        name: "set_setpoint",
+        category: "CONFIG",
         actuating: true,
-        args: { motor1_target: { type: 'int64', required: true } },
+        args: { motor1_target: { type: "int64", required: true } },
       },
       {
         function_id: 4,
-        name: 'set_trim',
-        args: { trim: { type: 'int64', required: true } },
+        name: "set_trim",
+        args: { trim: { type: "int64", required: true } },
       },
       {
         function_id: 5,
-        name: 'read_counter',
-        category: 'READ',
+        name: "read_counter",
+        category: "READ",
         actuating: false,
-        args: { channel: { type: 'int64', required: true } },
+        args: { channel: { type: "int64", required: true } },
       },
     ],
   },
@@ -51,67 +51,81 @@ const CAPS = {
 
 function statusBody(latched: boolean) {
   return {
-    status: { code: 'OK' },
-    version: '0.1.51',
-    mode: 'MANUAL',
+    status: { code: "OK" },
+    version: "0.1.51",
+    mode: "MANUAL",
     providers: [],
     device_count: 1,
-    estop: { latched, software_safe_state: 'zero', latched_at_epoch_ms: latched ? 1 : null, uncovered_actuating_functions: 0 },
+    estop: {
+      latched,
+      software_safe_state: "zero",
+      latched_at_epoch_ms: latched ? 1 : null,
+      uncovered_actuating_functions: 0,
+    },
   };
 }
 
 /** Operate for a running `demo` with one DCMT; `onCall` answers POST /v0/call. */
 function renderOperate(onCall: () => Response) {
   vi.stubGlobal(
-    'fetch',
+    "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = pathFromInput(input);
-      if (path === '/api/status') return jsonResponse(200, RUNNING);
-      if (path === '/v0/devices') return jsonResponse(200, DEVICES);
-      if (path === '/v0/devices/bread0/dcmt0/capabilities') return jsonResponse(200, CAPS);
-      if (path === '/v0/runtime/status') return jsonResponse(200, statusBody(false));
-      if (path === '/v0/call' && init?.method === 'POST') return onCall();
-      if (path === '/v0/estop' && init?.method === 'POST')
-        return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+      if (path === "/api/status") return jsonResponse(200, RUNNING);
+      if (path === "/v0/devices") return jsonResponse(200, DEVICES);
+      if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, CAPS);
+      if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
+      if (path === "/v0/call" && init?.method === "POST") return onCall();
+      if (path === "/v0/estop" && init?.method === "POST")
+        return jsonResponse(200, { latched: true, software_safe_state: "zero", actions: [] });
       return jsonResponse(200, {});
     }),
   );
-  render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+  render(Operate, {
+    props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+  });
 }
 
-const executeButtons = () => screen.getAllByRole('button', { name: 'Execute' });
+const executeButtons = () => screen.getAllByRole("button", { name: "Execute" });
 
-describe('Operate.svelte — function calls (#580)', () => {
+describe("Operate.svelte — function calls (#580)", () => {
   it("shows the runtime's message when a call fails", async () => {
     renderOperate(() =>
-      jsonResponse(409, { status: { code: 'FAILED_PRECONDITION', message: 'Device bread0/dcmt0 not found' } }),
+      jsonResponse(409, {
+        status: { code: "FAILED_PRECONDITION", message: "Device bread0/dcmt0 not found" },
+      }),
     );
-    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: '60' } });
+    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: "60" } });
     await fireEvent.click(executeButtons()[0]);
 
-    expect(await screen.findByText('Error: Device bread0/dcmt0 not found')).toBeInTheDocument();
+    expect(await screen.findByText("Error: Device bread0/dcmt0 not found")).toBeInTheDocument();
     expect(screen.queryByText(/HTTP 409/)).not.toBeInTheDocument();
   });
 
-  it('for a call the latch refuses, points at Clear latch, not the runtime endpoint (#692)', async () => {
+  it("for a call the latch refuses, points at Clear latch, not the runtime endpoint (#692)", async () => {
     renderOperate(() =>
       jsonResponse(409, {
-        status: { code: 'FAILED_PRECONDITION', message: 'Actuation latched by e-stop (POST /v0/estop/clear to release)' },
+        status: {
+          code: "FAILED_PRECONDITION",
+          message: "Actuation latched by e-stop (POST /v0/estop/clear to release)",
+        },
       }),
     );
-    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: '60' } });
+    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: "60" } });
     await fireEvent.click(executeButtons()[0]);
 
     expect(
-      await screen.findByText('Refused: the software stop latch holds actuation. Clear it with Clear latch… above.'),
+      await screen.findByText(
+        "Refused: the software stop latch holds actuation. Clear it with Clear latch… above.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/estop\/clear/)).not.toBeInTheDocument();
   });
 
-  it('keeps a successful call\'s result next to its form', async () => {
+  it("keeps a successful call's result next to its form", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    renderOperate(() => jsonResponse(200, { status: { code: 'OK' } }));
-    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: '60' } });
+    renderOperate(() => jsonResponse(200, { status: { code: "OK" } }));
+    await fireEvent.input(await screen.findByLabelText(/motor1_pwm/), { target: { value: "60" } });
     await fireEvent.click(executeButtons()[0]);
 
     expect(await screen.findByText(/^Accepted at /)).toBeInTheDocument();
@@ -119,27 +133,27 @@ describe('Operate.svelte — function calls (#580)', () => {
     expect(screen.getByText(/^Accepted at /)).toBeInTheDocument();
   });
 
-  it('on a software stop, clears every form but a READ one, setpoints included', async () => {
-    renderOperate(() => jsonResponse(200, { status: { code: 'OK' } }));
+  it("on a software stop, clears every form but a READ one, setpoints included", async () => {
+    renderOperate(() => jsonResponse(200, { status: { code: "OK" } }));
     const field = (name: RegExp) => screen.getByLabelText(name) as HTMLInputElement;
     await screen.findByLabelText(/motor1_pwm/);
-    await fireEvent.input(field(/motor1_pwm/), { target: { value: '60' } });
-    await fireEvent.input(field(/^mode/), { target: { value: 'open_loop' } });
-    await fireEvent.input(field(/motor1_target/), { target: { value: '400' } });
-    await fireEvent.input(field(/trim/), { target: { value: '5' } });
-    await fireEvent.input(field(/channel/), { target: { value: '2' } });
+    await fireEvent.input(field(/motor1_pwm/), { target: { value: "60" } });
+    await fireEvent.input(field(/^mode/), { target: { value: "open_loop" } });
+    await fireEvent.input(field(/motor1_target/), { target: { value: "400" } });
+    await fireEvent.input(field(/trim/), { target: { value: "5" } });
+    await fireEvent.input(field(/channel/), { target: { value: "2" } });
 
-    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+    await fireEvent.click(screen.getByRole("button", { name: "SOFTWARE STOP" }));
 
-    await waitFor(() => expect(field(/motor1_pwm/).value).toBe(''));
-    expect(field(/motor1_target/).value).toBe('');
-    expect(field(/^mode/).value).toBe('');
-    expect(field(/trim/).value).toBe('');
-    expect(field(/channel/).value).toBe('2');
+    await waitFor(() => expect(field(/motor1_pwm/).value).toBe(""));
+    expect(field(/motor1_target/).value).toBe("");
+    expect(field(/^mode/).value).toBe("");
+    expect(field(/trim/).value).toBe("");
+    expect(field(/channel/).value).toBe("2");
   });
 });
 
-describe('Operate.svelte — a string arg with allowed_values (#576)', () => {
+describe("Operate.svelte — a string arg with allowed_values (#576)", () => {
   // As the runtime emits them from anolis#467 on.
   const ENUM_CAPS = {
     capabilities: {
@@ -147,10 +161,12 @@ describe('Operate.svelte — a string arg with allowed_values (#576)', () => {
       functions: [
         {
           function_id: 3,
-          name: 'set_mode',
-          category: 'CONFIG',
+          name: "set_mode",
+          category: "CONFIG",
           actuating: true,
-          args: { mode: { type: 'string', required: true, allowed_values: ['open_loop', 'closed_speed'] } },
+          args: {
+            mode: { type: "string", required: true, allowed_values: ["open_loop", "closed_speed"] },
+          },
         },
       ],
     },
@@ -164,61 +180,70 @@ describe('Operate.svelte — a string arg with allowed_values (#576)', () => {
     const calls: unknown[] = [];
     const rt = { running: true, caps: ENUM_CAPS as unknown };
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = pathFromInput(input);
-        if (path === '/api/status')
+        if (path === "/api/status")
           return jsonResponse(200, rt.running ? RUNNING : { running: false, active_project: null });
-        if (path === '/v0/devices') return jsonResponse(200, DEVICES);
-        if (path === '/v0/devices/bread0/dcmt0/capabilities') return jsonResponse(200, rt.caps);
-        if (path === '/v0/runtime/status') return jsonResponse(200, statusBody(false));
-        if (path === '/v0/call' && init?.method === 'POST') {
+        if (path === "/v0/devices") return jsonResponse(200, DEVICES);
+        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, rt.caps);
+        if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
+        if (path === "/v0/call" && init?.method === "POST") {
           calls.push(JSON.parse(String(init.body)));
-          return jsonResponse(200, { status: { code: 'OK' } });
+          return jsonResponse(200, { status: { code: "OK" } });
         }
-        if (path === '/v0/estop' && init?.method === 'POST')
-          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        if (path === "/v0/estop" && init?.method === "POST")
+          return jsonResponse(200, { latched: true, software_safe_state: "zero", actions: [] });
         return jsonResponse(200, {});
       }),
     );
-    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+    render(Operate, {
+      props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+    });
     return { calls, rt };
   }
 
-  it('renders a select of the allowed values and sends the one chosen', async () => {
+  it("renders a select of the allowed values and sends the one chosen", async () => {
     const { calls } = renderWithEnum();
     const mode = (await screen.findByLabelText(/^mode/)) as HTMLSelectElement;
 
-    expect(mode.tagName).toBe('SELECT');
-    expect(Array.from(mode.options, (o) => o.value)).toEqual(['', 'open_loop', 'closed_speed']);
-    await fireEvent.change(mode, { target: { value: 'closed_speed' } });
+    expect(mode.tagName).toBe("SELECT");
+    expect(Array.from(mode.options, (o) => o.value)).toEqual(["", "open_loop", "closed_speed"]);
+    await fireEvent.change(mode, { target: { value: "closed_speed" } });
     await fireEvent.click(executeButtons()[0]);
 
     expect(await screen.findByText(/^Accepted at /)).toBeInTheDocument();
     expect(calls).toEqual([
-      { provider_id: 'bread0', device_id: 'dcmt0', function_id: 3, args: { mode: { type: 'string', string: 'closed_speed' } } },
+      {
+        provider_id: "bread0",
+        device_id: "dcmt0",
+        function_id: 3,
+        args: { mode: { type: "string", string: "closed_speed" } },
+      },
     ]);
   });
 
-  it('sends nothing while a required select is left unchosen', async () => {
+  it("sends nothing while a required select is left unchosen", async () => {
     const { calls } = renderWithEnum();
     await screen.findByLabelText(/^mode/);
     await fireEvent.click(executeButtons()[0]);
 
-    expect(await screen.findByText('Error: Missing required argument: mode')).toBeInTheDocument();
+    expect(await screen.findByText("Error: Missing required argument: mode")).toBeInTheDocument();
     expect(calls).toEqual([]);
   });
 
-  it('refuses a choice the restarted runtime no longer allows, before the POST', async () => {
+  it("refuses a choice the restarted runtime no longer allows, before the POST", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { calls, rt } = renderWithEnum();
-    await fireEvent.change(await screen.findByLabelText(/^mode/), { target: { value: 'closed_speed' } });
+    await fireEvent.change(await screen.findByLabelText(/^mode/), {
+      target: { value: "closed_speed" },
+    });
 
     rt.running = false;
     await vi.advanceTimersByTimeAsync(5000);
     await waitFor(() => expect(screen.queryByLabelText(/^mode/)).not.toBeInTheDocument());
     const narrowed = structuredClone(ENUM_CAPS);
-    narrowed.capabilities.functions[0].args.mode.allowed_values = ['open_loop'];
+    narrowed.capabilities.functions[0].args.mode.allowed_values = ["open_loop"];
     rt.caps = narrowed;
     rt.running = true;
     await vi.advanceTimersByTimeAsync(5000);
@@ -231,19 +256,80 @@ describe('Operate.svelte — a string arg with allowed_values (#576)', () => {
     expect(calls).toEqual([]);
   });
 
-  it('clears the select on a software stop', async () => {
+  it("clears the select on a software stop", async () => {
     renderWithEnum();
     const mode = (await screen.findByLabelText(/^mode/)) as HTMLSelectElement;
-    await fireEvent.change(mode, { target: { value: 'open_loop' } });
+    await fireEvent.change(mode, { target: { value: "open_loop" } });
 
-    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+    await fireEvent.click(screen.getByRole("button", { name: "SOFTWARE STOP" }));
 
-    await waitFor(() => expect(mode.value).toBe(''));
+    await waitFor(() => expect(mode.value).toBe(""));
   });
 
-  it('keeps a text box for a string arg with no allowed_values', async () => {
-    renderOperate(() => jsonResponse(200, { status: { code: 'OK' } }));
+  it("keeps a text box for a string arg with no allowed_values", async () => {
+    renderOperate(() => jsonResponse(200, { status: { code: "OK" } }));
 
-    expect((await screen.findByLabelText(/^mode/)).tagName).toBe('INPUT');
+    expect((await screen.findByLabelText(/^mode/)).tagName).toBe("INPUT");
+  });
+});
+
+describe("Operate.svelte — an arg's range hint names its unit", () => {
+  // ph0's calibrate as anolis 0.10.2 reports it for anolis-provider-ezo 0.5.0.
+  const UNIT_CAPS = {
+    capabilities: {
+      signals: [],
+      functions: [
+        {
+          function_id: 4,
+          name: "calibrate",
+          category: "CONFIG",
+          actuating: true,
+          args: {
+            point: { type: "string", required: true, allowed_values: ["mid", "low", "high"] },
+            reference_ph: { type: "double", required: true, min: 0.0, max: 14.0, unit: "pH" },
+          },
+        },
+        {
+          function_id: 6,
+          name: "set_temperature",
+          category: "CONFIG",
+          actuating: true,
+          args: { celsius: { type: "double", required: true, unit: "°C" } },
+        },
+      ],
+    },
+  };
+
+  function renderWithUnits() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === "/api/status") return jsonResponse(200, RUNNING);
+        if (path === "/v0/devices") return jsonResponse(200, DEVICES);
+        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, UNIT_CAPS);
+        if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+    });
+  }
+
+  it("shows the range with its unit", async () => {
+    renderWithUnits();
+    const label = (await screen.findByLabelText(/^reference_ph/))
+      .closest(".arg-row")
+      ?.querySelector("label");
+    expect(label).toHaveTextContent("reference_ph * [0 to 14 pH]");
+  });
+
+  it("shows the unit alone when the arg has no range", async () => {
+    renderWithUnits();
+    const label = (await screen.findByLabelText(/^celsius/))
+      .closest(".arg-row")
+      ?.querySelector("label");
+    expect(label).toHaveTextContent("celsius * [°C]");
   });
 });

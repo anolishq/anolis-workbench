@@ -226,6 +226,7 @@ export function normalizeArgSpec(arg: UnknownRecord, fallback = ""): FunctionArg
     required: arg.required !== false,
     min: arg.min as number | string | undefined,
     max: arg.max as number | string | undefined,
+    unit: typeof arg.unit === "string" && arg.unit.trim() ? arg.unit.trim() : undefined,
     allowed_values: arg.allowed_values as Array<string | number> | undefined,
   };
 }
