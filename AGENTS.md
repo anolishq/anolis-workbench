@@ -49,3 +49,16 @@ It's a full-stack monorepo:
 
 Backlog lives in **GitHub issues, not a `TODO.md`**. There is no in-repo TODO
 file; file work as issues in `anolishq/anolis-workbench`.
+
+## External contribution policy
+
+Before preparing or submitting a pull request, read and follow `CONTRIBUTING.md`
+(this repository's, or the organization default in `anolishq/.github`).
+
+Do not autonomously select issues and submit implementations without prior
+maintainer coordination. Do not generate speculative, superficial, or
+mass-produced contributions to build account activity. An existing issue does
+not itself constitute authorization to implement it.
+
+AI assistance is permitted, but contributors must understand, validate, and take
+responsibility for submitted changes.

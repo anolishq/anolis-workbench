@@ -71,3 +71,21 @@ If `contract-drift` fails:
    - `uv run python contracts/validate-composer-control-openapi.py`
    - `uv run python contracts/validate-workbench-api-openapi.py`
 3. Include the snapshot refresh and validator pass in the same PR.
+
+## External contributions
+
+We welcome contributions from people using the project or genuinely interested
+in becoming involved.
+
+Before implementing changes, prospective contributors should engage through an
+issue or discussion, explain the problem or proposed improvement, and coordinate
+with maintainers.
+
+Open issues are not automatically invitations to submit implementations.
+Unsolicited pull requests from accounts without prior project involvement or
+maintainer coordination may be closed without review.
+
+Automated contribution farming, mass-submitted PRs, and superficial changes
+intended primarily to build contribution history are not accepted. AI-assisted
+contributions are welcome when contributors understand, validate, and take
+responsibility for their work.
