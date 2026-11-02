@@ -348,6 +348,39 @@ def list_projects() -> list:
     return result
 
 
+def projects_pinning(kind: str, version: str) -> tuple[list[str], list[str]]:
+    """Projects whose profile pins `kind` at `version` and that use that kind,
+    and projects that can't be read to tell (#786).
+
+    Read only: unlike list_projects, it never migrates a legacy system.json
+    project, which therefore counts as can't-tell.
+    """
+    pinning: list[str] = []
+    unreadable: list[str] = []
+    if not SYSTEMS_ROOT.exists():
+        return pinning, unreadable
+    for pdir in sorted(SYSTEMS_ROOT.iterdir()):
+        if not pdir.is_dir():
+            continue
+        fmt = _dir_format(pdir, migrate=False)
+        if fmt is None:
+            continue
+        name = pdir.name
+        if fmt != FORMAT_MACHINE_PROFILE:
+            unreadable.append(name)
+            continue
+        try:
+            document = canonical.read_project(project_dir(name))
+        except (machine_profile.ProfileError, canonical.CanonicalError):
+            unreadable.append(name)
+            continue
+        if provider_schemas.pinned_version(document.get("profile"), kind) != version:
+            continue
+        if any(isinstance(p, dict) and p.get("kind") == kind for p in document["providers"].values()):
+            pinning.append(name)
+    return pinning, unreadable
+
+
 def _degraded_project(name: str) -> dict:
     """A project whose canonical files could not be fully parsed.
 
@@ -778,12 +811,22 @@ def _validate_canonical_provider_configs(document: dict) -> list[dict[str, str]]
         resolution = provider_schemas.resolve_for_profile(profile, kind) if isinstance(kind, str) else None
         if resolution is None:
             known = ", ".join(provider_schemas.available_kinds())
+            pinned = provider_schemas.pinned_version(profile, kind) if isinstance(kind, str) else None
+            if pinned is None:
+                message = f"Unknown provider kind '{kind}' — no vendored config schema (known kinds: {known})."
+            else:
+                # Most likely an import that was removed (#786).
+                message = (
+                    f"Unknown provider kind '{kind}' — the machine profile pins {kind}@{pinned}, and no "
+                    f"packaged or imported config schema covers it. Import its --config-schema envelope with "
+                    f"`anolis-workbench provider import <file>` (known kinds: {known})."
+                )
             errors.append(
                 {
                     "source": "provider-schema",
                     "code": "provider.unknown_kind",
                     "path": f"{base}.kind",
-                    "message": f"Unknown provider kind '{kind}' — no vendored config schema (known kinds: {known}).",
+                    "message": message,
                 }
             )
             continue

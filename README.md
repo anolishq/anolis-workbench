@@ -164,6 +164,11 @@ projects directory: `~/.anolis/schemas/providers/` by default, or next to
 user the workbench runs as. `provider list` also names any import that fails to
 load, which the workbench skips.
 
+`anolis-workbench provider remove foo@0.1.0` removes an import. It refuses
+while a project pins that kind at that version and uses it, naming the
+projects, unless you pass `--force`; saving such a project then fails until
+the schema is imported again. A packaged version can't be removed.
+
 `anolis-provision install --variant <key>` (and `remote --variant <key>`)
 installs that runtime variant, a key of the project's `runtime_profiles`, as
 Deploy does; without it,

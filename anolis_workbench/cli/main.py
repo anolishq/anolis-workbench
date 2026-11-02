@@ -13,7 +13,7 @@ from anolis_workbench.server.app import main as run_server
 
 
 def _provider(args: argparse.Namespace) -> int:
-    """`anolis-workbench provider …` (#286, #783)."""
+    """`anolis-workbench provider …` (#286, #783, #786)."""
     from anolis_workbench.core import provider_import
 
     if args.provider_command == "import":
@@ -32,6 +32,27 @@ def _provider(args: argparse.Namespace) -> int:
             return 1
         where = f" into {result.path}" if result.path else ""
         print(f"{result.kind} {result.version}: {result.status} (sha256 {result.sha256[:12]}){where}")
+        return 0
+
+    if args.provider_command == "remove":
+        try:
+            removed = provider_import.remove_import(args.spec, force=args.force)
+        except provider_import.RemoveRefused as exc:
+            print(f"error: not removed: {exc}", file=sys.stderr)
+            return 1
+        spec = f"{removed.kind}@{removed.version}"
+        if removed.pinned_by:
+            print(
+                f"warning: removed although project(s) {', '.join(removed.pinned_by)} pin {spec}; "
+                "saving them fails until it is imported again.",
+                file=sys.stderr,
+            )
+        if removed.unreadable:
+            print(
+                f"warning: project(s) {', '.join(removed.unreadable)} can't be read, and may pin {spec}.",
+                file=sys.stderr,
+            )
+        print(f"{spec}: removed {removed.path}")
         return 0
 
     entries = provider_import.list_imports()
@@ -81,7 +102,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # this entry point with only the flags above.
     commands = parser.add_subparsers(dest="command", metavar="{provider}")
     provider = commands.add_parser(
-        "provider", help="Import or list provider config schemas the workbench doesn't package."
+        "provider", help="Import, list or remove provider config schemas the workbench doesn't package."
     )
     provider_commands = provider.add_subparsers(dest="provider_command", required=True)
     import_cmd = provider_commands.add_parser(
@@ -94,6 +115,15 @@ def main(argv: list[str] | None = None) -> int | None:
         help="Replace an import of the same kind and version with different content.",
     )
     provider_commands.add_parser("list", help="List imported provider schemas, and any that fail to load.")
+    remove_cmd = provider_commands.add_parser(
+        "remove", help="Remove an imported provider schema, refusing while a project pins it."
+    )
+    remove_cmd.add_argument("spec", metavar="kind@version", help="The import to remove, such as foo@1.2.3.")
+    remove_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="Remove it even while a project pins that kind at that version.",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "provider":

@@ -59,6 +59,21 @@ class ImportRefused(ValueError):
     """The file is not an envelope the workbench will import."""
 
 
+class RemoveRefused(ValueError):
+    """The argument names nothing `remove_import` may remove, or a project pins it."""
+
+
+@dataclass(frozen=True)
+class RemoveResult:
+    kind: str
+    version: str
+    path: pathlib.Path
+    # Projects that pin and use it, or can't be read to tell: removed anyway
+    # with force.
+    pinned_by: list[str]
+    unreadable: list[str]
+
+
 @dataclass(frozen=True)
 class ImportResult:
     kind: str
@@ -125,6 +140,24 @@ def _ref_paths(node: Any, path: str = "$") -> list[str]:
     return found
 
 
+def _kind_problem(kind: str) -> str | None:
+    """Why `kind` can't name an import (it becomes part of a file name), or None."""
+    if len(kind) > MAX_KIND_CHARS:
+        return f"the kind is too long (more than {MAX_KIND_CHARS} characters)"
+    if not KIND_PATTERN.fullmatch(kind):
+        return f"the kind {kind!r} must be lowercase letters, digits and hyphens"
+    return None
+
+
+def _version_problem(version: str) -> str | None:
+    """Why `version` can't name an import (it becomes part of a file name), or None."""
+    if len(version) > MAX_VERSION_CHARS:
+        return f"provider_version is too long (more than {MAX_VERSION_CHARS} characters)"
+    if not SEMVER_PATTERN.fullmatch(version):
+        return f"provider_version {version!r} is not a semver version such as 1.2.3"
+    return None
+
+
 def check_envelope(raw: bytes) -> tuple[str, str, dict[str, Any]]:
     """The (kind, version, envelope) a file declares, or ImportRefused."""
     if len(raw) > MAX_ENVELOPE_BYTES:
@@ -155,18 +188,16 @@ def check_envelope(raw: bytes) -> tuple[str, str, dict[str, Any]]:
     if not isinstance(provider, str) or not provider.startswith(PROVIDER_PREFIX):
         raise ImportRefused(f"'provider' must name the binary, {PROVIDER_PREFIX}<kind>")
     kind = provider[len(PROVIDER_PREFIX) :]
-    if len(kind) > MAX_KIND_CHARS:
-        raise ImportRefused(f"the kind is too long (more than {MAX_KIND_CHARS} characters)")
-    if not KIND_PATTERN.fullmatch(kind):
-        raise ImportRefused(f"the kind {kind!r} must be lowercase letters, digits and hyphens")
+    problem = _kind_problem(kind)
+    if problem:
+        raise ImportRefused(problem)
 
     version = doc.get("provider_version")
     if not isinstance(version, str):
         raise ImportRefused("the envelope must carry the provider_version it came from")
-    if len(version) > MAX_VERSION_CHARS:
-        raise ImportRefused(f"provider_version is too long (more than {MAX_VERSION_CHARS} characters)")
-    if not SEMVER_PATTERN.fullmatch(version):
-        raise ImportRefused(f"provider_version {version!r} is not a semver version such as 1.2.3")
+    problem = _version_problem(version)
+    if problem:
+        raise ImportRefused(problem)
 
     refs = _ref_paths(doc)
     if refs:
@@ -340,3 +371,70 @@ def list_imports() -> list[ImportEntry]:
             )
         )
     return entries
+
+
+def _inside(directory: pathlib.Path, name: str) -> pathlib.Path:
+    """`directory / name`, refusing a name that leads anywhere but directly inside it.
+
+    Only the parent is resolved: unlinking a symlink removes the link, never
+    what it points at, and a separator or `..` in the name changes the parent.
+    """
+    path = directory / name
+    if path.name != name or path.parent.resolve() != directory.resolve():
+        raise RemoveRefused(f"refusing to remove {path}: it is outside {directory}")
+    return path
+
+
+def remove_import(spec: str, *, force: bool = False) -> RemoveResult:
+    """Remove the import `spec` (`<kind>@<version>`) names: its envelope, then its sidecar.
+
+    Refuses, removing nothing, while a project pins that kind at that version
+    and uses it, or can't be read to tell, unless `force` (#786).
+    """
+    from anolis_workbench.core import projects, provider_schemas
+
+    kind, sep, version = spec.partition("@")
+    if not sep:
+        raise RemoveRefused(f"name the import as <kind>@<version>, such as foo@1.2.3, not {spec!r}")
+    problem = _kind_problem(kind) or _version_problem(version)
+    if problem:
+        raise RemoveRefused(problem)
+
+    directory = paths_module.IMPORTED_PROVIDER_SCHEMAS_DIR
+    envelope = _inside(directory, stored_name(kind, version))
+    sidecar = _inside(directory, f"{kind}@{version}{SIDECAR_SUFFIX}")
+    packaged = provider_schemas.packaged_envelope(kind)
+    is_packaged = packaged is not None and packaged.get("provider_version") == version
+    if not os.path.lexists(envelope):
+        if is_packaged:
+            raise RemoveRefused(f"{kind}@{version} is packaged with the workbench, not imported; it can't be removed")
+        raise RemoveRefused(f"{kind}@{version} is not imported (see `anolis-workbench provider list`)")
+
+    pinned_by: list[str] = []
+    unreadable: list[str] = []
+    # An import of a packaged version is superseded and unused: a project
+    # pinning that version validates against the packaged envelope.
+    if not is_packaged:
+        pinned_by, unreadable = projects.projects_pinning(kind, version)
+    if (pinned_by or unreadable) and not force:
+        reasons = []
+        if pinned_by:
+            reasons.append(f"is pinned and used by project(s) {', '.join(pinned_by)}")
+        if unreadable:
+            reasons.append(f"may be pinned by project(s) {', '.join(unreadable)}, which can't be read")
+        raise RemoveRefused(
+            f"{kind}@{version} {'; it '.join(reasons)}. Saving such a project fails while the import is gone; "
+            "pass --force to remove it anyway"
+        )
+
+    # The envelope first: it alone makes an import exist (resolve and
+    # list_imports enumerate envelopes), so once it is gone no reader sees the
+    # import. An interruption before the sidecar goes leaves an orphan nothing
+    # reads, which a later import of this version rewrites. The other order
+    # would leave a live import whose origin had vanished.
+    try:
+        envelope.unlink()
+        sidecar.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RemoveRefused(f"cannot remove {exc.filename or envelope}: {exc.strerror or exc}") from exc
+    return RemoveResult(kind, version, envelope, pinned_by, unreadable)
