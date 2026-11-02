@@ -78,6 +78,20 @@ export interface ProviderSchemaEnvelope extends UnknownRecord {
 export interface ProviderSchemasResponse extends UnknownRecord {
   schema_version: number;
   providers: Record<string, ProviderSchemaEnvelope>;
+  /** What the server resolved each kind to at its pin (#784); absent from the unpinned route. */
+  resolution?: Record<string, ProviderResolution>;
+}
+
+/** How the server resolved one provider kind at the machine's pin (#784). */
+export interface ProviderResolution {
+  /** "packaged", or "sideloaded" for an envelope imported on this host (#783). */
+  source: string;
+  /** The envelope is the pinned version's own contract. */
+  exact: boolean;
+  pinned_version: string | null;
+  envelope_version: string | null;
+  /** An imported envelope's sha256; null for a packaged one. */
+  sha256: string | null;
 }
 
 /**

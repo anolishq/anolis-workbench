@@ -246,6 +246,24 @@ def serve_provider_schemas(handler) -> None:
     handler._json(200, {"schema_version": 1, "providers": provider_schemas.all_envelopes()})
 
 
+def resolve_provider_schemas(handler) -> None:
+    """The envelope each pinned provider version resolves to (#784).
+
+    Body: {"pins": {kind: version}}. The reply has every available kind, as
+    /api/provider-schemas does, resolved at its pin, plus what resolution
+    decided (source, exact, the versions, an import's sha256). The composer
+    asks again whenever a pin changes, so its forms match what a save checks.
+    """
+    body = handler._body_json()
+    if body is None:
+        return
+    pins = body.get("pins") if isinstance(body, dict) else None
+    if not isinstance(pins, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in pins.items()):
+        handler._json(400, {"error": 'Body must be {"pins": {kind: version}} with string versions'})
+        return
+    handler._json(200, {"schema_version": 1, **provider_schemas.resolve_pins(pins)})
+
+
 def serve_templates(handler) -> None:
     """Bundled canonical project templates (#255)."""
     tpl_root = paths_module.TEMPLATES_ROOT

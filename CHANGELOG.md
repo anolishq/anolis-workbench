@@ -30,6 +30,13 @@ Historical note:
   imported version supersedes the import. A running workbench sees an import
   without a restart, and skips (and `provider list` names) an import that
   fails to load instead of failing.
+- **Compose's provider forms follow the pinned version** (#784, part of
+  #286). Compose asks the new `POST /api/provider-schemas/resolve` for the
+  envelope each pin resolves to whenever a pin changes, so forms and their
+  checks match what a save validates against, imports included, without a
+  save in between. An imported envelope is labelled "imported, unverified"
+  with its sha256, and the skew note is the server's verdict rather than a
+  comparison in the browser.
 
 ## [0.31.0] - 2026-11-01
 

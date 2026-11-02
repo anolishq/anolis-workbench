@@ -192,6 +192,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._trigger_update()
         elif path == "/api/rollback":
             self._trigger_rollback()
+        elif path == "/api/provider-schemas/resolve":
+            compose.resolve_provider_schemas(self)
         elif path == "/api/projects":
             compose.create_project(self)
         elif path == "/api/projects/import":

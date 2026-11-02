@@ -25,6 +25,14 @@ class FakeEventSource {
 
 beforeEach(() => {
   vi.stubGlobal('EventSource', FakeEventSource as unknown as typeof EventSource);
+  // No test reaches the network: a component that fetches gets this unless
+  // the test stubs fetch itself (Compose resolves pins on mount, #784).
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`fetch is not stubbed in this test: ${String(input)}`);
+    }),
+  );
 });
 
 afterEach(() => {
