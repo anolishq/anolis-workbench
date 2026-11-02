@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-01
+
 ### Added
 
 - **`anolis-workbench provider import` and `provider list`** (#783, part of
