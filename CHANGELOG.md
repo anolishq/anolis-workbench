@@ -13,6 +13,16 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-01
+
+Upgrade notes:
+
+- **The workbench no longer upgrades itself.** The Home view and
+  `anolis-provision check-update` show the command that upgrades this
+  install; run it, then restart the workbench. `anolis-provision update`
+  does the same as `check-update`, and its `--install-prefix` and
+  `--dry-run` flags are gone. `POST /api/update` answers 410.
+
 ### Fixed
 
 - **Self-update says how to upgrade instead of failing** (#535). It
