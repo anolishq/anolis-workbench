@@ -164,6 +164,17 @@ projects directory: `~/.anolis/schemas/providers/` by default, or next to
 user the workbench runs as. `provider list` also names any import that fails to
 load, which the workbench skips.
 
+A deploy fetches a provider's release from the repository its pin names
+(`components.providers.<kind>.repo`). An import records one: `--repo
+<owner>/<name>`, else `anolishq/anolis-provider-<kind>`, and a new pin of that
+kind in Compose starts with it. Re-importing the same file with another
+`--repo` changes only the recorded repo; a pin that already names a repo keeps
+it. For the deploy to find the provider, that repository's release must be
+tagged `v<version>` and publish `anolis-provider-<kind>-<version>-linux-<arch>.tar.gz`
+(`<arch>` is `arm64` or `x86_64`) containing `bin/anolis-provider-<kind>`, and
+a `SHA256SUMS` that lists the tarball: `install.sh` refuses a provider it
+can't verify.
+
 `anolis-workbench provider remove foo@0.1.0` removes an import. It refuses
 while a project pins that kind at that version and uses it, naming the
 projects, unless you pass `--force`; saving such a project then fails until

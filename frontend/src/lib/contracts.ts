@@ -92,6 +92,8 @@ export interface ProviderResolution {
   envelope_version: string | null;
   /** An imported envelope's sha256; null for a packaged one. */
   sha256: string | null;
+  /** Where a deploy fetches an imported kind from, as recorded at import (#785); null for a packaged one. */
+  repo?: string | null;
 }
 
 /**

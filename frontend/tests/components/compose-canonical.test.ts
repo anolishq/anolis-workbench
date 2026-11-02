@@ -366,6 +366,51 @@ describe("stale component pins", () => {
   });
 });
 
+describe("a pin of an imported kind deploys from its recorded repo (#785)", () => {
+  function importedResolution(repo: string): ProviderSchemasResponse["resolution"] {
+    return {
+      ...packagedResolution({}),
+      sim: {
+        source: "sideloaded",
+        exact: true,
+        pinned_version: null,
+        envelope_version: "0.1.0",
+        sha256: "ab".repeat(32),
+        repo,
+      },
+    };
+  }
+
+  function pinSim(doc: ReturnType<typeof reactive<ReturnType<typeof createProjectDocument>>>, repo: string) {
+    render(ProfileForm, {
+      props: { doc, providerSchemas: schemasResponseForPins(importedResolution(repo)), onChanged: vi.fn() },
+    });
+    const input = document.querySelector("#pin-sim") as HTMLInputElement;
+    return fireEvent.input(input, { target: { value: "0.1.0" } });
+  }
+
+  it("seeds a new pin's repo from the import", async () => {
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", {});
+    delete doc.profile.components!.providers!.sim;
+    const reactiveDoc = reactive(doc);
+    await pinSim(reactiveDoc, "example/anolis-provider-sim");
+    expect(reactiveDoc.profile.components?.providers?.sim).toEqual({
+      repo: "example/anolis-provider-sim",
+      version: "0.1.0",
+    });
+  });
+
+  it("keeps a repo the pin already names", async () => {
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "sim0", "sim", {});
+    doc.profile.components!.providers!.sim = { repo: "myorg/anolis-provider-sim", version: "0.0.9" };
+    const reactiveDoc = reactive(doc);
+    await pinSim(reactiveDoc, "example/anolis-provider-sim");
+    expect(reactiveDoc.profile.components?.providers?.sim?.repo).toBe("myorg/anolis-provider-sim");
+  });
+});
+
 describe("provider schema version skew (#283)", () => {
   /**
    * Read the version off the envelope rather than hardcoding it: a routine

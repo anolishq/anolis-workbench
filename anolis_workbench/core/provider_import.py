@@ -51,6 +51,10 @@ SEMVER_PATTERN = re.compile(
     r"(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?"
     r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?"
 )
+# The GitHub repository install.sh fetches a provider's release from
+# (components.providers.<kind>.repo, #785): owner/name, as GitHub spells them.
+# It goes into a download URL, so nothing else gets through.
+REPO_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}")
 # jsonschema resolves these, remotely or from file:// (#286's review).
 _REF_KEYS = ("$ref", "$dynamicRef", "$recursiveRef")
 
@@ -78,10 +82,13 @@ class RemoveResult:
 class ImportResult:
     kind: str
     version: str
-    # "imported", "replaced", "unchanged" or "already packaged"
+    # "imported", "replaced", "repo updated", "unchanged" or "already packaged"
     status: str
     sha256: str
     path: pathlib.Path | None
+    # The repository a deploy fetches this provider from (#785); None for a
+    # packaged envelope, whose repo the composer already knows.
+    repo: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +100,7 @@ class ImportEntry:
     origin: str | None
     imported_at_utc: str | None
     error: str | None
+    repo: str | None = None
 
 
 def semver_key(version: str) -> tuple[Any, ...]:
@@ -231,8 +239,33 @@ def _canonical(doc: Any) -> str:
     return json.dumps(doc, sort_keys=True, separators=(",", ":"))
 
 
-def import_file(source: pathlib.Path, *, replace: bool = False) -> ImportResult:
-    """Import one envelope file. Raises ImportRefused, writing nothing."""
+def default_repo(kind: str) -> str:
+    """Where a provider of `kind` is fetched from when its import names nowhere."""
+    return f"anolishq/{PROVIDER_PREFIX}{kind}"
+
+
+def _check_repo(repo: str) -> str:
+    if not REPO_PATTERN.fullmatch(repo) or repo.partition("/")[2] in (".", ".."):
+        raise ImportRefused(f"the repo {repo!r} must be owner/name, as GitHub spells a repository")
+    return repo
+
+
+def _recorded_repo(directory: pathlib.Path, kind: str, version: str) -> str | None:
+    try:
+        sidecar = json.loads((directory / f"{kind}@{version}{SIDECAR_SUFFIX}").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    repo = sidecar.get("repo") if isinstance(sidecar, dict) else None
+    return repo if isinstance(repo, str) else None
+
+
+def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None = None) -> ImportResult:
+    """Import one envelope file. Raises ImportRefused, writing nothing.
+
+    `repo` is where a deploy fetches this provider's release from. Without
+    one, the repo already recorded for this kind and version is kept, else
+    anolishq's name for the kind.
+    """
     from anolis_workbench.core import provider_schemas
 
     source = pathlib.Path(source)
@@ -242,6 +275,8 @@ def import_file(source: pathlib.Path, *, replace: bool = False) -> ImportResult:
         raise ImportRefused(f"cannot read {source}: {exc.strerror or exc}") from exc
     kind, version, doc = check_envelope(raw)
     sha256 = hashlib.sha256(raw).hexdigest()
+    if repo is not None:
+        _check_repo(repo)
 
     packaged = provider_schemas.packaged_envelope(kind)
     if packaged is not None and packaged.get("provider_version") == version:
@@ -254,33 +289,40 @@ def import_file(source: pathlib.Path, *, replace: bool = False) -> ImportResult:
 
     directory = paths_module.IMPORTED_PROVIDER_SCHEMAS_DIR
     target = directory / stored_name(kind, version)
+    recorded = _recorded_repo(directory, kind, version)
+    effective_repo = repo or recorded or default_repo(kind)
     status = "imported"
     if target.exists():
         if hashlib.sha256(target.read_bytes()).hexdigest() == sha256:
-            return ImportResult(kind, version, "unchanged", sha256, target)
-        if not replace:
+            if recorded == effective_repo:
+                return ImportResult(kind, version, "unchanged", sha256, target, effective_repo)
+            status = "repo updated"
+        elif not replace:
             raise _already_imported(kind, version)
-        status = "replaced"
+        else:
+            status = "replaced"
 
     sidecar = {
         "origin": str(source.resolve()),
         "sha256": sha256,
         "provider_version": version,
+        "repo": effective_repo,
         "imported_at_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     try:
-        tmp = _write_temp(directory, target.name, raw)
-        try:
-            if status == "replaced":
-                os.replace(tmp, target)
-            elif not _publish_new(tmp, target):
-                # Another import of this kind and version landed after the
-                # check above.
-                if hashlib.sha256(target.read_bytes()).hexdigest() == sha256:
-                    return ImportResult(kind, version, "unchanged", sha256, target)
-                raise _already_imported(kind, version)
-        finally:
-            tmp.unlink(missing_ok=True)
+        if status != "repo updated":
+            tmp = _write_temp(directory, target.name, raw)
+            try:
+                if status == "replaced":
+                    os.replace(tmp, target)
+                elif not _publish_new(tmp, target):
+                    # Another import of this kind and version landed after the
+                    # check above.
+                    if hashlib.sha256(target.read_bytes()).hexdigest() == sha256:
+                        return ImportResult(kind, version, "unchanged", sha256, target, effective_repo)
+                    raise _already_imported(kind, version)
+            finally:
+                tmp.unlink(missing_ok=True)
         # After the envelope: list_imports drops a sidecar whose sha256
         # disagrees with the envelope beside it, so a reader in between sees
         # no origin rather than a wrong one.
@@ -289,7 +331,7 @@ def import_file(source: pathlib.Path, *, replace: bool = False) -> ImportResult:
         )
     except OSError as exc:
         raise ImportRefused(f"cannot write into {directory}: {exc.strerror or exc}") from exc
-    return ImportResult(kind, version, status, sha256, target)
+    return ImportResult(kind, version, status, sha256, target, effective_repo)
 
 
 def _already_imported(kind: str, version: str) -> ImportRefused:
@@ -368,6 +410,7 @@ def list_imports() -> list[ImportEntry]:
                 if isinstance(sidecar.get("imported_at_utc"), str)
                 else None,
                 error=errors.get(path.name),
+                repo=sidecar.get("repo") if isinstance(sidecar.get("repo"), str) else None,
             )
         )
     return entries
