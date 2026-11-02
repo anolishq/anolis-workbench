@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import sys
@@ -336,7 +337,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "Not found"})
 
     def _check_update(self) -> None:
-        from anolis_workbench.core.updater import check_for_update
+        from anolis_workbench.core.updater import check_for_update, upgrade_instructions
 
         status = check_for_update()
         self._json(
@@ -346,32 +347,22 @@ class _Handler(BaseHTTPRequestHandler):
                 "latest_version": status.latest_version,
                 "update_available": status.update_available,
                 "error": status.error,
+                "upgrade": dataclasses.asdict(upgrade_instructions(status.latest_version)),
             },
         )
 
     def _trigger_update(self) -> None:
-        from anolis_workbench.core.updater import check_for_update, perform_update
+        """Self-update is gone (#535): answer a page from an older workbench
+        with the command that upgrades this install."""
+        from anolis_workbench.core.updater import check_for_update, upgrade_instructions
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length) if content_length else b"{}"
-        params = json.loads(body) if body else {}
-
-        status = check_for_update()
-        if not status.update_available or not status.latest_version:
-            self._json(200, {"update_available": False, "current_version": status.current_version})
-            return
-
-        result = perform_update(
-            target_version=status.latest_version,
-            dry_run=params.get("dry_run", False),
-        )
+        upgrade = upgrade_instructions(check_for_update().latest_version)
+        how = upgrade.command or upgrade.note
         self._json(
-            200 if result.success else 500,
+            410,
             {
-                "success": result.success,
-                "version": result.version,
-                "error": result.error,
-                "warning": result.warning,
+                "error": f"The workbench no longer upgrades itself. To upgrade, run: {how}",
+                "upgrade": dataclasses.asdict(upgrade),
             },
         )
 

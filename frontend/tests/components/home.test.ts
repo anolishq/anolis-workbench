@@ -100,15 +100,7 @@ describe('Home.svelte', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('says when the updated install.sh could not be checked against SHA256SUMS', async () => {
-    const warning = 'WARNING: install.sh not verified: anolis-workbench v0.18.3 predates install.sh in SHA256SUMS';
-    const fetchMock = vi.fn(async (path: string) =>
-      path === '/api/update-check'
-        ? jsonResponse(200, { current_version: '0.18.2', latest_version: '0.18.3', update_available: true, error: null })
-        : jsonResponse(200, { success: true, version: '0.18.3', error: null, warning }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
+  function renderHome() {
     render(Home, {
       props: {
         projects: [],
@@ -118,10 +110,59 @@ describe('Home.svelte', () => {
         onProjectsRefreshed: vi.fn(async () => {}),
       },
     });
+  }
+
+  it('shows the command that upgrades this install, and runs nothing (#535)', async () => {
+    const command = '/srv/wb/venv/bin/python -m pip install --upgrade anolis-workbench==0.33.0';
+    const fetchMock = vi.fn(async (_path: string) =>
+      jsonResponse(200, {
+        current_version: '0.32.0',
+        latest_version: '0.33.0',
+        update_available: true,
+        error: null,
+        upgrade: {
+          install: 'pip',
+          command,
+          restart: 'sudo systemctl restart anolis-workbench',
+          note: 'Run the command, then restart the workbench service.',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderHome();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Update to v0.18.3' }));
-    expect(await screen.findByText(new RegExp(`Updated to v0\\.18\\.3\\..*${warning}`))).toBeInTheDocument();
+
+    expect(await screen.findByText('Update available: v0.33.0')).toBeInTheDocument();
+    const howTo = screen.getByTestId('upgrade-instructions');
+    expect(howTo).toHaveTextContent(command);
+    expect(howTo).toHaveTextContent('sudo systemctl restart anolis-workbench');
+    expect(howTo).toHaveTextContent('Run the command, then restart the workbench service.');
+    expect(screen.queryByRole('button', { name: /Update to/ })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/update-check']);
+  });
+
+  it('points the desktop app at the release, with no command', async () => {
+    const note = 'Install the new desktop build from https://github.com/anolishq/anolis-workbench/releases/tag/v0.33.0.';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(200, {
+          current_version: '0.32.0',
+          latest_version: '0.33.0',
+          update_available: true,
+          error: null,
+          upgrade: { install: 'desktop', command: null, restart: null, note },
+        }),
+      ),
+    );
+    renderHome();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }));
+
+    const howTo = await screen.findByTestId('upgrade-instructions');
+    expect(howTo).toHaveTextContent(note);
+    expect(howTo.querySelector('code')).toBeNull();
   });
 
   it('asks before rolling back, says the service restarts, and names a running project', async () => {
