@@ -22,6 +22,7 @@
   import ProfileView from "../lib/ProfileView.svelte";
   import RuntimeForm from "../lib/RuntimeForm.svelte";
   import ProviderList from "../lib/ProviderList.svelte";
+  import ProviderSchemaImport from "../lib/ProviderSchemaImport.svelte";
 
   let {
     projectName,
@@ -81,7 +82,11 @@
   );
   let resolvedSchemas = $state<ProviderSchemasResponse | null>(null);
   let resolveSeq = 0;
+  // Bumped by an import (#787): the kinds on offer, and the forms, change
+  // without a pin changing.
+  let importsVersion = $state(0);
   $effect(() => {
+    void importsVersion;
     const pins = Object.fromEntries(JSON.parse(pinsKey) as [string, string][]);
     const seq = ++resolveSeq;
     if (editable === null) {
@@ -317,6 +322,7 @@
 
       <RuntimeForm doc={editable} {variant} onChanged={markDirty} />
       <ProviderList doc={editable} {variant} providerSchemas={schemas} onChanged={markDirty} />
+      <ProviderSchemaImport onImported={() => importsVersion++} />
     {:else}
       <p class="placeholder">Loading…</p>
     {/if}

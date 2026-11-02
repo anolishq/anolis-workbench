@@ -156,9 +156,13 @@ anolis-workbench provider list
 The file is the provider's `--config-schema` envelope. A project that pins
 that kind at that version is validated against it; one pinning the packaged
 version keeps the packaged schema. An import is refused if it isn't a valid
-JSON Schema, uses `$ref`, lacks a semver `provider_version`, or would replace
-a packaged envelope. An import of the same kind and version with other
-content needs `--replace`. Imports live in `schemas/providers/` next to the
+JSON Schema, uses `$ref`, lacks a semver `provider_version`, would replace
+a packaged envelope, or names a version that differs from an existing
+import's only in case (macOS and Windows would store the two as one file).
+An import of the same kind and version with other content needs
+`--replace`. The desktop app has no CLI on PATH: there, Compose's "Provider
+schemas" section imports a file, with the same checks and the same reasons
+when one is refused, and the kind is offered at once. Imports live in `schemas/providers/` next to the
 projects directory: `~/.anolis/schemas/providers/` by default, or next to
 `ANOLIS_DATA_DIR` when it is set. They are per user, so run the import as the
 user the workbench runs as. `provider list` also names any import that fails to

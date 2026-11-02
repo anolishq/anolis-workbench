@@ -491,3 +491,14 @@ def test_a_sidecar_for_other_content_is_not_believed(tmp_path, _imports_dir):
     sidecar.write_text(json.dumps(data), encoding="utf-8")
     (entry,) = provider_import.list_imports()
     assert entry.origin is None and entry.imported_at_utc is None and entry.error is None
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_a_version_differing_only_in_case_is_refused(tmp_path, _imports_dir, replace):
+    # macOS and Windows file systems ignore case by default, so foo@1.0.0-RC
+    # and foo@1.0.0-rc would share one file there (#787).
+    provider_import.import_file(_write(tmp_path, _envelope("foo", "1.0.0-RC"), "upper.json"))
+    before = sorted(p.name for p in _imports_dir.iterdir())
+    with pytest.raises(provider_import.ImportRefused, match=r"foo@1\.0\.0-RC"):
+        provider_import.import_file(_write(tmp_path, _envelope("foo", "1.0.0-rc"), "lower.json"), replace=replace)
+    assert sorted(p.name for p in _imports_dir.iterdir()) == before

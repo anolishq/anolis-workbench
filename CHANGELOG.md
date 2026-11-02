@@ -45,6 +45,14 @@ Historical note:
   restart. Saving a project whose pinned kind has no schema now names the
   missing `<kind>@<version>` and says to import it with
   `anolis-workbench provider import`.
+- **Import a provider schema from Compose** (#787, part of #286), for the
+  desktop app, which has no CLI on PATH. `POST /api/provider-schemas/import`
+  takes the envelope file's bytes, with `replace`, `repo` and `filename` in
+  the query, runs the CLI's checks behind the request-origin gate, and
+  answers a refusal with the CLI's reason. Compose's "Provider schemas"
+  section uploads a file to it and then offers the kind without a restart.
+  An import whose version differs from an existing one's only in case is
+  now refused, since macOS and Windows would store the two as one file.
 - **An imported kind deploys from its own repository** (#785, part of
   #286). `provider import --repo <owner>/<name>` records the repository a
   deploy fetches that provider's release from, defaulting to

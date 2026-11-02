@@ -82,6 +82,16 @@ export interface ProviderSchemasResponse extends UnknownRecord {
   resolution?: Record<string, ProviderResolution>;
 }
 
+/** POST /api/provider-schemas/import's reply (#787). */
+export interface ProviderImportResult {
+  kind: string;
+  version: string;
+  /** imported, replaced, repo updated, unchanged or already packaged */
+  status: string;
+  sha256: string;
+  repo: string | null;
+}
+
 /** How the server resolved one provider kind at the machine's pin (#784). */
 export interface ProviderResolution {
   /** "packaged", or "sideloaded" for an envelope imported on this host (#783). */

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from anolis_workbench.core import machine_profile, provider_schemas
+import urllib.parse
+
+from anolis_workbench.core import machine_profile, provider_import, provider_schemas
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 
@@ -262,6 +264,56 @@ def resolve_provider_schemas(handler) -> None:
         handler._json(400, {"error": 'Body must be {"pins": {kind: version}} with string versions'})
         return
     handler._json(200, {"schema_version": 1, **provider_schemas.resolve_pins(pins)})
+
+
+def import_provider_schema(handler) -> None:
+    """Import a provider's --config-schema envelope over HTTP (#787).
+
+    For the desktop app, which has no CLI on PATH. The body is the envelope
+    file's bytes, so the recorded sha256 is the file's; `replace`, `repo` and
+    `filename` come in the query. The checks and refusals are the CLI's, and
+    a running workbench offers the kind at once.
+    """
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(handler.path).query)
+
+    def param(name: str) -> str | None:
+        values = query.get(name)
+        return values[-1] if values else None
+
+    try:
+        length = int(handler.headers.get("Content-Length", 0))
+    except ValueError:
+        length = 0
+    if length <= 0:
+        handler._json(400, {"error": "Empty body: send the envelope file's bytes"})
+        return
+    if length > provider_import.MAX_ENVELOPE_BYTES:
+        handler._json(
+            400, {"error": f"Request body too large: an envelope is at most {provider_import.MAX_ENVELOPE_BYTES} bytes"}
+        )
+        return
+    raw = handler.rfile.read(length)
+    filename = "".join(c for c in (param("filename") or "") if c.isprintable()).strip()[:255]
+    try:
+        result = provider_import.import_bytes(
+            raw,
+            origin=f"upload: {filename}" if filename else "upload",
+            replace=param("replace") in ("1", "true"),
+            repo=param("repo"),
+        )
+    except provider_import.ImportRefused as exc:
+        handler._json(400, {"error": str(exc)})
+        return
+    handler._json(
+        200,
+        {
+            "kind": result.kind,
+            "version": result.version,
+            "status": result.status,
+            "sha256": result.sha256,
+            "repo": result.repo,
+        },
+    )
 
 
 def serve_templates(handler) -> None:

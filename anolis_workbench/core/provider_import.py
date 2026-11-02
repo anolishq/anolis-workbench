@@ -260,7 +260,18 @@ def _recorded_repo(directory: pathlib.Path, kind: str, version: str) -> str | No
 
 
 def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None = None) -> ImportResult:
-    """Import one envelope file. Raises ImportRefused, writing nothing.
+    """Import one envelope file. Raises ImportRefused, writing nothing."""
+    source = pathlib.Path(source)
+    try:
+        raw = source.read_bytes()
+    except OSError as exc:
+        raise ImportRefused(f"cannot read {source}: {exc.strerror or exc}") from exc
+    return import_bytes(raw, origin=str(source.resolve()), replace=replace, repo=repo)
+
+
+def import_bytes(raw: bytes, *, origin: str, replace: bool = False, repo: str | None = None) -> ImportResult:
+    """Import one envelope's bytes; `origin` says where they came from.
+    Raises ImportRefused, writing nothing.
 
     `repo` is where a deploy fetches this provider's release from. Without
     one, the repo already recorded for this kind and version is kept, else
@@ -268,11 +279,6 @@ def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None
     """
     from anolis_workbench.core import provider_schemas
 
-    source = pathlib.Path(source)
-    try:
-        raw = source.read_bytes()
-    except OSError as exc:
-        raise ImportRefused(f"cannot read {source}: {exc.strerror or exc}") from exc
     kind, version, doc = check_envelope(raw)
     sha256 = hashlib.sha256(raw).hexdigest()
     if repo is not None:
@@ -289,6 +295,7 @@ def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None
 
     directory = paths_module.IMPORTED_PROVIDER_SCHEMAS_DIR
     target = directory / stored_name(kind, version)
+    _refuse_case_collision(directory, target, kind, version)
     recorded = _recorded_repo(directory, kind, version)
     effective_repo = repo or recorded or default_repo(kind)
     status = "imported"
@@ -303,7 +310,7 @@ def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None
             status = "replaced"
 
     sidecar = {
-        "origin": str(source.resolve()),
+        "origin": origin,
         "sha256": sha256,
         "provider_version": version,
         "repo": effective_repo,
@@ -332,6 +339,24 @@ def import_file(source: pathlib.Path, *, replace: bool = False, repo: str | None
     except OSError as exc:
         raise ImportRefused(f"cannot write into {directory}: {exc.strerror or exc}") from exc
     return ImportResult(kind, version, status, sha256, target, effective_repo)
+
+
+def _refuse_case_collision(directory: pathlib.Path, target: pathlib.Path, kind: str, version: str) -> None:
+    """Refuse a version that differs from an existing import's only in case.
+
+    macOS and Windows file systems ignore case by default, so the two would
+    share one file there, and a --replace would leave content whose declared
+    version disagrees with its name, which the loader skips (#787).
+    """
+    if not directory.is_dir():
+        return
+    for existing in directory.glob(f"*{ENVELOPE_SUFFIX}"):
+        if existing.name != target.name and existing.name.lower() == target.name.lower():
+            spec = existing.name[: -len(ENVELOPE_SUFFIX)]
+            raise ImportRefused(
+                f"{kind}@{version} differs only in case from the import {spec}, and the two would share "
+                f"one file on a case-insensitive file system; remove {spec} first"
+            )
 
 
 def _already_imported(kind: str, version: str) -> ImportRefused:
