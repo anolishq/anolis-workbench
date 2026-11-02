@@ -67,6 +67,43 @@
     Array.isArray(system?.warnings) ? system.warnings.filter((w) => typeof w === "string") : [],
   );
 
+  // Forms and client-side checks follow the envelope a save validates against:
+  // the server resolves each pin, imports included (#784), and Compose asks
+  // again whenever a pin changes. Until it answers, or if it can't, the
+  // app-wide schemas stand in, with no skew verdicts.
+  const pinsKey = $derived(
+    JSON.stringify(
+      Object.entries(editable?.profile?.components?.providers ?? {})
+        .map(([kind, pin]) => [kind, typeof pin?.version === "string" ? pin.version.trim() : ""])
+        .filter(([, version]) => version)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    ),
+  );
+  let resolvedSchemas = $state<ProviderSchemasResponse | null>(null);
+  let resolveSeq = 0;
+  $effect(() => {
+    const pins = Object.fromEntries(JSON.parse(pinsKey) as [string, string][]);
+    const seq = ++resolveSeq;
+    if (editable === null) {
+      resolvedSchemas = null;
+      return;
+    }
+    fetchJson<ProviderSchemasResponse>("/api/provider-schemas/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pins }),
+    })
+      .then((reply) => {
+        // Only a schemas reply: anything else keeps the app-wide schemas.
+        const ok = reply && typeof reply.providers === "object" && reply.providers !== null;
+        if (seq === resolveSeq) resolvedSchemas = ok ? reply : null;
+      })
+      .catch(() => {
+        if (seq === resolveSeq) resolvedSchemas = null;
+      });
+  });
+  const schemas = $derived(resolvedSchemas ?? providerSchemas);
+
   let saving = $state<boolean>(false);
   // Once a save fails, provider forms show every empty required field (#578).
   const saveAttempt = $state({ failed: false });
@@ -236,7 +273,7 @@
     {#if system && imported}
       <ProfileView doc={system} />
     {:else if editable}
-      <ProfileForm doc={editable} {providerSchemas} onChanged={markDirty} />
+      <ProfileForm doc={editable} providerSchemas={schemas} onChanged={markDirty} />
 
       <div class="variant-bar">
         <label for="variant-select">Runtime variant</label>
@@ -279,7 +316,7 @@
       {/if}
 
       <RuntimeForm doc={editable} {variant} onChanged={markDirty} />
-      <ProviderList doc={editable} {variant} {providerSchemas} onChanged={markDirty} />
+      <ProviderList doc={editable} {variant} providerSchemas={schemas} onChanged={markDirty} />
     {:else}
       <p class="placeholder">Loading…</p>
     {/if}

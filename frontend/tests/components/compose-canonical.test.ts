@@ -15,15 +15,43 @@ import { createProjectDocument, createRuntimeStatus, jsonResponse, withProvider 
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-function schemasResponseForPins(): ProviderSchemasResponse {
-  const load = (kind: string) =>
-    JSON.parse(
-      readFileSync(
-        resolve(HERE, `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`),
-        "utf-8",
-      ),
-    );
-  return { schema_version: 1, providers: { sim: load("sim"), bread: load("bread") } };
+function loadEnvelope(kind: string) {
+  return JSON.parse(
+    readFileSync(
+      resolve(HERE, `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`),
+      "utf-8",
+    ),
+  );
+}
+
+function schemasResponseForPins(
+  resolution?: ProviderSchemasResponse["resolution"],
+): ProviderSchemasResponse {
+  return {
+    schema_version: 1,
+    providers: { sim: loadEnvelope("sim"), bread: loadEnvelope("bread") },
+    ...(resolution ? { resolution } : {}),
+  };
+}
+
+/** What the server would answer for these pins, packaged envelopes only. */
+function packagedResolution(pins: Record<string, string>): ProviderSchemasResponse["resolution"] {
+  return Object.fromEntries(
+    ["sim", "bread"].map((kind) => {
+      const envelopeVersion = loadEnvelope(kind).provider_version as string;
+      const pinned = pins[kind] ?? null;
+      return [
+        kind,
+        {
+          source: "packaged",
+          exact: pinned === null || pinned === envelopeVersion,
+          pinned_version: pinned,
+          envelope_version: envelopeVersion,
+          sha256: null,
+        },
+      ];
+    }),
+  );
 }
 import { reactive } from "./helpers.svelte";
 
@@ -176,8 +204,10 @@ describe("Compose.svelte (variants)", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    // Compose also asks the server to resolve the pins (#784); find the save.
+    const isSave = (call: unknown[]) => (call[1] as RequestInit | undefined)?.method === "PUT";
+    await waitFor(() => expect(fetchMock.mock.calls.some(isSave)).toBe(true));
+    const body = JSON.parse(String(fetchMock.mock.calls.find(isSave)?.[1]?.body));
     expect(body.variants.manual.experimental_knob).toEqual({ deep: true });
     expect(body.profile.machine_id).toBe("demo");
   });
@@ -365,9 +395,13 @@ describe("provider schema version skew (#283)", () => {
     return reactive(doc);
   }
 
-  it("names both versions when the pin disagrees with the packaged envelope", () => {
+  it("names both versions when the server says the pin disagrees with its envelope", () => {
     render(ProfileForm, {
-      props: { doc: skewedDoc(), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+      props: {
+        doc: skewedDoc(),
+        providerSchemas: schemasResponseForPins(packagedResolution({ bread: olderThanPackaged("bread") })),
+        onChanged: vi.fn(),
+      },
     });
 
     const warning = screen.getByTestId("schema-skew-bread");
@@ -375,21 +409,110 @@ describe("provider schema version skew (#283)", () => {
     expect(warning).toHaveTextContent(olderThanPackaged("bread"));
   });
 
-  it("clears as soon as the pin is corrected, with no save", async () => {
-    // Derived, not stored — the property that keeps it from going stale the
-    // way sidecar-carried warnings do (#290).
-    render(ProfileForm, {
-      props: { doc: skewedDoc(), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+  it("follows the pin as it is edited, with no save (#784)", async () => {
+    // Compose asks the server to resolve the pins whenever one changes; the
+    // note, the label and the form all follow its answer.
+    const imported = loadEnvelope("bread");
+    imported.provider_version = olderThanPackaged("bread");
+    imported.schema.properties.only_in_the_import = { type: "string", title: "Only in the import" };
+    const pinsSeen: Record<string, string>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const pins = JSON.parse(String(init?.body)).pins as Record<string, string>;
+        pinsSeen.push(pins);
+        const reply = schemasResponseForPins(packagedResolution(pins));
+        if (pins.bread === olderThanPackaged("bread")) {
+          reply.providers.bread = imported;
+          reply.resolution!.bread = {
+            source: "sideloaded",
+            exact: true,
+            pinned_version: pins.bread,
+            envelope_version: pins.bread,
+            sha256: "ab".repeat(32),
+          };
+        }
+        return jsonResponse(200, reply);
+      }),
+    );
+    const doc = skewedDoc("0.0.1");
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: doc,
+        providerSchemas: schemasResponseForPins(),
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
     });
-    expect(screen.getByTestId("schema-skew-bread")).toBeInTheDocument();
 
+    // A pin nothing satisfies: the packaged form, and the skew note.
+    expect(await screen.findByTestId("schema-skew-bread")).toHaveTextContent(packagedVersion("bread"));
+    expect(screen.queryByText("Only in the import")).not.toBeInTheDocument();
+
+    // The imported version: its own form, labelled, and no skew.
+    await fireEvent.input(screen.getByLabelText("bread version"), {
+      target: { value: olderThanPackaged("bread") },
+    });
+    expect(await screen.findByTestId("schema-imported-bread")).toHaveTextContent("abababababab");
+    expect(screen.getByText("Only in the import")).toBeInTheDocument();
+    expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
+
+    // The packaged version: the packaged form, unlabelled.
     await fireEvent.input(screen.getByLabelText("bread version"), {
       target: { value: packagedVersion("bread") },
     });
+    await waitFor(() => expect(screen.queryByText("Only in the import")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("schema-imported-bread")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
+    expect(pinsSeen.map((p) => p.bread)).toEqual([
+      "0.0.1",
+      olderThanPackaged("bread"),
+      packagedVersion("bread"),
+    ]);
+  });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
+  it("keeps the app-wide schemas when the resolve reply isn't schemas", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { ok: true })));
+    const doc = reactive(
+      withProvider(createProjectDocument("demo"), "bread0", "bread", {
+        provider: { name: "bread0" },
+        hardware: {},
+        discovery: { mode: "scan" },
+        devices: [],
+      }),
+    );
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: doc,
+        providerSchemas: schemasResponseForPins(),
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
     });
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByPlaceholderText("/dev/i2c-1 or mock://name")).toBeInTheDocument();
+  });
+
+  it("keeps the app-wide schemas, and says nothing about skew, when resolving fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(500, { error: "boom" })));
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: skewedDoc(),
+        providerSchemas: schemasResponseForPins(),
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    });
+    expect(await screen.findByLabelText("bread version")).toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByTestId("schema-skew-bread")).not.toBeInTheDocument();
   });
 
   it("stays quiet when the schemas could not be loaded", () => {
@@ -416,7 +539,13 @@ describe("provider schema version skew (#283)", () => {
     };
 
     render(ProfileForm, {
-      props: { doc: reactive(doc), providerSchemas: schemasResponseForPins(), onChanged: vi.fn() },
+      props: {
+        doc: reactive(doc),
+        providerSchemas: schemasResponseForPins(
+          packagedResolution({ sim: packagedVersion("sim"), bread: olderThanPackaged("bread") }),
+        ),
+        onChanged: vi.fn(),
+      },
     });
 
     expect(screen.getByTestId("stale-pin-bread")).toBeInTheDocument();

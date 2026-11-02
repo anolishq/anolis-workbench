@@ -277,6 +277,36 @@ def resolve_for_profile(profile: Any, kind: str) -> Resolution | None:
     return resolve(kind, pinned_version(profile, kind))
 
 
+def resolve_pins(pins: dict[str, str]) -> dict[str, Any]:
+    """Every available kind resolved at its pin, for the composer (#784).
+
+    `providers` is kind -> envelope, the shape /api/provider-schemas serves,
+    so forms render unchanged; `resolution` carries what `resolve` decided, so
+    the composer never applies its own precedence rule.
+    """
+    from anolis_workbench.core import provider_import
+
+    import_sha = {
+        (entry.kind, entry.version): entry.sha256 for entry in provider_import.list_imports() if not entry.error
+    }
+    providers: dict[str, dict[str, Any]] = {}
+    resolution: dict[str, dict[str, Any]] = {}
+    for kind in available_kinds():
+        pin = pins.get(kind)
+        result = resolve(kind, pin.strip() or None if isinstance(pin, str) else None)
+        if result is None:
+            continue
+        providers[kind] = result.envelope
+        resolution[kind] = {
+            "source": result.source,
+            "exact": result.exact,
+            "pinned_version": result.pinned_version,
+            "envelope_version": result.envelope_version,
+            "sha256": import_sha.get((kind, result.envelope_version)) if result.source == "sideloaded" else None,
+        }
+    return {"providers": providers, "resolution": resolution}
+
+
 def version_skew_warnings(document: Any) -> list[str]:
     """Skew warnings for every provider kind in a canonical project document.
 
