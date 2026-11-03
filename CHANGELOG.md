@@ -13,6 +13,12 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **The packaged ezo config schema is anolis-provider-ezo 0.6.0's**, so a
+  project pinning ezo 0.6.0 does not show the schema-version note in Compose.
+  The schema itself changes only its `provider_version`.
+
 ## [0.33.1] - 2026-11-02
 
 ### Changed
