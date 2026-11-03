@@ -31,6 +31,10 @@ Usage:
   python scripts/sync-upstream-schema-from-release.py --schema runtime-config --tag v0.1.3
   python scripts/sync-upstream-schema-from-release.py --schema provider-config-sim --tag v0.2.8
 
+  # Re-sync a lock Renovate has bumped, at the tag it now pins (#802):
+  python scripts/sync-upstream-schema-from-release.py \
+      --from-lock contracts/upstream/anolis/runtime-config.lock.json
+
   # Onboard a provider that has no lock yet — no code change required:
   python scripts/sync-upstream-schema-from-release.py \
       --new-provider foo --repo vendor/anolis-provider-foo --tag v0.1.0
@@ -176,6 +180,41 @@ def known_schemas(repo_root: Path) -> list[str]:
     return sorted(_ANOLIS_CONFIGS) + [f"{_PROVIDER_PREFIX}{k}" for k in provider_locks.locked_kinds(repo_root)]
 
 
+def schema_and_tag_from_lock(repo_root: Path, lock_file: Path) -> tuple[str, str]:
+    """The --schema name and the tag for an existing lock.
+
+    Renovate moves the tags in a lock but cannot refresh its sha256s (#802), so
+    the re-sync reads the tag back out of the lock it is fixing.
+    """
+    target = lock_file.resolve()
+    schema = next(
+        (name for name, cfg in _ANOLIS_CONFIGS.items() if (repo_root / cfg["lock_path"]).resolve() == target),
+        None,
+    )
+    if schema is None:
+        kind = next(
+            (
+                k
+                for k in provider_locks.locked_kinds(repo_root)
+                if provider_locks.lock_path(repo_root, k).resolve() == target
+            ),
+            None,
+        )
+        if kind is None:
+            raise RuntimeError(f"{lock_file}: not a schema lock this repo syncs")
+        schema = f"{_PROVIDER_PREFIX}{kind}"
+
+    lock = provider_locks.load_lock(target)
+    release = lock.get("distribution", {}).get("release", {})
+    release_tag = release.get("tag") if isinstance(release, dict) else None
+    source_tag = lock.get("source", {}).get("tag")
+    if not isinstance(release_tag, str) or not release_tag:
+        raise RuntimeError(f"{lock_file}: missing distribution.release.tag")
+    if source_tag != release_tag:
+        raise RuntimeError(f"{lock_file}: source.tag {source_tag!r} and release.tag {release_tag!r} disagree")
+    return schema, release_tag
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Sync a vendored upstream schema from an anolis release artifact")
     # NB: --schema is validated after parsing, against the RESOLVED --repo-root.
@@ -187,6 +226,11 @@ def parse_args() -> argparse.Namespace:
         "--new-provider",
         metavar="KIND",
         help="Onboard a provider that has no lock yet (requires --repo)",
+    )
+    target.add_argument(
+        "--from-lock",
+        metavar="PATH",
+        help="Re-sync an existing lock at the tag it already pins (what Renovate's bumps need)",
     )
     parser.add_argument(
         "--repo",
@@ -205,8 +249,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--tag",
-        required=True,
-        help="Upstream release tag (e.g. v0.1.3)",
+        default=None,
+        help="Upstream release tag (e.g. v0.1.3); required except with --from-lock",
     )
     parser.add_argument(
         "--upstream-repo",
@@ -219,6 +263,16 @@ def parse_args() -> argparse.Namespace:
         help="Repository root path (default: auto-detected)",
     )
     args = parser.parse_args()
+    if args.from_lock:
+        if args.tag or args.repo or args.upstream_repo or args.asset_template or args.manifest_asset_template:
+            parser.error("--from-lock reads the tag, repo and templates from the lock; pass no other source options")
+        repo_root = Path(args.repo_root).resolve()
+        try:
+            args.schema, args.tag = schema_and_tag_from_lock(repo_root, Path(args.from_lock))
+        except (RuntimeError, provider_locks.LockError) as exc:
+            parser.error(str(exc))
+    elif not args.tag:
+        parser.error("--tag is required")
     if args.new_provider and not args.repo:
         parser.error("--new-provider requires --repo (there is no lock to read it from yet)")
     if args.repo and not args.new_provider:
