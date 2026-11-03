@@ -74,17 +74,17 @@ patterns are stored in the lock and every later sync reads them back.
 Renovate tracks each lock's release tag (`renovate.json`, #369), so a new
 upstream release opens a PR that moves every version in the lock: the tags,
 the release asset names and, for provider locks, `source.path` and
-`provider_version`. That PR stays red until the sha256s are refreshed. On its
-branch, run the sync script once per lock the PR touches, with the new tag:
+`provider_version`. Renovate cannot refresh the sha256s, so the
+`Renovate schema sync` workflow (`.github/workflows/renovate-schema-sync.yml`,
+#802) does it: it re-syncs each lock the PR changes and pushes the result to
+the branch, which starts CI again.
+
+To do the same by hand, on the PR's branch, re-sync each lock the PR touches
+at the tag it now pins:
 
 ```bash
-# An anolis release bumps all three anolis locks
-python3 scripts/sync-upstream-schema-from-release.py --schema runtime-config --tag vX.Y.Z
-python3 scripts/sync-upstream-schema-from-release.py --schema machine-profile --tag vX.Y.Z
-python3 scripts/sync-upstream-schema-from-release.py --schema runtime-http --tag vX.Y.Z
-
-# A provider release bumps that provider's lock
-python3 scripts/sync-upstream-schema-from-release.py --schema provider-config-<kind> --tag vX.Y.Z
+python3 scripts/sync-upstream-schema-from-release.py --from-lock contracts/upstream/anolis/runtime-config.lock.json
+python3 scripts/sync-upstream-schema-from-release.py --from-lock contracts/upstream/providers/<kind>-config-schema.lock.json
 
 # Verify: each anolis lock by name, the provider locks all at once
 python3 scripts/verify-upstream-schema.py --schema runtime-config --require-release-artifact
@@ -93,7 +93,9 @@ python3 scripts/verify-upstream-schema.py --schema runtime-http --require-releas
 python3 scripts/verify-upstream-schema.py --all-providers --require-release-artifact
 ```
 
-Commit the refreshed locks and vendored schemas to the Renovate branch.
+Commit the refreshed locks and vendored schemas to the Renovate branch. If the
+upstream schema itself changed, the vendored copy changes too, and CI may need
+more than the sync.
 
 ### Lock `schema_version`
 
