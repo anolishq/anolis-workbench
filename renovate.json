@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["local>anolishq/renovate-config"],
+  "gitIgnoredAuthors": ["351769807+anolis-ci-bot[bot]@users.noreply.github.com"],
   "customManagers": [
     {
       "customType": "regex",
