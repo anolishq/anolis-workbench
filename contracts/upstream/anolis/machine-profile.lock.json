@@ -15,7 +15,7 @@
       "manifest_asset": "machine-profile-schema-manifest.json"
     },
     "schema_sha256": "cfdae515c4c56487d055ac99fe59a4cc021f2c8e24da7d3e6d9fe589379da420",
-    "asset_sha256": "af3ebc152362e1af7f25d1859a75f7d7168920444dcaaf98d8a9dc432f6ca2cf"
+    "asset_sha256": "b74c206ecfda054c8541a927cfc83798d35f61a561e1cf496252f9e13a2e8eca"
   },
-  "synced_at_utc": "2026-11-01T21:32:02Z"
+  "synced_at_utc": "2026-11-03T02:40:14Z"
 }
