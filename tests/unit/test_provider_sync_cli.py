@@ -273,3 +273,97 @@ def test_a_lock_without_release_repo_refuses_to_guess(tmp_path: pathlib.Path) ->
 
     with pytest.raises(provider_locks.LockError, match="release.repo"):
         sync._plan_for_existing_provider(tmp_path, "acme")
+
+
+# ---------------------------------------------------------------------------
+# --from-lock: the Renovate path (#802)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("lock", "schema"),
+    [
+        ("contracts/upstream/anolis/runtime-config.lock.json", "runtime-config"),
+        ("contracts/upstream/anolis/runtime-http.lock.json", "runtime-http"),
+        ("contracts/upstream/anolis/machine-profile.lock.json", "machine-profile"),
+        ("contracts/upstream/providers/sim-config-schema.lock.json", "provider-config-sim"),
+        ("contracts/upstream/providers/ezo-config-schema.lock.json", "provider-config-ezo"),
+    ],
+)
+def test_from_lock_names_the_schema_and_the_tag_the_lock_pins(lock: str, schema: str) -> None:
+    """Renovate moves the tag in the lock; the re-sync takes it from there
+    rather than from a second copy someone has to keep in step."""
+    data = json.loads((REPO_ROOT / lock).read_text(encoding="utf-8"))
+
+    assert sync.schema_and_tag_from_lock(REPO_ROOT, REPO_ROOT / lock) == (
+        schema,
+        data["distribution"]["release"]["tag"],
+    )
+
+
+def test_from_lock_refuses_a_lock_whose_two_tags_disagree(tmp_path: pathlib.Path) -> None:
+    """A half-applied bump: syncing either tag would hide which one was meant."""
+    source = REPO_ROOT / "contracts/upstream/anolis/runtime-config.lock.json"
+    lock_file = tmp_path / "contracts/upstream/anolis/runtime-config.lock.json"
+    lock_file.parent.mkdir(parents=True)
+    data = json.loads(source.read_text(encoding="utf-8"))
+    data["source"]["tag"] = "v0.0.1"
+    lock_file.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="disagree"):
+        sync.schema_and_tag_from_lock(tmp_path, lock_file)
+
+
+def test_from_lock_refuses_a_file_that_is_not_a_lock(tmp_path: pathlib.Path) -> None:
+    stray = tmp_path / "contracts/upstream/anolis/stray.lock.json"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not a schema lock"):
+        sync.schema_and_tag_from_lock(tmp_path, stray)
+
+
+def test_from_lock_syncs_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """The workflow's call: only the lock path, and the result passes the
+    registry checks CI runs."""
+    _stub_network(monkeypatch, ENVELOPE)
+    _run(
+        monkeypatch,
+        [
+            "--new-provider",
+            "acme",
+            "--repo",
+            "vendor/anolis-provider-acme",
+            "--tag",
+            "v1.0.0",
+            "--repo-root",
+            str(tmp_path),
+        ],
+    )
+    lock_file = provider_locks.lock_path(tmp_path, "acme")
+    bumped = {**ENVELOPE, "provider_version": "1.1.0"}
+    lock_file.write_text(lock_file.read_text(encoding="utf-8").replace("1.0.0", "1.1.0"), encoding="utf-8")
+    _stub_network(monkeypatch, bumped)
+
+    rc = _run(monkeypatch, ["--from-lock", str(lock_file), "--repo-root", str(tmp_path)])
+
+    assert rc == 0
+    assert provider_locks.check_registry(tmp_path) == []
+    assert json.loads(lock_file.read_text(encoding="utf-8"))["provider_version"] == "1.1.0"
+
+
+def test_from_lock_takes_no_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """Refused before anything is fetched. The lock is a copy and the network
+    raises, so a regression here cannot rewrite this repo's lock."""
+    rel = "contracts/upstream/anolis/runtime-config.lock.json"
+    lock_file = tmp_path / rel
+    lock_file.parent.mkdir(parents=True)
+    lock_file.write_text((REPO_ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8")
+
+    def _no_network(url: str, timeout_seconds: int = 45) -> bytes:
+        raise AssertionError(f"fetched {url} after a bad argument")
+
+    monkeypatch.setattr(sync, "fetch_url_bytes", _no_network)
+
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, ["--from-lock", str(lock_file), "--tag", "v1.0.0", "--repo-root", str(tmp_path)])

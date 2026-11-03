@@ -1,0 +1,103 @@
+name: Renovate schema sync
+
+# Renovate bumps the release tag in an upstream schema lock but cannot refresh
+# its sha256s: the hosted Renovate app does not run post-upgrade commands. The
+# PR then fails the contract drift check until someone runs
+# scripts/sync-upstream-schema-from-release.py by hand (#802). This job runs it
+# on Renovate's PRs and pushes the result to the PR branch.
+#
+# The push uses a GitHub App token, because a push made with GITHUB_TOKEN does
+# not start CI and the PR would never get its required checks. Setup: the app
+# has Contents read/write on this repo only; its client id is the
+# ANOLIS_CI_BOT_CLIENT_ID variable and its key the ANOLIS_CI_BOT_PRIVATE_KEY
+# secret. renovate.json lists the app's commit email in gitIgnoredAuthors, so
+# Renovate keeps rebasing the branch; a rebase drops the sync commit and this
+# job adds it again.
+#
+# Only main's copy of the sync script runs with the write token, never the PR
+# branch's.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - "contracts/upstream/**/*.lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate-schema-sync-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Re-sync bumped schema locks
+    # Renovate's own pushes only: the app's sync commit is a synchronize event
+    # too, and must not start this job again.
+    if: >-
+      github.actor == 'renovate[bot]' &&
+      github.event.pull_request.user.login == 'renovate[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Mint an app token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.ANOLIS_CI_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.ANOLIS_CI_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Check out the PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+
+      - name: Check out main's sync script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: _base
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - name: Re-sync each lock the PR changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA"...HEAD -- 'contracts/upstream/' \
+            | grep '\.lock\.json$' > "$RUNNER_TEMP/locks.txt" || true
+          if [ ! -s "$RUNNER_TEMP/locks.txt" ]; then
+            echo "No lock changed."
+            exit 0
+          fi
+          while IFS= read -r lock; do
+            echo "::group::$lock"
+            python3 _base/scripts/sync-upstream-schema-from-release.py --from-lock "$lock" --repo-root .
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/locks.txt"
+
+      - name: Commit and push the refreshed locks
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Locks already match their releases."
+            exit 0
+          fi
+          user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git add -u
+          git commit -m "chore(deps): re-sync upstream schema locks" \
+            -m "Refreshes the sha256s for the release this PR bumps to (#802)."
+          git push origin "HEAD:refs/heads/${HEAD_REF}"
