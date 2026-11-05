@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/sve
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Operate from "../../src/routes/Operate.svelte";
-import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
+import { createProjectDocument, deferred, jsonResponse, pathFromInput } from "./helpers";
 
 const RUNNING = { running: true, active_project: "demo" };
 
@@ -54,8 +54,15 @@ const modeOptions = async (mode: string) => {
   const select = badge.closest(".operate-section")?.querySelector("select") as HTMLSelectElement;
   return Array.from(select.options).map((o) => o.value);
 };
+// The stop card's row, found by its stop button, which reads ENGAGING… while
+// a stop is in flight.
 const row = () =>
-  screen.getByRole("button", { name: /^SOFTWARE STOP/ }).closest(".estop-row") as HTMLElement;
+  screen
+    .getByRole("button", { name: /^SOFTWARE STOP|^ENGAGING/ })
+    .closest(".estop-row") as HTMLElement;
+
+const FAULT_CLEARED =
+  "Latch cleared. Manual calls are accepted. The runtime is in FAULT, so the automation stays stopped: AUTO is reachable only through MANUAL.";
 
 describe("Operate.svelte — mode and latch wording (#692)", () => {
   it("in FAULT offers only the way out the runtime accepts, MANUAL, and the machine line says why", async () => {
@@ -76,7 +83,9 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     expect(screen.queryByTestId("mode-fault-note")).not.toBeInTheDocument();
   });
 
-  it("clearing the latch in FAULT says device calls stay refused until MANUAL", async () => {
+  it("clearing the latch in FAULT says manual calls are accepted and AUTO waits on MANUAL", async () => {
+    // The runtime's CallRouter gates IDLE and AUTO, not FAULT: manual calls go
+    // through in FAULT, and FAULT -> AUTO is refused (anolis mode_manager).
     renderOperate("FAULT", true);
     await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
     await fireEvent.click(await within(row()).findByRole("button", { name: "Clear latch…" }));
@@ -85,10 +94,8 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     );
 
     const feedback = await within(row()).findByTestId("estop-feedback");
-    expect(feedback).toHaveTextContent(
-      "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL.",
-    );
-    expect(feedback).not.toHaveTextContent("Actuation re-enabled");
+    expect(feedback.textContent?.trim()).toBe(FAULT_CLEARED);
+    expect(feedback).not.toHaveTextContent("refuses");
   });
 });
 
@@ -103,6 +110,8 @@ type Rig = {
   modeUnreadable?: boolean;
   /** How POST /v0/estop answers. */
   stop?: "latches" | "does-not-latch" | "fails";
+  /** When set, POST /v0/estop answers only once this resolves. */
+  stopReply?: ReturnType<typeof deferred<Response>>;
 };
 
 /**
@@ -134,6 +143,7 @@ function renderRig(rig: Rig) {
       }
       if (path === "/v0/devices") return jsonResponse(200, { devices: [] });
       if (path === "/v0/estop" && init?.method === "POST") {
+        if (rig.stopReply) return rig.stopReply.promise;
         if (rig.stop === "fails") throw new Error("network down");
         rig.latched = rig.stop !== "does-not-latch";
         return jsonResponse(200, {
@@ -154,10 +164,8 @@ function renderRig(rig: Rig) {
   });
 }
 
-const FAULT_CLEARED =
-  "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL.";
 const CLEARED = "Latch cleared. Actuation re-enabled.";
-/** What a clear says while the mode does not take device calls, or is not known. */
+/** What a clear says in IDLE, which blocks control calls, or while the mode is not known. */
 const CLEARED_ONLY = "Latch cleared.";
 
 /** The stop card's message, exactly; "" when it shows none. */
@@ -328,6 +336,27 @@ describe("Operate.svelte — the latch-clear message follows the latch and mode 
     await fireEvent.click(within(row()).getByRole("button", { name: /^SOFTWARE STOP/ }));
 
     await waitFor(() => expect(note()).toMatch(message));
+    expect(note()).not.toContain("Latch cleared");
+  });
+
+  it("goes as soon as a stop from the page is pressed, before its reply", async () => {
+    // The runtime latches before it runs the ladder and answers, so while the
+    // stop is in flight "Actuation re-enabled" would be false.
+    const rig: Rig = { mode: "MANUAL", latched: true };
+    renderRig(rig);
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(CLEARED));
+
+    const reply = deferred<Response>();
+    rig.stopReply = reply;
+    await fireEvent.click(within(row()).getByRole("button", { name: /^SOFTWARE STOP/ }));
+    await screen.findByRole("button", { name: "ENGAGING…" });
+    expect(note()).toBe("");
+
+    rig.latched = true;
+    reply.resolve(jsonResponse(200, { latched: true, software_safe_state: "hooks", actions: [] }));
+    await waitFor(() => expect(note()).toMatch(/Software stop engaged/));
     expect(note()).not.toContain("Latch cleared");
   });
 });

@@ -183,15 +183,17 @@
   let estopFeedbackFor = $state<string | null>(null);
   // Whether this page's clear released the latch, and no latch has engaged
   // since. The note it gives is read from the mode as it is now, not as it was
-  // at the clear (#725). It says actuation is re-enabled only in a mode that
-  // takes device calls: IDLE blocks them, and while the mode is unknown ("--",
-  // UNKNOWN) it says nothing about them.
+  // at the clear (#725). Per the runtime's CallRouter, MANUAL and FAULT take
+  // manual calls and AUTO runs the automation; IDLE blocks control calls, and
+  // while the mode is unknown ("--", UNKNOWN) the note says nothing about them.
+  // FAULT keeps the automation stopped, and AUTO is reachable from it only
+  // through MANUAL.
   let latchClearedHere = $state<boolean>(false);
   const clearNote = $derived(
     !latchClearedHere
       ? ""
       : mode === "FAULT"
-        ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
+        ? "Latch cleared. Manual calls are accepted. The runtime is in FAULT, so the automation stays stopped: AUTO is reachable only through MANUAL."
         : mode === "MANUAL" || mode === "AUTO"
           ? "Latch cleared. Actuation re-enabled."
           : "Latch cleared.",
@@ -691,6 +693,9 @@
 
   async function triggerEstop(): Promise<void> {
     estopRunning = true;
+    // The runtime latches before it answers, so a clear's note must not stand
+    // beside a stop in flight (#725).
+    latchClearedHere = false;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
     estopFeedbackFor = runningProject;
