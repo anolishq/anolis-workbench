@@ -10,6 +10,7 @@ attest job refuses release assets without the three SBOMs.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -91,6 +92,22 @@ def test_the_sbom_check_runs_after_the_assets_are_named_and_before_they_are_atte
     assert names.index("Normalize desktop artifact filenames") < check < names.index("Attest release assets")
 
 
+def _lines(block: str) -> list[str]:
+    return [line.strip() for line in block.splitlines() if line.strip()]
+
+
+def test_what_is_attested_uploaded_and_released_is_one_list() -> None:
+    """A line dropped from one list ships an asset unattested, or drops it
+    from the artifact create-release attaches from, after the tag is pushed."""
+    attested = _lines(_step("attest", "Attest release assets")["with"]["subject-path"])
+    uploaded = _lines(_step("attest", "Upload attested release assets")["with"]["path"])
+    steps = _jobs()["create-release"]["steps"]
+    release = next(s for s in steps if str(s.get("uses", "")).startswith("softprops/action-gh-release@"))
+    released = _lines(release["with"]["files"])
+    assert attested == uploaded == released
+    assert "release-assets/sbom-*" in attested
+
+
 def test_the_release_step_fails_on_an_unmatched_files_line() -> None:
     steps = _jobs()["create-release"]["steps"]
     release = next(s for s in steps if str(s.get("uses", "")).startswith("softprops/action-gh-release@"))
@@ -99,9 +116,18 @@ def test_the_release_step_fails_on_an_unmatched_files_line() -> None:
 
 # ── The attest job's own shell steps, run on a local directory ──────────────
 
+TOOLS = ("bash", "jq")
+MISSING_TOOLS = [t for t in TOOLS if shutil.which(t) is None]
+# Skipped on a developer machine without them; in CI a skip would pass while
+# testing nothing, so there they run, and fail.
 needs_tools = pytest.mark.skipif(
-    shutil.which("bash") is None or shutil.which("jq") is None, reason="needs bash and jq, as the runner has"
+    bool(MISSING_TOOLS) and not os.environ.get("CI"), reason=f"needs {', '.join(MISSING_TOOLS)}, as the runner has"
 )
+
+
+@pytest.mark.skipif(not os.environ.get("CI"), reason="CI only: elsewhere the step tests skip instead")
+def test_ci_has_the_tools_the_attest_steps_need() -> None:
+    assert not MISSING_TOOLS, f"not on PATH: {MISSING_TOOLS}"
 
 
 def _run_step(job: str, name: str, cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
@@ -110,8 +136,12 @@ def _run_step(job: str, name: str, cwd: pathlib.Path) -> subprocess.CompletedPro
     return subprocess.run(["bash", "-c", script], cwd=cwd, capture_output=True, text=True, timeout=60)
 
 
+# The root entry syft writes for frontend/ (v0.33.1's sbom-node.cdx.json).
+COMPONENT = {"type": "library", "name": "anolis-workbench-ui", "version": "9.9.9"}
+
+
 def _sbom(path: pathlib.Path) -> None:
-    path.write_text(json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}), "utf-8")
+    path.write_text(json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [COMPONENT]}), "utf-8")
 
 
 def _downloaded(tmp_path: pathlib.Path, *, sboms: tuple[str, ...]) -> pathlib.Path:
@@ -158,12 +188,22 @@ def test_release_assets_missing_one_sbom_are_refused(tmp_path: pathlib.Path, mis
 @needs_tools
 @pytest.mark.parametrize(
     "content",
-    ["", "{}", '{"bomFormat": "SPDX"}', "not json"],
-    ids=["empty", "no-bomformat", "spdx", "not-json"],
+    [
+        "",
+        json.dumps({"components": [COMPONENT]}),
+        json.dumps({"bomFormat": "SPDX", "components": [COMPONENT]}),
+        "not json",
+        json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": []}),
+        json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6"}),
+    ],
+    ids=["empty", "no-bomformat", "spdx", "not-json", "no-components", "components-absent"],
 )
-def test_an_sbom_that_is_not_cyclonedx_is_refused(tmp_path: pathlib.Path, content: str) -> None:
+def test_an_sbom_that_is_not_a_cyclonedx_inventory_is_refused(tmp_path: pathlib.Path, content: str) -> None:
     cwd = _downloaded(tmp_path, sboms=SBOMS)
     (cwd / "raw-bundles" / "sbom-node.cdx.json").write_text(content, "utf-8")
     result = _attest_steps(cwd)
     assert result.returncode != 0
-    assert "release-assets/sbom-node.cdx.json is missing or is not a CycloneDX SBOM" in result.stdout
+    assert result.stdout.count("::error::") == 1
+    assert (
+        "release-assets/sbom-node.cdx.json is missing, is not a CycloneDX SBOM, or lists no components" in result.stdout
+    )

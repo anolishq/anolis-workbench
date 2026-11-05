@@ -573,15 +573,18 @@ jobs:
           ls -lh release-assets/
 
       # The globs below pass while any one line matches, so `sbom-*` alone
-      # would let a release ship with none of its SBOMs (#673).
+      # would let a release ship with none of its SBOMs (#673). Each must be
+      # CycloneDX and list at least one component: syft exits 0 on an empty
+      # inventory.
       - name: Require the three SBOMs
         shell: bash
         run: |
           set -euo pipefail
           missing=0
           for f in sbom-python.cdx.json sbom-node.cdx.json sbom-rust.cdx.json; do
-            if ! jq -e '.bomFormat == "CycloneDX"' "release-assets/$f" >/dev/null 2>&1; then
-              echo "::error::release-assets/$f is missing or is not a CycloneDX SBOM"
+            if ! jq -e '.bomFormat == "CycloneDX" and ((.components // []) | length > 0)' \
+                "release-assets/$f" >/dev/null 2>&1; then
+              echo "::error::release-assets/$f is missing, is not a CycloneDX SBOM, or lists no components"
               missing=1
             fi
           done

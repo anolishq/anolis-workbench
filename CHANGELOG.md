@@ -26,8 +26,8 @@ Historical note:
   step accepted an empty match, so PyPI, the tag and the GitHub Release
   could go out with no `sbom-*.cdx.json` assets. A failed SBOM job now stops
   the run, the SBOM artifact is downloaded by name, and the attest job
-  refuses to go on unless all three SBOMs are present and CycloneDX, before
-  anything is published. The release step also fails on any `files:` line
+  refuses to go on unless all three SBOMs are present, CycloneDX, and list
+  at least one component, before anything is published. The release step also fails on any `files:` line
   that matches nothing.
 
 ## [0.33.1] - 2026-11-02
