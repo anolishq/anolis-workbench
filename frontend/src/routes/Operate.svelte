@@ -181,6 +181,17 @@
   // The running project a stop's result belongs to, so the advisory never
   // shows one project's result under another's name (#264).
   let estopFeedbackFor = $state<string | null>(null);
+  // Whether this page's clear released the latch, and no latch has engaged
+  // since. The note it gives is read from the mode as it is now, not as it was
+  // at the clear (#725).
+  let latchClearedHere = $state<boolean>(false);
+  const clearNote = $derived(
+    !latchClearedHere
+      ? ""
+      : mode === "FAULT"
+        ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
+        : "Latch cleared. Actuation re-enabled.",
+  );
 
   let providerHealth = $state<ProviderHealth[]>([]);
   // Devices whose command watchdog tripped, and the one being cleared (wb#572).
@@ -346,6 +357,12 @@
     if (!estop?.latched) clearArmed = false;
   });
 
+  // A latch engaged after this page's clear, by a stop from anywhere, ends
+  // that clear's note for good (#725).
+  $effect(() => {
+    if (estop?.latched) latchClearedHere = false;
+  });
+
   onDestroy(() => stopOperate());
 
   // ── Core activate/deactivate ──────────────────────────────────────────────
@@ -389,6 +406,7 @@
     stopChain = null;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
+    latchClearedHere = false;
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
@@ -717,11 +735,7 @@
         estopFeedback = "Clear requested, but the runtime still reports the latch engaged.";
         estopFeedbackClass = "field-error";
       } else {
-        estopFeedback =
-          mode === "FAULT"
-            ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
-            : "Latch cleared. Actuation re-enabled.";
-        estopFeedbackClass = "field-note";
+        latchClearedHere = true;
         estopEpoch += 1;
         if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
       }
@@ -1816,6 +1830,8 @@
         {/if}
         {#if estopFeedback}
           <span class={estopFeedbackClass} data-testid="estop-feedback">{estopFeedback}</span>
+        {:else if clearNote}
+          <span class="field-note" data-testid="estop-feedback">{clearNote}</span>
         {/if}
         <span class="estop-disclaimer">
           Not an emergency stop: use the hardware E-stop

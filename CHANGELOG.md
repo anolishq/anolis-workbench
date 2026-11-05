@@ -19,6 +19,15 @@ Historical note:
   project pinning ezo 0.6.0 does not show the schema-version note in Compose.
   The schema itself changes only its `provider_version`.
 
+### Fixed
+
+- **Operate's "Latch cleared" note follows the latch and the mode** (#725).
+  It was written once, from the mode at the moment of the clear, and stayed
+  until the next stop or clear made from the page: beside a latch a stop
+  from the API, another tab or the hardware had engaged since, and still
+  saying FAULT after the mode had changed to MANUAL. It now names the mode
+  the runtime is in, and goes for good when a latch engages again.
+
 ## [0.33.1] - 2026-11-02
 
 ### Changed
