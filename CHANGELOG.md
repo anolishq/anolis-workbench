@@ -26,13 +26,13 @@ Historical note:
   command's exit status before it read any output and without a time limit,
   so output past the SSH channel window (about 2 MiB) deadlocked it and a
   command that never exited blocked it for good; the job never ended. It now
-  reads stdout and stderr as they arrive, interleaved or not, and stops at
-  the timeout it is given (30 minutes for `install.sh`): it closes the
-  channel and the job ends `failed` with "timed out after N seconds". The
-  timeouts the other SSH steps already pass now take effect too (5 minutes
-  for a rollback, 2 minutes for a `systemctl` action, 30 seconds for the
-  probes). A timeout does not stop the command on the target, which may be
-  left part-installed or still running.
+  reads stdout and stderr as they arrive, interleaved or not, and once the
+  command has started, the timeout it is given bounds its run (30 minutes
+  for `install.sh`): on expiry it closes the channel and the job ends
+  `failed` with "timed out after N seconds". The timeouts the server's other
+  SSH steps already pass now take effect too (2 minutes for a `systemctl`
+  action, 30 seconds for the probes). A timeout does not stop the command on
+  the target, which may be left part-installed or still running.
 
 ## [0.33.1] - 2026-11-02
 
