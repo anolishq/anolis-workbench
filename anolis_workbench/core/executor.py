@@ -7,7 +7,6 @@ targeting the local machine or a remote host over SSH.
 from __future__ import annotations
 
 import re
-import select
 import shlex
 import subprocess
 import time
@@ -389,6 +388,9 @@ class ParamikoSSHExecutor(Executor):
 
 
 _RECV_CHUNK = 32768
+# How long the read loop waits when neither stream holds data. Each wake reads
+# all that is buffered, up to a full channel window.
+_IDLE_WAIT_S = 0.05
 
 
 def _collect(channel: paramiko.Channel, deadline: float, out: bytearray, err: bytearray) -> int:
@@ -400,6 +402,10 @@ def _collect(channel: paramiko.Channel, deadline: float, out: bytearray, err: by
     (#656). The output ends at EOF, not at the exit status, which a server
     may send before the last of it. A closed channel counts as EOF, and its
     status is -1 when the server sent none.
+
+    It polls rather than waiting on channel.fileno(): that fd joins the two
+    streams through paramiko's OrPipe, which can lose a wakeup while both
+    hold data, and the window then stays shut until the deadline.
     """
     while True:
         # Read the flag before draining: data arrives before the EOF does, so
@@ -414,9 +420,8 @@ def _collect(channel: paramiko.Channel, deadline: float, out: bytearray, err: by
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError
-        # The channel's fileno is readable while either stream holds data, and
-        # from EOF on.
-        select.select([channel], [], [], remaining)
+        if not (channel.recv_ready() or channel.recv_stderr_ready()):
+            time.sleep(min(remaining, _IDLE_WAIT_S))
     while not channel.exit_status_ready():
         remaining = deadline - time.monotonic()
         if remaining <= 0:

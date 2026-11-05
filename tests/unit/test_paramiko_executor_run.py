@@ -186,6 +186,27 @@ def test_stderr_and_stdout_are_drained_together(connect: Callable[[Behaviour], _
     assert (len(result.stdout), len(result.stderr)) == (BIG, BIG)
 
 
+def test_interleaved_stdout_and_stderr_far_past_the_window_complete(connect: Callable[[Behaviour], _Link]) -> None:
+    # How a chatty install.sh writes: small lines on both streams, in turn.
+    # Waiting for paramiko's channel fileno to become readable stalls here: it
+    # joins the two streams with an OrPipe that can drop a wakeup while both
+    # hold data, and the window then stays at 0 until the deadline.
+    rounds = 6144  # 24 MiB in all, 12 times the window
+    out_chunk, err_chunk = b"o" * 3000, b"e" * 1000
+
+    def behaviour(channel: paramiko.Channel) -> None:
+        for _ in range(rounds):
+            channel.sendall(out_chunk)
+            channel.sendall_stderr(err_chunk)
+        _finish(channel, 0)
+
+    link = connect(behaviour)
+    result = _run_bounded(link.executor, ["bash", "/tmp/install.sh"], timeout=20, join_s=20 + SLACK_S)
+
+    assert result.returncode == 0
+    assert (len(result.stdout), len(result.stderr)) == (rounds * len(out_chunk), rounds * len(err_chunk))
+
+
 def test_output_sent_after_the_exit_status_is_kept(connect: Callable[[Behaviour], _Link]) -> None:
     # A server may send exit-status before the last of the output; the output
     # ends at EOF, not at the status.
