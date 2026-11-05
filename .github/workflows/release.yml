@@ -457,7 +457,6 @@ jobs:
     name: Generate CycloneDX SBOM
     needs: package-desktop
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -488,7 +487,8 @@ jobs:
   # 10. Name and attest the release assets
   # =========================================================================
   # publish-pypi and create-release both need this job, so a failed build,
-  # SBOM or attestation stops the run before anything irreversible.
+  # SBOM job or attestation, or a missing SBOM, stops the run before anything
+  # irreversible (#673).
   attest:
     name: Attest release assets
     needs: [validate, build-python, package-desktop, sbom, metrics]
@@ -511,12 +511,13 @@ jobs:
           path: raw-bundles
           merge-multiple: true
 
+      # By name: a pattern that matches no artifact downloads nothing and
+      # passes; a name that matches none fails the step (#673).
       - name: Download SBOM artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          pattern: desktop-sbom-*
+          name: desktop-sbom-cyclonedx
           path: raw-bundles
-          merge-multiple: true
 
       - name: Download metrics artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -570,6 +571,21 @@ jobs:
 
           echo "=== Release assets ==="
           ls -lh release-assets/
+
+      # The globs below pass while any one line matches, so `sbom-*` alone
+      # would let a release ship with none of its SBOMs (#673).
+      - name: Require the three SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in sbom-python.cdx.json sbom-node.cdx.json sbom-rust.cdx.json; do
+            if ! jq -e '.bomFormat == "CycloneDX"' "release-assets/$f" >/dev/null 2>&1; then
+              echo "::error::release-assets/$f is missing or is not a CycloneDX SBOM"
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       # The same paths as create-release's `files:`, so every attached asset
       # carries a build-provenance attestation (#126).
@@ -632,6 +648,10 @@ jobs:
           tag_name: ${{ needs.validate.outputs.tag }}
           name: Release ${{ inputs.version }}
           prerelease: ${{ inputs.prerelease }}
+          # Refuse before the release is created if any `files:` line matches
+          # nothing. The tag is already pushed by then; the SBOM check in
+          # attest is what runs before anything irreversible.
+          fail_on_unmatched_files: true
           body: |
             ## Release ${{ inputs.version }}
 

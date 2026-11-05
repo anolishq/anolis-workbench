@@ -19,6 +19,17 @@ Historical note:
   project pinning ezo 0.6.0 does not show the schema-version note in Compose.
   The schema itself changes only its `provider_version`.
 
+### Fixed
+
+- **A release no longer ships without its SBOMs** (#673). The release
+  workflow's SBOM job could fail without failing the run, and every later
+  step accepted an empty match, so PyPI, the tag and the GitHub Release
+  could go out with no `sbom-*.cdx.json` assets. A failed SBOM job now stops
+  the run, the SBOM artifact is downloaded by name, and the attest job
+  refuses to go on unless all three SBOMs are present and CycloneDX, before
+  anything is published. The release step also fails on any `files:` line
+  that matches nothing.
+
 ## [0.33.1] - 2026-11-02
 
 ### Changed
