@@ -183,14 +183,18 @@
   let estopFeedbackFor = $state<string | null>(null);
   // Whether this page's clear released the latch, and no latch has engaged
   // since. The note it gives is read from the mode as it is now, not as it was
-  // at the clear (#725).
+  // at the clear (#725). It says actuation is re-enabled only in a mode that
+  // takes device calls: IDLE blocks them, and while the mode is unknown ("--",
+  // UNKNOWN) it says nothing about them.
   let latchClearedHere = $state<boolean>(false);
   const clearNote = $derived(
     !latchClearedHere
       ? ""
       : mode === "FAULT"
         ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
-        : "Latch cleared. Actuation re-enabled.",
+        : mode === "MANUAL" || mode === "AUTO"
+          ? "Latch cleared. Actuation re-enabled."
+          : "Latch cleared.",
   );
 
   let providerHealth = $state<ProviderHealth[]>([]);
@@ -1097,8 +1101,12 @@
 
   function noteRestart(status: RuntimeApiStatus | null): void {
     if (!status) return;
-    if (lastUptime !== null && status.uptime_seconds < lastUptime && operator?.settings?.length)
-      restartNote = true;
+    if (lastUptime !== null && status.uptime_seconds < lastUptime) {
+      // A new runtime process: a clear made against the last one is not news
+      // about this one (#725).
+      latchClearedHere = false;
+      if (operator?.settings?.length) restartNote = true;
+    }
     lastUptime = status.uptime_seconds;
   }
 

@@ -25,8 +25,11 @@ Historical note:
   It was written once, from the mode at the moment of the clear, and stayed
   until the next stop or clear made from the page: beside a latch a stop
   from the API, another tab or the hardware had engaged since, and still
-  saying FAULT after the mode had changed to MANUAL. It now names the mode
-  the runtime is in, and goes for good when a latch engages again.
+  saying FAULT after the mode had changed to MANUAL. It now follows the mode
+  the runtime is in: it says actuation is re-enabled only in MANUAL or AUTO,
+  keeps the FAULT advice in FAULT, and says only "Latch cleared." in IDLE,
+  which refuses device calls, or while the mode cannot be read. It goes for
+  good when a latch engages again or the runtime restarts.
 
 ## [0.33.1] - 2026-11-02
 
