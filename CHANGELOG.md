@@ -19,6 +19,18 @@ Historical note:
   project pinning ezo 0.6.0 does not show the schema-version note in Compose.
   The schema itself changes only its `provider_version`.
 
+### Fixed
+
+- **A remote provision over SSH no longer hangs on a stuck or chatty
+  `install.sh`** (#656). The workbench server's SSH executor waited for the
+  command's exit status before it read any output and without a time limit,
+  so output past the SSH channel window (about 2 MiB) deadlocked it and a
+  command that never exited blocked it for good; the job never ended. It now
+  reads stdout and stderr as they arrive and stops at the timeout it is
+  given (30 minutes for `install.sh`, 60 seconds when none is given): it
+  closes the channel and the job ends `failed` with "timed out after N
+  seconds".
+
 ## [0.33.1] - 2026-11-02
 
 ### Changed
