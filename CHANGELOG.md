@@ -41,6 +41,18 @@ Historical note:
   SSH steps already pass now take effect too (2 minutes for a `systemctl`
   action, 30 seconds for the probes). A timeout does not stop the command on
   the target, which may be left part-installed or still running.
+- **Operate's "Latch cleared" note follows the latch and the mode** (#725).
+  It was written once, from the mode at the moment of the clear, and stayed
+  until the next stop or clear made from the page: beside a latch a stop
+  from the API, another tab or the hardware had engaged since, and still
+  saying FAULT after the mode had changed to MANUAL. It now follows the mode
+  the runtime is in: it says actuation is re-enabled in MANUAL or AUTO, and
+  only "Latch cleared." in IDLE, which blocks control calls, or while the
+  mode cannot be read. In FAULT it no longer says that every device call is
+  refused, which the runtime does not do: it says manual calls are accepted,
+  the automation stays stopped, and AUTO is reachable only through MANUAL.
+  It goes for good when a stop is pressed or a latch engages again, or the
+  runtime restarts.
 
 ## [0.33.1] - 2026-11-02
 

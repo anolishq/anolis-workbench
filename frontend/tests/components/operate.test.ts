@@ -592,6 +592,7 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = pathFromInput(input);
         if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path === '/v0/mode') return jsonResponse(200, { status: { code: 'OK' }, mode: 'MANUAL' });
         if (init?.method === 'POST' && path === '/v0/estop') {
           acted = true;
           return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
@@ -747,6 +748,7 @@ describe('Operate.svelte — a status reply older than the last stop or clear (#
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = pathFromInput(input);
         if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path === '/v0/mode') return jsonResponse(200, { status: { code: 'OK' }, mode: 'MANUAL' });
         if (init?.method === 'POST' && path === '/v0/estop')
           return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
         if (init?.method === 'POST' && path === '/v0/estop/clear') return jsonResponse(200, { latched: false });
@@ -824,7 +826,8 @@ describe('Operate.svelte — a status reply older than the last stop or clear (#
     await waitFor(() => expect(reads).toHaveLength(2));
     await fireEvent.click(await screen.findByRole('button', { name: 'Clear latch…' }));
     await fireEvent.click(screen.getByRole('button', { name: /Confirm clear/ }));
-    expect(await screen.findByText('Latch cleared. Actuation re-enabled.')).toBeInTheDocument();
+    // No status read has landed yet, so the page does not know the mode (#725).
+    expect(await screen.findByText('Latch cleared.')).toBeInTheDocument();
     await waitFor(() => expect(reads).toHaveLength(3));
 
     reads[1].resolve(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }));

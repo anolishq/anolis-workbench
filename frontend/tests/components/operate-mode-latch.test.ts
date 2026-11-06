@@ -1,17 +1,17 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Operate from "../../src/routes/Operate.svelte";
-import { createProjectDocument, jsonResponse, pathFromInput } from "./helpers";
+import { createProjectDocument, deferred, jsonResponse, pathFromInput } from "./helpers";
 
 const RUNNING = { running: true, active_project: "demo" };
 
-function status(mode: string, latched: boolean) {
+function status(mode: string | null, latched: boolean, uptime = 1) {
   return {
     status: { code: "OK" },
     version: "0.4.0",
-    mode,
-    uptime_seconds: 1,
+    ...(mode === null ? {} : { mode }),
+    uptime_seconds: uptime,
     polling_interval_ms: 500,
     providers: [],
     device_count: 0,
@@ -54,8 +54,15 @@ const modeOptions = async (mode: string) => {
   const select = badge.closest(".operate-section")?.querySelector("select") as HTMLSelectElement;
   return Array.from(select.options).map((o) => o.value);
 };
+// The stop card's row, found by its stop button, which reads ENGAGING… while
+// a stop is in flight.
 const row = () =>
-  screen.getByRole("button", { name: /^SOFTWARE STOP/ }).closest(".estop-row") as HTMLElement;
+  screen
+    .getByRole("button", { name: /^SOFTWARE STOP|^ENGAGING/ })
+    .closest(".estop-row") as HTMLElement;
+
+const FAULT_CLEARED =
+  "Latch cleared. Manual calls are accepted. The runtime is in FAULT, so the automation stays stopped: AUTO is reachable only through MANUAL.";
 
 describe("Operate.svelte — mode and latch wording (#692)", () => {
   it("in FAULT offers only the way out the runtime accepts, MANUAL, and the machine line says why", async () => {
@@ -76,7 +83,9 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     expect(screen.queryByTestId("mode-fault-note")).not.toBeInTheDocument();
   });
 
-  it("clearing the latch in FAULT says device calls stay refused until MANUAL", async () => {
+  it("clearing the latch in FAULT says manual calls are accepted and AUTO waits on MANUAL", async () => {
+    // The runtime's CallRouter gates IDLE and AUTO, not FAULT: manual calls go
+    // through in FAULT, and FAULT -> AUTO is refused (anolis mode_manager).
     renderOperate("FAULT", true);
     await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
     await fireEvent.click(await within(row()).findByRole("button", { name: "Clear latch…" }));
@@ -85,9 +94,269 @@ describe("Operate.svelte — mode and latch wording (#692)", () => {
     );
 
     const feedback = await within(row()).findByTestId("estop-feedback");
-    expect(feedback).toHaveTextContent(
-      "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL.",
+    expect(feedback.textContent?.trim()).toBe(FAULT_CLEARED);
+    expect(feedback).not.toHaveTextContent("refuses");
+  });
+});
+
+type Rig = {
+  mode: string;
+  latched: boolean;
+  /** The runtime's uptime; a drop is how the poll sees a restart. */
+  uptime?: number;
+  /** The workbench's /api/status fails: the page then shows mode "--". */
+  workbenchDown?: boolean;
+  /** /v0/mode fails and runtime status carries no mode: the page shows UNKNOWN. */
+  modeUnreadable?: boolean;
+  /** How POST /v0/estop answers. */
+  stop?: "latches" | "does-not-latch" | "fails";
+  /** When set, POST /v0/estop answers only once this resolves. */
+  stopReply?: ReturnType<typeof deferred<Response>>;
+};
+
+/**
+ * Operate for a running `demo` whose runtime state the test changes from
+ * outside the page: the rig's fields are what the runtime reports next, as
+ * another tab, the API or the hardware would leave them.
+ */
+function renderRig(rig: Rig) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = pathFromInput(input);
+      if (path === "/api/status") {
+        if (rig.workbenchDown) throw new Error("workbench unreachable");
+        return jsonResponse(200, RUNNING);
+      }
+      if (path === "/v0/runtime/status")
+        return jsonResponse(
+          200,
+          status(rig.modeUnreadable ? null : rig.mode, rig.latched, rig.uptime ?? 1),
+        );
+      if (path === "/v0/mode" && init?.method === "POST") {
+        rig.mode = JSON.parse(String(init.body)).mode;
+        return jsonResponse(200, { status: { code: "OK" }, mode: rig.mode });
+      }
+      if (path === "/v0/mode") {
+        if (rig.modeUnreadable) throw new Error("mode unreadable");
+        return jsonResponse(200, { status: { code: "OK" }, mode: rig.mode });
+      }
+      if (path === "/v0/devices") return jsonResponse(200, { devices: [] });
+      if (path === "/v0/estop" && init?.method === "POST") {
+        if (rig.stopReply) return rig.stopReply.promise;
+        if (rig.stop === "fails") throw new Error("network down");
+        rig.latched = rig.stop !== "does-not-latch";
+        return jsonResponse(200, {
+          latched: rig.latched,
+          software_safe_state: "hooks",
+          actions: [],
+        });
+      }
+      if (path === "/v0/estop/clear" && init?.method === "POST") {
+        rig.latched = false;
+        return jsonResponse(200, { latched: false });
+      }
+      return jsonResponse(200, {});
+    }),
+  );
+  return render(Operate, {
+    props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+  });
+}
+
+const CLEARED = "Latch cleared. Actuation re-enabled.";
+/** What a clear says in IDLE, which blocks control calls, or while the mode is not known. */
+const CLEARED_ONLY = "Latch cleared.";
+
+/** The stop card's message, exactly; "" when it shows none. */
+const note = () => within(row()).queryByTestId("estop-feedback")?.textContent?.trim() ?? "";
+
+async function clearFromThePage(): Promise<void> {
+  await fireEvent.click(await within(row()).findByRole("button", { name: "Clear latch…" }));
+  await fireEvent.click(
+    within(row()).getByRole("button", { name: "Confirm clear: re-enables actuation" }),
+  );
+}
+
+async function setModeFromThePage(mode: string): Promise<void> {
+  const badge = screen.getByTestId("mode-badge");
+  const section = badge.closest(".operate-section") as HTMLElement;
+  await fireEvent.change(section.querySelector("select") as HTMLSelectElement, {
+    target: { value: mode },
+  });
+  await fireEvent.click(within(section).getByRole("button", { name: "Set Mode" }));
+  await screen.findByText(mode, { selector: '[data-testid="mode-badge"]' });
+}
+
+/** The next 5 s status poll, which is how the page sees a change made elsewhere. */
+const nextPoll = () => vi.advanceTimersByTimeAsync(5000);
+
+describe("Operate.svelte — the latch-clear message follows the latch and mode (#725)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("goes when a stop from outside the page latches again, and stays gone after that latch is released", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rig = { mode: "FAULT", latched: true };
+    renderRig(rig);
+    await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
+
+    await clearFromThePage();
+    expect(await within(row()).findByTestId("estop-feedback")).toHaveTextContent(FAULT_CLEARED);
+
+    // A software stop from the API, another tab or the hardware.
+    rig.latched = true;
+    await nextPoll();
+    expect(await within(row()).findByRole("button", { name: "Clear latch…" })).toBeInTheDocument();
+    expect(within(row()).queryByTestId("estop-feedback")).not.toBeInTheDocument();
+
+    await setModeFromThePage("MANUAL");
+    expect(within(row()).queryByTestId("estop-feedback")).not.toBeInTheDocument();
+
+    // Released elsewhere: that clear is not this page's to report.
+    rig.latched = false;
+    await nextPoll();
+    await waitFor(() =>
+      expect(within(row()).queryByRole("button", { name: "Clear latch…" })).not.toBeInTheDocument(),
     );
-    expect(feedback).not.toHaveTextContent("Actuation re-enabled");
+    expect(within(row()).queryByTestId("estop-feedback")).not.toBeInTheDocument();
+  });
+
+  it("names the mode the runtime is in now, however the mode changed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rig = { mode: "FAULT", latched: true };
+    renderRig(rig);
+    await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
+
+    await clearFromThePage();
+    expect(await within(row()).findByTestId("estop-feedback")).toHaveTextContent(FAULT_CLEARED);
+
+    await setModeFromThePage("MANUAL");
+    await waitFor(() =>
+      expect(within(row()).getByTestId("estop-feedback")).toHaveTextContent(CLEARED),
+    );
+    expect(within(row()).getByTestId("estop-feedback")).not.toHaveTextContent("FAULT");
+
+    // A fault raised outside the page: the note says FAULT again.
+    rig.mode = "FAULT";
+    await nextPoll();
+    await waitFor(() =>
+      expect(within(row()).getByTestId("estop-feedback")).toHaveTextContent(FAULT_CLEARED),
+    );
+  });
+
+  it("does not come back with a runtime that stopped and started again", async () => {
+    const rig = { mode: "MANUAL", latched: true };
+    const view = renderRig(rig);
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    expect(await within(row()).findByTestId("estop-feedback")).toHaveTextContent(CLEARED);
+
+    await view.rerender({ runtimeStatus: { running: false, active_project: null } });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^SOFTWARE STOP/ })).toBeNull(),
+    );
+    await view.rerender({ runtimeStatus: RUNNING });
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+
+    expect(within(row()).queryByTestId("estop-feedback")).not.toBeInTheDocument();
+  });
+  it("claims actuation re-enabled only in MANUAL or AUTO, not in IDLE", async () => {
+    const rig: Rig = { mode: "IDLE", latched: true };
+    renderRig(rig);
+    await screen.findByText("IDLE", { selector: '[data-testid="mode-badge"]' });
+
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(CLEARED_ONLY));
+
+    await setModeFromThePage("MANUAL");
+    await waitFor(() => expect(note()).toBe(CLEARED));
+    await setModeFromThePage("AUTO");
+    expect(note()).toBe(CLEARED);
+  });
+
+  it("says only that the latch cleared while the workbench cannot read the mode", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rig: Rig = { mode: "FAULT", latched: true };
+    renderRig(rig);
+    await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(FAULT_CLEARED));
+
+    rig.workbenchDown = true;
+    await nextPoll();
+    await screen.findByText("--", { selector: '[data-testid="mode-badge"]' });
+    expect(note()).toBe(CLEARED_ONLY);
+
+    rig.workbenchDown = false;
+    await nextPoll();
+    await waitFor(() => expect(note()).toBe(FAULT_CLEARED));
+  });
+
+  it("says only that the latch cleared while the runtime does not report its mode", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rig: Rig = { mode: "FAULT", latched: true };
+    renderRig(rig);
+    await screen.findByText("FAULT", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(FAULT_CLEARED));
+
+    rig.modeUnreadable = true;
+    await nextPoll();
+    await screen.findByText("UNKNOWN", { selector: '[data-testid="mode-badge"]' });
+    expect(note()).toBe(CLEARED_ONLY);
+  });
+
+  it("does not come back with a runtime the poll sees restarted", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const rig: Rig = { mode: "MANUAL", latched: true, uptime: 1000 };
+    renderRig(rig);
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(CLEARED));
+
+    // A new process, up unlatched, between two polls: only its uptime says so.
+    rig.uptime = 2;
+    await nextPoll();
+    await waitFor(() => expect(note()).toBe(""));
+  });
+
+  it.each([
+    ["fails", /^Failed to engage software stop: .*use the hardware e-stop now\.$/],
+    ["does-not-latch", /WARNING: the latch did not engage/],
+  ] as const)("gives way to the result of a stop from the page that %s", async (stop, message) => {
+    const rig: Rig = { mode: "MANUAL", latched: true, stop };
+    renderRig(rig);
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(CLEARED));
+
+    await fireEvent.click(within(row()).getByRole("button", { name: /^SOFTWARE STOP/ }));
+
+    await waitFor(() => expect(note()).toMatch(message));
+    expect(note()).not.toContain("Latch cleared");
+  });
+
+  it("goes as soon as a stop from the page is pressed, before its reply", async () => {
+    // The runtime latches before it runs the ladder and answers, so while the
+    // stop is in flight "Actuation re-enabled" would be false.
+    const rig: Rig = { mode: "MANUAL", latched: true };
+    renderRig(rig);
+    await screen.findByText("MANUAL", { selector: '[data-testid="mode-badge"]' });
+    await clearFromThePage();
+    await waitFor(() => expect(note()).toBe(CLEARED));
+
+    const reply = deferred<Response>();
+    rig.stopReply = reply;
+    await fireEvent.click(within(row()).getByRole("button", { name: /^SOFTWARE STOP/ }));
+    await screen.findByRole("button", { name: "ENGAGING…" });
+    expect(note()).toBe("");
+
+    rig.latched = true;
+    reply.resolve(jsonResponse(200, { latched: true, software_safe_state: "hooks", actions: [] }));
+    await waitFor(() => expect(note()).toMatch(/Software stop engaged/));
+    expect(note()).not.toContain("Latch cleared");
   });
 });

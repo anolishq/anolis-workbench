@@ -73,6 +73,7 @@ function renderOperate(
     const path = pathFromInput(input);
     if (path === '/api/status') return jsonResponse(200, RUNNING);
     if (path === '/v0/runtime/status') return jsonResponse(200, runtimeStatus());
+    if (path === '/v0/mode') return jsonResponse(200, { status: { code: 'OK' }, mode: 'MANUAL' });
     if (path === '/v0/devices') return jsonResponse(200, { devices: DEVICES });
     if (path === '/v0/estop/clear' && init?.method === 'POST') return onClear();
     return jsonResponse(200, {});

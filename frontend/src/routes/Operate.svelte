@@ -181,6 +181,23 @@
   // The running project a stop's result belongs to, so the advisory never
   // shows one project's result under another's name (#264).
   let estopFeedbackFor = $state<string | null>(null);
+  // Whether this page's clear released the latch, and no latch has engaged
+  // since. The note it gives is read from the mode as it is now, not as it was
+  // at the clear (#725). Per the runtime's CallRouter, MANUAL and FAULT take
+  // manual calls and AUTO runs the automation; IDLE blocks control calls, and
+  // while the mode is unknown ("--", UNKNOWN) the note says nothing about them.
+  // FAULT keeps the automation stopped, and AUTO is reachable from it only
+  // through MANUAL.
+  let latchClearedHere = $state<boolean>(false);
+  const clearNote = $derived(
+    !latchClearedHere
+      ? ""
+      : mode === "FAULT"
+        ? "Latch cleared. Manual calls are accepted. The runtime is in FAULT, so the automation stays stopped: AUTO is reachable only through MANUAL."
+        : mode === "MANUAL" || mode === "AUTO"
+          ? "Latch cleared. Actuation re-enabled."
+          : "Latch cleared.",
+  );
 
   let providerHealth = $state<ProviderHealth[]>([]);
   // Devices whose command watchdog tripped, and the one being cleared (wb#572).
@@ -346,6 +363,12 @@
     if (!estop?.latched) clearArmed = false;
   });
 
+  // A latch engaged after this page's clear, by a stop from anywhere, ends
+  // that clear's note for good (#725).
+  $effect(() => {
+    if (estop?.latched) latchClearedHere = false;
+  });
+
   onDestroy(() => stopOperate());
 
   // ── Core activate/deactivate ──────────────────────────────────────────────
@@ -389,6 +412,7 @@
     stopChain = null;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
+    latchClearedHere = false;
     clearArmed = false;
     providerHealth = [];
     eventTrace = [];
@@ -669,6 +693,9 @@
 
   async function triggerEstop(): Promise<void> {
     estopRunning = true;
+    // The runtime latches before it answers, so a clear's note must not stand
+    // beside a stop in flight (#725).
+    latchClearedHere = false;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
     estopFeedbackFor = runningProject;
@@ -717,11 +744,7 @@
         estopFeedback = "Clear requested, but the runtime still reports the latch engaged.";
         estopFeedbackClass = "field-error";
       } else {
-        estopFeedback =
-          mode === "FAULT"
-            ? "Latch cleared. The runtime is still in FAULT, which refuses every device call: set the mode to MANUAL."
-            : "Latch cleared. Actuation re-enabled.";
-        estopFeedbackClass = "field-note";
+        latchClearedHere = true;
         estopEpoch += 1;
         if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
       }
@@ -1083,8 +1106,12 @@
 
   function noteRestart(status: RuntimeApiStatus | null): void {
     if (!status) return;
-    if (lastUptime !== null && status.uptime_seconds < lastUptime && operator?.settings?.length)
-      restartNote = true;
+    if (lastUptime !== null && status.uptime_seconds < lastUptime) {
+      // A new runtime process: a clear made against the last one is not news
+      // about this one (#725).
+      latchClearedHere = false;
+      if (operator?.settings?.length) restartNote = true;
+    }
     lastUptime = status.uptime_seconds;
   }
 
@@ -1816,6 +1843,8 @@
         {/if}
         {#if estopFeedback}
           <span class={estopFeedbackClass} data-testid="estop-feedback">{estopFeedback}</span>
+        {:else if clearNote}
+          <span class="field-note" data-testid="estop-feedback">{clearNote}</span>
         {/if}
         <span class="estop-disclaimer">
           Not an emergency stop: use the hardware E-stop
