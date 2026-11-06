@@ -15,6 +15,22 @@ def test_paramiko_is_a_core_dependency() -> None:
     assert any(r.startswith("paramiko") and "extra ==" not in r for r in reqs), reqs
 
 
+def _finished_exec(stdout: bytes = b"", status: int = 0) -> tuple[MagicMock, MagicMock, MagicMock]:
+    """exec_command's (stdin, stdout, stderr) for a command that has already
+    exited: its output is buffered, EOF and the exit status have arrived."""
+    channel = MagicMock()
+    channel.eof_received = True
+    channel.closed = False
+    channel.recv_ready.side_effect = [bool(stdout), False]
+    channel.recv.return_value = stdout
+    channel.recv_stderr_ready.return_value = False
+    channel.exit_status_ready.return_value = True
+    channel.recv_exit_status.return_value = status
+    stdout_file = MagicMock()
+    stdout_file.channel = channel
+    return MagicMock(), stdout_file, MagicMock()
+
+
 class TestParamikoSSHExecutor:
     """Tests for ParamikoSSHExecutor using mocked paramiko."""
 
@@ -32,19 +48,14 @@ class TestParamikoSSHExecutor:
         executor._client = mock_client
         executor._sftp = MagicMock()
 
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b"x86_64\n"
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_stderr = MagicMock()
-        mock_stderr.read.return_value = b""
-        mock_stdin = MagicMock()
-        mock_client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+        mock_client.exec_command.return_value = _finished_exec(b"x86_64\n")
 
         result = executor.run(["uname", "-m"])
 
         assert result.returncode == 0
         assert result.stdout == "x86_64\n"
-        mock_client.exec_command.assert_called_once_with("uname -m", timeout=None)
+        # No timeout given: the 60 s default, as SubprocessSSHExecutor's.
+        mock_client.exec_command.assert_called_once_with("uname -m", timeout=60)
 
     @patch("anolis_workbench.core.executor.ParamikoSSHExecutor.__init__", return_value=None)
     def test_run_with_sudo(self, mock_init: MagicMock) -> None:
@@ -54,17 +65,11 @@ class TestParamikoSSHExecutor:
         executor._client = MagicMock()
         executor._sftp = MagicMock()
 
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b""
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_stderr = MagicMock()
-        mock_stderr.read.return_value = b""
-        mock_stdin = MagicMock()
-        executor._client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+        executor._client.exec_command.return_value = _finished_exec()
 
-        executor.run(["tar", "-xz", "-C", "/usr/local"], sudo=True)
+        executor.run(["tar", "-xz", "-C", "/usr/local"], sudo=True, timeout=300)
 
-        executor._client.exec_command.assert_called_once_with("sudo tar -xz -C /usr/local", timeout=None)
+        executor._client.exec_command.assert_called_once_with("sudo tar -xz -C /usr/local", timeout=300)
 
     @patch("anolis_workbench.core.executor.ParamikoSSHExecutor.__init__", return_value=None)
     def test_run_with_input(self, mock_init: MagicMock) -> None:
@@ -74,12 +79,7 @@ class TestParamikoSSHExecutor:
         executor._client = MagicMock()
         executor._sftp = MagicMock()
 
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b""
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_stderr = MagicMock()
-        mock_stderr.read.return_value = b""
-        mock_stdin = MagicMock()
+        mock_stdin, mock_stdout, mock_stderr = _finished_exec()
         executor._client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
 
         executor.run(["cat"], input=b"hello")

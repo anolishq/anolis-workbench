@@ -9,11 +9,16 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath
+from typing import TYPE_CHECKING
 
 from anolis_workbench.core.child_env import child_env
+
+if TYPE_CHECKING:
+    import paramiko
 
 # Allowlist of binaries that executors are permitted to invoke.
 # Commands not in this set are rejected to prevent command injection.
@@ -331,16 +336,25 @@ class ParamikoSSHExecutor(Executor):
         remote_cmd = shlex.join(safe_cmd)
         if sudo:
             remote_cmd = f"sudo {remote_cmd}"
-        stdin, stdout, stderr = self._client.exec_command(remote_cmd, timeout=timeout)
-        if input:
-            stdin.write(input)
-            stdin.flush()
-            stdin.channel.shutdown_write()
-        exit_code = stdout.channel.recv_exit_status()
+        timeout = timeout if timeout else 60
+        deadline = time.monotonic() + timeout
+        stdin, stdout, _ = self._client.exec_command(remote_cmd, timeout=timeout)
+        channel = stdout.channel
+        out, err = bytearray(), bytearray()
+        try:
+            if input:
+                stdin.write(input)
+                stdin.flush()
+                stdin.channel.shutdown_write()
+            exit_code = _collect(channel, deadline, out, err)
+        except TimeoutError:
+            raise subprocess.TimeoutExpired(remote_cmd, timeout, output=bytes(out), stderr=bytes(err)) from None
+        finally:
+            channel.close()
         return RunResult(
             returncode=exit_code,
-            stdout=stdout.read().decode(errors="replace"),
-            stderr=stderr.read().decode(errors="replace"),
+            stdout=out.decode(errors="replace"),
+            stderr=err.decode(errors="replace"),
         )
 
     def write_file(self, path: str, data: bytes) -> None:
@@ -371,6 +385,49 @@ class ParamikoSSHExecutor(Executor):
         """Close the SSH connection and SFTP channel."""
         self._sftp.close()
         self._client.close()
+
+
+_RECV_CHUNK = 32768
+# How long the read loop waits when neither stream holds data. Each wake reads
+# all that is buffered, up to a full channel window.
+_IDLE_WAIT_S = 0.05
+
+
+def _collect(channel: paramiko.Channel, deadline: float, out: bytearray, err: bytearray) -> int:
+    """Read the channel's stdout and stderr to EOF, then wait for its exit
+    status, all by `deadline` (time.monotonic()); raise TimeoutError if not.
+
+    Both streams are read as data arrives: they share one channel window, and
+    a stream left unread stops the remote command once the window fills
+    (#656). The output ends at EOF, not at the exit status, which a server
+    may send before the last of it. A closed channel counts as EOF, and its
+    status is -1 when the server sent none.
+
+    It polls rather than waiting on channel.fileno(): that fd joins the two
+    streams through paramiko's OrPipe, which can lose a wakeup while both
+    hold data, and the window then stays shut until the deadline.
+    """
+    while True:
+        # Read the flag before draining: data arrives before the EOF does, so
+        # once it is set, this drain takes the last of the output.
+        ended = channel.eof_received or channel.closed
+        while channel.recv_ready():
+            out += channel.recv(_RECV_CHUNK)
+        while channel.recv_stderr_ready():
+            err += channel.recv_stderr(_RECV_CHUNK)
+        if ended:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        if not (channel.recv_ready() or channel.recv_stderr_ready()):
+            time.sleep(min(remaining, _IDLE_WAIT_S))
+    while not channel.exit_status_ready():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        channel.status_event.wait(remaining)
+    return channel.recv_exit_status()
 
 
 def create_ssh_executor(
