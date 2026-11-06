@@ -48,17 +48,18 @@ Desktop job flow:
 4. `package-desktop` — stage the frozen sidecar into the Tauri `externalBin`
    path and run `tauri build` per target (`.msi`, `.deb` + `.AppImage`,
    `.dmg`).
-5. `sbom` — Syft CycloneDX SBOMs for the Python, Node and Rust trees. This job
-   is `continue-on-error: true`, which keeps a failed SBOM from failing the
-   run. `attest` needs it, though, and GitHub documents that a failed job
-   skips the jobs that need it without saying whether `continue-on-error`
-   changes that. Treat a failed `sbom` as possibly blocking `attest` and
-   everything after it, PyPI included, and check the SBOM assets (below).
-6. `attest` — normalize asset names and attest build provenance for every
-   file the release attaches: the wheel and sdist, the installers, the SBOMs
-   and `metrics.json`. It needs `validate`, `build-python`,
-   `package-desktop`, `sbom` and `metrics`, and `publish-pypi` needs it, so
-   nothing is published until every asset is built and attested.
+5. `sbom` — Syft CycloneDX SBOMs for the Python, Node and Rust trees. A
+   failed `sbom` job fails the run: `attest` needs it, so `attest` is
+   skipped, and with it the PyPI publish, the tag and the GitHub Release.
+6. `attest` — download the SBOM artifact by name (a missing artifact fails
+   the step), normalize asset names, then refuse to go on unless
+   `sbom-python.cdx.json`, `sbom-node.cdx.json` and `sbom-rust.cdx.json`
+   are all present, CycloneDX, and list at least one component. Only then
+   does it attest build provenance for every file the release attaches: the
+   wheel and sdist, the installers, the SBOMs and `metrics.json`. It needs
+   `validate`, `build-python`, `package-desktop`, `sbom` and `metrics`, and
+   `publish-pypi` needs it, so nothing is published until every asset is
+   built, the SBOMs are checked, and everything is attested.
 7. `create-release` — push the `v<version>` tag and create the GitHub
    Release with the attested assets. It needs `validate`, `smoke-test` and
    `attest`.
@@ -89,13 +90,26 @@ Desktop job flow:
 
 1. macOS is built in the same `package-desktop` matrix as Windows and Linux,
    so a failed macOS leg fails that job and `create-release` does not run.
-2. `publish-pypi` needs `attest`, so a desktop or attestation failure stops
-   the run before the PyPI publish. A failure after it (`smoke-test`,
-   `create-release`) can still leave the version on PyPI with no tag and no
-   GitHub Release. Re-running the workflow for the same version recovers —
-   no tag exists yet, so `validate` passes, and the publish step uses
+2. `publish-pypi` needs `attest`, so a desktop, SBOM or attestation failure
+   stops the run before the PyPI publish. A failure after it can still leave
+   the version on PyPI with no GitHub Release. If it came before
+   `create-release` pushed the tag (`smoke-test`, or `create-release`'s
+   checkout), re-running the workflow for the same version recovers — no tag
+   exists yet, so `validate` passes, and the publish step uses
    `skip-existing: true`.
 3. Re-running only the failed jobs of the same run also recovers, without
-   rebuilding: GitHub re-runs the failed jobs and the ones they gated. 0.15.0
-   went out this way after `smoke-test` failed because PyPI's index had not
-   yet listed the new version.
+   rebuilding, as long as the tag was not pushed: GitHub re-runs the failed
+   jobs and the ones they gated. 0.15.0 went out this way after `smoke-test`
+   failed because PyPI's index had not yet listed the new version.
+4. `create-release` pushes the tag **before** it creates the release, so a
+   failure in "Create GitHub Release" (an API error, or `fail_on_unmatched_files`
+   refusing a `files:` line that matches nothing) leaves the tag pushed and no
+   release. Neither re-run recovers then: a new run fails in `validate`
+   ("Tag already exists"), and re-running `create-release` fails at
+   `git tag -a`, because its checkout fetches the existing tag. Create the
+   release on the existing tag from the run's attested assets instead, after
+   checking that the `release-assets` artifact holds every asset (an
+   unmatched line means one is missing):
+   `gh run download <run-id> -R anolishq/anolis-workbench -n release-assets`,
+   then `gh release create v<version> --verify-tag` with the same files the
+   workflow lists.
