@@ -21,6 +21,26 @@ Historical note:
 
 ### Fixed
 
+- **A release no longer ships without its SBOMs** (#673). The release
+  workflow's SBOM job could fail without failing the run, and every later
+  step accepted an empty match, so PyPI, the tag and the GitHub Release
+  could go out with no `sbom-*.cdx.json` assets. A failed SBOM job now stops
+  the run, the SBOM artifact is downloaded by name, and the attest job
+  refuses to go on unless all three SBOMs are present, CycloneDX, and list
+  at least one component, before anything is published. The release step also fails on any `files:` line
+  that matches nothing.
+- **A remote provision over SSH no longer hangs on a stuck or chatty
+  `install.sh`** (#656). The workbench server's SSH executor waited for the
+  command's exit status before it read any output and without a time limit,
+  so output past the SSH channel window (about 2 MiB) deadlocked it and a
+  command that never exited blocked it for good; the job never ended. It now
+  reads stdout and stderr as they arrive, interleaved or not, and once the
+  command has started, the timeout it is given bounds its run (30 minutes
+  for `install.sh`): on expiry it closes the channel and the job ends
+  `failed` with "timed out after N seconds". The timeouts the server's other
+  SSH steps already pass now take effect too (2 minutes for a `systemctl`
+  action, 30 seconds for the probes). A timeout does not stop the command on
+  the target, which may be left part-installed or still running.
 - **Operate's "Latch cleared" note follows the latch and the mode** (#725).
   It was written once, from the mode at the moment of the clear, and stayed
   until the next stop or clear made from the page: beside a latch a stop
