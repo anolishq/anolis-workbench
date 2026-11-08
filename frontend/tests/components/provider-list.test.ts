@@ -2,13 +2,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 
 import { AUTOMATION_VARIANT, MANUAL_VARIANT, variantRelpath } from "../../src/lib/canonical";
 import type {
   ProjectDocument,
   ProviderSchemaEnvelope,
   ProviderSchemasResponse,
+  RestartPolicy,
+  RuntimeProviderEntry,
   UnknownRecord,
 } from "../../src/lib/contracts";
 import ProviderList from "../../src/lib/ProviderList.svelte";
@@ -371,5 +373,86 @@ describe("ProviderList.svelte", () => {
 
     expect(screen.getByDisplayValue("ghost0")).toBeInTheDocument();
     expect(screen.getByText(/No config schema is vendored/)).toBeInTheDocument();
+  });
+
+  describe("restart policy timeout (#824)", () => {
+    function renderWithRestart(
+      restart_policy: RestartPolicy,
+      timeouts: Partial<RuntimeProviderEntry> = {},
+    ): { entry: RuntimeProviderEntry; onChanged: Mock } {
+      const doc = docWithSim();
+      const entry = doc.variants[MANUAL_VARIANT].providers![0];
+      entry.restart_policy = restart_policy;
+      Object.assign(entry, timeouts);
+      const onChanged = vi.fn();
+      render(ProviderList, { props: { doc, providerSchemas: schemasResponse(), onChanged } });
+      return { entry, onChanged };
+    }
+
+    const ENABLED: RestartPolicy = { enabled: true, max_attempts: 3, backoff_ms: [200, 500, 1000] };
+    const enableCheckbox = () => screen.getByRole("checkbox", { name: "Enable restart policy" });
+    const timeoutInput = () => screen.getByLabelText("timeout (ms)") as HTMLInputElement;
+    const belowSumNote = () => screen.queryByTestId("restart-timeout-below-sum");
+
+    it("enabling restart leaves timeout_ms unset and says what unset means", async () => {
+      const { entry, onChanged } = renderWithRestart({ enabled: false });
+
+      await fireEvent.click(enableCheckbox());
+
+      // The exact shape test_projects_validation.py passes through the schema.
+      expect(entry.restart_policy).toEqual(ENABLED);
+      expect("timeout_ms" in entry.restart_policy!).toBe(false);
+      expect(onChanged).toHaveBeenCalled();
+      expect(timeoutInput().value).toBe("");
+      expect(timeoutInput()).toHaveAttribute("min", "1000");
+      expect(screen.getByTestId("restart-timeout-note")).toHaveTextContent(
+        "Empty: the runtime uses hello + ready timeouts.",
+      );
+    });
+
+    it("keeps an authored timeout_ms across display and a disable/enable cycle", async () => {
+      const { entry } = renderWithRestart({ ...ENABLED, timeout_ms: 30000 });
+      expect(timeoutInput().value).toBe("30000");
+
+      await fireEvent.click(enableCheckbox());
+      expect(entry.restart_policy?.enabled).toBe(false);
+      expect(entry.restart_policy?.timeout_ms).toBe(30000);
+
+      await fireEvent.click(enableCheckbox());
+      expect(entry.restart_policy).toEqual({ ...ENABLED, timeout_ms: 30000 });
+      expect(timeoutInput().value).toBe("30000");
+    });
+
+    it("writes an entered value and unsets the field when it is cleared", async () => {
+      const { entry, onChanged } = renderWithRestart({ ...ENABLED });
+
+      await fireEvent.change(timeoutInput(), { target: { value: "45000" } });
+      expect(entry.restart_policy?.timeout_ms).toBe(45000);
+      expect(onChanged).toHaveBeenCalledTimes(1);
+
+      await fireEvent.change(timeoutInput(), { target: { value: "" } });
+      expect("timeout_ms" in entry.restart_policy!).toBe(false);
+      expect(onChanged).toHaveBeenCalledTimes(2);
+    });
+
+    it("warns about an explicit value below hello + ready, naming the sum", async () => {
+      renderWithRestart({ ...ENABLED, timeout_ms: 12999 });
+
+      expect(belowSumNote()).toHaveTextContent("below hello + ready (13000 ms)");
+      expect(belowSumNote()).toHaveTextContent("accepts it with a warning");
+
+      await fireEvent.change(timeoutInput(), { target: { value: "13000" } });
+      expect(belowSumNote()).not.toBeInTheDocument();
+    });
+
+    it.each<[string, RestartPolicy, Partial<RuntimeProviderEntry>]>([
+      ["the field is unset", { ...ENABLED }, {}],
+      ["the value is below the 1000 the runtime rejects", { ...ENABLED, timeout_ms: 999 }, {}],
+      ["hello is unset", { ...ENABLED, timeout_ms: 1000 }, { hello_timeout_ms: undefined }],
+      ["ready is unset", { ...ENABLED, timeout_ms: 1000 }, { ready_timeout_ms: undefined }],
+    ])("does not warn when %s", (_name, policy, timeouts) => {
+      renderWithRestart(policy, timeouts);
+      expect(belowSumNote()).not.toBeInTheDocument();
+    });
   });
 });
