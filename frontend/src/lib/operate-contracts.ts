@@ -145,7 +145,7 @@ export function watchdogTrippedDevices(providers: ProviderHealth[]): string[] {
  * `watchdog_tripped` health metric as "false" (wb#769). The startup report
  * holds until the runtime restarts; this says whether the devices it names
  * still report a trip. An absent metric makes no claim, and neither does an
- * output not driven (a config failure, which no trip clearing changes).
+ * action not driven (a config failure, which no trip clearing changes).
  */
 export function startupFailuresUntripped(
   s: StartupSafeStateStatus,
@@ -448,9 +448,9 @@ function observeSoftwareSafeState(
 }
 
 /**
- * An entry for an output nothing reached (`cause: "config"`): the call could
- * not be planned, or was refused before its provider (anolis#640). The error
- * says why; it is not a call that was sent and failed.
+ * An entry nothing was sent for (`cause: "config"`): an output the stop could
+ * not plan, or a call refused before its provider (anolis#640). The error says
+ * why; it is not a call that was sent and failed.
  */
 function isNotDriven(action: UnknownRecord): boolean {
   return action.success === false && action.cause === "config";
@@ -608,7 +608,7 @@ export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
   if (s.ran) {
     const outcome = [
       failed.length > 0 ? `${failed.length} call(s) failed.` : "",
-      notDriven.length > 0 ? `${notDriven.length} output(s) not driven.` : "",
+      notDriven.length > 0 ? `${notDriven.length} action(s) not driven, nothing sent.` : "",
       skipped,
     ].filter(Boolean);
     return { text: `${head}: ${outcome.join(" ")}`, ok: false, calls };
@@ -719,6 +719,9 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
       );
     }
     // When the latch failed, the leading warning already conveys nothing is safe.
+    // A kind this build cannot describe that also reports no action is the case
+    // it knows least about, so it points at the hardware stop.
+    if (rung === "unknown") ok = false;
   } else if (failures.length > 0 || notDriven.length > 0) {
     ok = false;
     const describe = (list: UnknownRecord[], fallback: string) =>
@@ -732,7 +735,7 @@ export function summarizeEstopResponse(payload: unknown): { text: string; ok: bo
     }
     if (notDriven.length > 0) {
       parts.push(
-        `${notDriven.length} output(s) not driven: ${describe(notDriven, "no reason reported")}`,
+        `${notDriven.length} action(s) not driven, nothing sent: ${describe(notDriven, "no reason reported")}`,
       );
     }
   } else if (actions.length > 0) {

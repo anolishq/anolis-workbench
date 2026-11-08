@@ -1733,9 +1733,9 @@
               The project declares zero_is_safe: latches actuation, then tries to drive every
               actuating function to zero.
             {:else if estop.software_safe_state === "mixed"}
-              Latches actuation, then tries to drive each output to its declared safe setpoint, or
-              to zero where none applies (zero_is_safe). An output it can do neither for is left as
-              it was and counted as not covered.
+              Latches actuation, then tries to drive each actuating function to its declared safe
+              setpoint, or to zero where none applies (zero_is_safe). An output it does not drive is
+              left as it was. The stop's reply lists those the runtime reports as not driven.
             {:else if estop.software_safe_state === "unknown"}
               This runtime reports a software safe state this version of the workbench does not
               recognise (<code>{estop.software_safe_state_reported}</code>). The stop latches

@@ -90,7 +90,51 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
   describe('under mixed (#816)', () => {
     const note =
-      /tries to drive each output to its declared safe setpoint, or to zero where none applies \(zero_is_safe\)/;
+      /tries to drive each actuating function to its declared safe setpoint, or to zero where none applies \(zero_is_safe\)/;
+
+    it('does not promise that every undriven output is counted or named', async () => {
+      renderOperate(() => jsonResponse(200, status({ software_safe_state: 'mixed' })));
+
+      await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+      await fireEvent.click(info('About the software stop'));
+      expect(rowText()).toContain(
+        "An output it does not drive is left as it was. The stop's reply lists those the runtime reports as not driven.",
+      );
+      expect(rowText()).not.toMatch(/counted as not covered/);
+    });
+
+    it('with nothing counted as uncovered, the stop reply still names a refused setpoint', async () => {
+      // A refused setpoint beside a good one for the same function is not in
+      // the uncovered list: the runtime reports it only in the stop's reply.
+      renderOperate(
+        () => jsonResponse(200, status({ software_safe_state: 'mixed', uncovered_actuating_functions: 0 })),
+        () =>
+          jsonResponse(200, {
+            latched: true,
+            software_safe_state: 'mixed',
+            actions: [
+              { device_handle: 'bread0/dcmt0', function: 'set_pwm', success: true },
+              {
+                device_handle: 'bread0/dcmt0',
+                function: 'set_pwm',
+                success: false,
+                cause: 'config',
+                error: 'setpoint: refused',
+              },
+            ],
+          }),
+      );
+      await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+      expect(screen.queryByTestId('estop-coverage')).not.toBeInTheDocument();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+      const feedback = await screen.findByTestId('estop-feedback');
+      expect(feedback).toHaveTextContent(
+        '1 action(s) not driven, nothing sent: bread0/dcmt0/set_pwm: setpoint: refused',
+      );
+      expect(feedback).toHaveClass('field-error');
+    });
 
     it('reads as a stop that drives outputs, with no latch-only claim', async () => {
       renderOperate(() => jsonResponse(200, status({ software_safe_state: 'mixed' })));

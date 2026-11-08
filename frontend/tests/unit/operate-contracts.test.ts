@@ -497,8 +497,8 @@ describe("estop contract", () => {
     expect(match, "SoftwareSafeState enum not found in contract").not.toBeNull();
     const contractStates = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
     // The vendored contract is the latest anolis release's. `mixed` is known here
-    // ahead of the first release that carries it (#816); this list empties by
-    // itself once the contract is synced to that release.
+    // ahead of the first release that carries it (#816). Once the contract is
+    // synced to that release this allowance does nothing: remove it in that PR.
     const knownAheadOfContract = ["mixed"];
     expect(contractStates.filter((s) => !SOFTWARE_SAFE_STATES.includes(s as never))).toEqual([]);
     expect(
@@ -688,13 +688,15 @@ describe("summarizeEstopResponse", () => {
     expect(out.text).not.toMatch(/\(none\)|NOT driven|no software safe-state/);
   });
 
-  it("with an unrecognised kind and no actions, reports that and no declaration claim (#816)", () => {
+  it("with an unrecognised kind and no actions, points at the hardware stop, with no declaration claim (#816)", () => {
     const out = summarizeEstopResponse({
       latched: true,
       software_safe_state: "FULL_STOP",
       actions: [],
     });
+    expect(out.ok).toBe(false);
     expect(out.text).toMatch(/reported no safe-state actions/);
+    expect(out.text).toMatch(/hardware e-stop/i);
     expect(out.text).not.toMatch(/no software safe-state is declared/);
   });
 
@@ -709,13 +711,13 @@ describe("summarizeEstopResponse", () => {
       ],
     });
     expect(out.ok).toBe(false);
-    expect(out.text).toContain(`1 output(s) not driven: bread0/dcmt0/set_pwm: ${reason}`);
+    expect(out.text).toContain(`1 action(s) not driven, nothing sent: bread0/dcmt0/set_pwm: ${reason}`);
     expect(out.text).toMatch(/1 safe-state action\(s\) succeeded/);
     expect(out.text).not.toMatch(/FAILED/);
     expect(out.text).toMatch(/hardware e-stop/i);
   });
 
-  it("counts a call that failed against the calls sent, apart from outputs not driven (anolis#640)", () => {
+  it("counts a call that failed against the calls sent, apart from actions not driven (anolis#640)", () => {
     const out = summarizeEstopResponse({
       latched: true,
       software_safe_state: "mixed",
@@ -727,7 +729,7 @@ describe("summarizeEstopResponse", () => {
     });
     expect(out.ok).toBe(false);
     expect(out.text).toContain("1 of 2 action(s) FAILED: d/b/f: timeout");
-    expect(out.text).toContain("1 output(s) not driven: d/c/f: no zero");
+    expect(out.text).toContain("1 action(s) not driven, nothing sent: d/c/f: no zero");
   });
 
   it("flags a non-engaged latch and a failed FAULT transition", () => {
@@ -840,7 +842,7 @@ describe("summarizeStartupSafeState with mixed, unknown and not-driven (#816)", 
       }),
     );
     expect(out.ok).toBe(false);
-    expect(out.text).toBe("Startup safe state (mixed): 1 call(s) failed. 1 output(s) not driven.");
+    expect(out.text).toBe("Startup safe state (mixed): 1 call(s) failed. 1 action(s) not driven, nothing sent.");
     expect(out.calls).toEqual(["d/b/f: timeout", "d/a/f not driven: no zero"]);
   });
 
@@ -854,7 +856,7 @@ describe("summarizeStartupSafeState with mixed, unknown and not-driven (#816)", 
         ],
       }),
     );
-    expect(out.text).toBe("Startup safe state (mixed): 2 output(s) not driven.");
+    expect(out.text).toBe("Startup safe state (mixed): 2 action(s) not driven, nothing sent.");
     expect(out.calls).toEqual(["d/a/f, d/a/f not driven: bad"]);
   });
 });
@@ -1197,7 +1199,7 @@ describe("startupFailuresUntripped (wb#769)", () => {
     expect(startupFailuresUntripped(startup, [])).toBe(false);
   });
 
-  it("makes no claim when an output was not driven: a config failure is no trip (#816)", () => {
+  it("makes no claim when an action was not driven: a config failure is no trip (#816)", () => {
     const notDriven = extractStartupSafeState({
       startup_safe_state: {
         on_startup: "safe_state",
