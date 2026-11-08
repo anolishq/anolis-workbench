@@ -273,6 +273,74 @@ describe("Operate.svelte — a string arg with allowed_values (#576)", () => {
   });
 });
 
+describe("Operate.svelte — args in declared order (#807)", () => {
+  const PID_CAPS = {
+    capabilities: {
+      signals: [],
+      functions: [
+        {
+          function_id: 9,
+          name: "set_pid",
+          category: "CONFIG",
+          actuating: true,
+          args: {
+            kd1: { type: "double", required: true, position: 2 },
+            kp1: { type: "double", required: true, position: 0 },
+            ki1: { type: "double", required: true, position: 1 },
+          },
+        },
+      ],
+    },
+  };
+
+  it("shows the boxes in declared order and sends each value under its own name", async () => {
+    const calls: Array<{ args: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === "/api/status") return jsonResponse(200, RUNNING);
+        if (path === "/v0/devices") return jsonResponse(200, DEVICES);
+        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, PID_CAPS);
+        if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
+        if (path === "/v0/call" && init?.method === "POST") {
+          calls.push(JSON.parse(String(init.body)) as { args: unknown });
+          return jsonResponse(200, { status: { code: "OK" } });
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+    });
+    await screen.findByLabelText(/^kp1/);
+
+    const rows = Array.from(document.querySelectorAll(".function-card .arg-row"));
+    expect(rows.map((row) => row.querySelector("label")?.textContent?.trim())).toEqual([
+      "kp1 *",
+      "ki1 *",
+      "kd1 *",
+    ]);
+
+    // Typed down the form, as an operator enters gains in the declared order.
+    for (const [i, value] of ["1.5", "0.25", "0.75"].entries()) {
+      await fireEvent.input(rows[i].querySelector("input") as HTMLInputElement, {
+        target: { value },
+      });
+    }
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+
+    expect(calls.map((c) => c.args)).toEqual([
+      {
+        kp1: { type: "double", double: 1.5 },
+        ki1: { type: "double", double: 0.25 },
+        kd1: { type: "double", double: 0.75 },
+      },
+    ]);
+  });
+});
+
 describe("Operate.svelte — an arg's range hint names its unit", () => {
   // ph0's calibrate as anolis 0.10.2 reports it for anolis-provider-ezo 0.5.0.
   const UNIT_CAPS = {

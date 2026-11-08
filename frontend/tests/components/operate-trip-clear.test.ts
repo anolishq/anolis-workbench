@@ -31,6 +31,15 @@ const CAPS: Record<string, unknown> = {
           category: "CONFIG",
           args: [{ name: "mode", type: "string", required: true }],
         },
+        {
+          function_id: 8,
+          name: "set_limits",
+          category: "CONFIG",
+          args: {
+            upper: { type: "double", required: true, position: 1 },
+            lower: { type: "double", required: true, position: 0 },
+          },
+        },
       ],
     },
   },
@@ -331,6 +340,34 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     expect(actionPosts(rt).slice(1).map((p) => p.body?.args)).toEqual([
       { mode: { type: "string", string: "open_loop" } },
       { motor1_brake: { type: "bool", bool: false }, motor2_brake: { type: "bool", bool: false } },
+    ]);
+  });
+
+  it("sends a step's arguments by name when the function declares them out of name order (#807)", async () => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [
+              { label: "Set limits", function: "set_limits", args: { upper: 10, lower: 2 } },
+            ],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    await press(4, "Set limits");
+    await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
+
+    expect(actionPosts(rt).slice(1).map((p) => p.body?.args)).toEqual([
+      { upper: { type: "double", double: 10 }, lower: { type: "double", double: 2 } },
     ]);
   });
 
