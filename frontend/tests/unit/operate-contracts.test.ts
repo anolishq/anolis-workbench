@@ -496,15 +496,8 @@ describe("estop contract", () => {
     const match = contract.match(/SoftwareSafeState:\s*\n(?:.*\n)*?\s*enum:\s*\[([^\]]+)\]/);
     expect(match, "SoftwareSafeState enum not found in contract").not.toBeNull();
     const contractStates = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
-    // The vendored contract is the latest anolis release's. `mixed` is known here
-    // ahead of the first release that carries it (#816). The first assert fails
-    // the PR that syncs the contract to that release until this list is emptied.
-    const knownAheadOfContract = ["mixed"];
-    expect(knownAheadOfContract.filter((s) => contractStates.includes(s))).toEqual([]);
     expect(contractStates.filter((s) => !SOFTWARE_SAFE_STATES.includes(s as never))).toEqual([]);
-    expect(
-      SOFTWARE_SAFE_STATES.filter((s) => !contractStates.includes(s) && !knownAheadOfContract.includes(s)),
-    ).toEqual([]);
+    expect(SOFTWARE_SAFE_STATES.filter((s) => !contractStates.includes(s))).toEqual([]);
   });
 });
 
