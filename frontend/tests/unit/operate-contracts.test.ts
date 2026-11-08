@@ -35,6 +35,7 @@ import {
   SOFTWARE_SAFE_STATES,
   summarizeEstopResponse,
   summarizeRuntimeHealth,
+  summarizeStartupSafeState,
   versionAtLeast,
 } from "../../src/lib/operate-contracts";
 
@@ -495,7 +496,15 @@ describe("estop contract", () => {
     const match = contract.match(/SoftwareSafeState:\s*\n(?:.*\n)*?\s*enum:\s*\[([^\]]+)\]/);
     expect(match, "SoftwareSafeState enum not found in contract").not.toBeNull();
     const contractStates = (match as RegExpMatchArray)[1].split(",").map((s) => s.trim());
-    expect([...SOFTWARE_SAFE_STATES]).toEqual(contractStates);
+    // The vendored contract is the latest anolis release's. `mixed` is known here
+    // ahead of the first release that carries it (#816). The first assert fails
+    // the PR that syncs the contract to that release until this list is emptied.
+    const knownAheadOfContract = ["mixed"];
+    expect(knownAheadOfContract.filter((s) => contractStates.includes(s))).toEqual([]);
+    expect(contractStates.filter((s) => !SOFTWARE_SAFE_STATES.includes(s as never))).toEqual([]);
+    expect(
+      SOFTWARE_SAFE_STATES.filter((s) => !contractStates.includes(s) && !knownAheadOfContract.includes(s)),
+    ).toEqual([]);
   });
 });
 
@@ -505,10 +514,21 @@ describe("normalizeSoftwareSafeState", () => {
     expect(normalizeSoftwareSafeState(" HOOKS ")).toBe("hooks");
     expect(normalizeSoftwareSafeState("setpoints")).toBe("setpoints");
   });
-  it("degrades any unrecognized value to the weakest claim 'none'", () => {
-    expect(normalizeSoftwareSafeState("FULL_STOP")).toBe("none");
-    expect(normalizeSoftwareSafeState(undefined)).toBe("none");
-    expect(normalizeSoftwareSafeState(null)).toBe("none");
+  it("knows mixed as its own kind (#816)", () => {
+    expect(normalizeSoftwareSafeState("mixed")).toBe("mixed");
+  });
+  it("keeps 'none' for a literal none only", () => {
+    expect(normalizeSoftwareSafeState("none")).toBe("none");
+    expect(normalizeSoftwareSafeState(" NONE ")).toBe("none");
+  });
+  it("reads anything else as 'unknown', never as 'none' (#816)", () => {
+    expect(normalizeSoftwareSafeState("FULL_STOP")).toBe("unknown");
+    expect(normalizeSoftwareSafeState("")).toBe("unknown");
+    expect(normalizeSoftwareSafeState(undefined)).toBe("unknown");
+    expect(normalizeSoftwareSafeState(null)).toBe("unknown");
+    expect(normalizeSoftwareSafeState(["none"])).toBe("unknown");
+    // A value the runtime sends named "unknown" is unknown like any other.
+    expect(normalizeSoftwareSafeState("unknown")).toBe("unknown");
   });
 });
 
@@ -560,18 +580,28 @@ describe("extractEstopStatus", () => {
     expect(extractEstopStatus(null)).toBeNull();
   });
 
-  it("applies safe defaults and weakest-claim normalization", () => {
+  it("applies safe defaults, and keeps an unrecognised kind as the runtime sent it (#816)", () => {
     expect(
       extractEstopStatus({
         estop: { latched: "nope", software_safe_state: "FULL_STOP", latched_at_epoch_ms: "x" },
       }),
     ).toEqual({
       latched: false,
-      software_safe_state: "none",
+      software_safe_state: "unknown",
+      software_safe_state_reported: "FULL_STOP",
       latched_at_epoch_ms: null,
       uncovered_actuating_functions: 0,
       uncovered_functions: [],
     });
+  });
+
+  it("does not report a value it recognises, and says when there is none to report (#816)", () => {
+    const mixed = extractEstopStatus({ estop: { software_safe_state: "mixed" } });
+    expect(mixed?.software_safe_state).toBe("mixed");
+    expect(mixed?.software_safe_state_reported).toBeUndefined();
+    const absent = extractEstopStatus({ estop: {} });
+    expect(absent?.software_safe_state).toBe("unknown");
+    expect(absent?.software_safe_state_reported).toBe("no value");
   });
 
   it("keeps an explicit null latch time as null (not coerced to 0)", () => {
@@ -633,6 +663,76 @@ describe("summarizeEstopResponse", () => {
     expect(noWarning.text).toMatch(/outputs were NOT driven/);
   });
 
+  it("names mixed, not none, for a stop that drove outputs (#816)", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "mixed",
+      actions: [
+        { device_handle: "bread0/rlht0", function: "set_duty", success: true },
+        { device_handle: "bread0/dcmt0", function: "set_pwm", success: true },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    expect(out.text).toMatch(/engaged \(mixed\)/);
+    expect(out.text).toMatch(/2 safe-state action\(s\) succeeded/);
+  });
+
+  it("names an unrecognised kind as the runtime sent it, and makes no 'none' claim (#816)", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "Full_Stop",
+      actions: [{ device_handle: "d/x", function: "f", success: true }],
+    });
+    expect(out.ok).toBe(true);
+    expect(out.text).toContain("Full_Stop");
+    expect(out.text).toMatch(/does not recognise/);
+    expect(out.text).not.toMatch(/\(none\)|NOT driven|no software safe-state/);
+  });
+
+  it("with an unrecognised kind and no actions, points at the hardware stop, with no declaration claim (#816)", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "FULL_STOP",
+      actions: [],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.text).toMatch(/reported no safe-state actions/);
+    expect(out.text).toMatch(/hardware e-stop/i);
+    expect(out.text).not.toMatch(/no software safe-state is declared/);
+  });
+
+  it("shows a config entry as not driven, not as a call that failed (anolis#640)", () => {
+    const reason = "setpoint: Argument 'duty': Value -5 below minimum 0; zero: Argument 'motor_index': Value 0 below minimum 1";
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "mixed",
+      actions: [
+        { device_handle: "bread0/rlht0", function: "set_duty", success: true },
+        { device_handle: "bread0/dcmt0", function: "set_pwm", success: false, cause: "config", error: reason },
+      ],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain(`1 action(s) not driven, nothing sent: bread0/dcmt0/set_pwm: ${reason}`);
+    expect(out.text).toMatch(/1 safe-state action\(s\) succeeded/);
+    expect(out.text).not.toMatch(/FAILED/);
+    expect(out.text).toMatch(/hardware e-stop/i);
+  });
+
+  it("counts a call that failed against the calls sent, apart from actions not driven (anolis#640)", () => {
+    const out = summarizeEstopResponse({
+      latched: true,
+      software_safe_state: "mixed",
+      actions: [
+        { device_handle: "d/a", function: "f", success: true },
+        { device_handle: "d/b", function: "f", success: false, cause: "run", error: "timeout" },
+        { device_handle: "d/c", function: "f", success: false, cause: "config", error: "no zero" },
+      ],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain("1 of 2 action(s) FAILED: d/b/f: timeout");
+    expect(out.text).toContain("1 action(s) not driven, nothing sent: d/c/f: no zero");
+  });
+
   it("flags a non-engaged latch and a failed FAULT transition", () => {
     const notLatched = summarizeEstopResponse({
       latched: false,
@@ -683,6 +783,82 @@ describe("summarizeEstopResponse", () => {
       expect(out.ok).toBe(false);
       expect(out.text).toMatch(/hardware e-stop/i);
     }
+  });
+});
+
+describe("summarizeStartupSafeState with mixed, unknown and not-driven (#816)", () => {
+  const startup = (over: Record<string, unknown>) => {
+    const parsed = extractStartupSafeState({
+      startup_safe_state: {
+        on_startup: "safe_state",
+        ran: true,
+        software_safe_state: "mixed",
+        safe_state_achieved: true,
+        failed_actions: [],
+        ...over,
+      },
+    });
+    if (!parsed) throw new Error("fixture did not parse");
+    return parsed;
+  };
+
+  it("names mixed in the head of the report", () => {
+    const out = summarizeStartupSafeState(startup({}));
+    expect(out.ok).toBe(true);
+    expect(out.text).toContain("Startup safe state (mixed)");
+  });
+
+  it("names an unrecognised kind as the runtime sent it", () => {
+    const out = summarizeStartupSafeState(startup({ software_safe_state: "FULL_STOP" }));
+    expect(out.text).toContain("Startup safe state (FULL_STOP)");
+    expect(out.text).not.toContain("(unknown)");
+  });
+
+  it("does not say no safe state is declared for an unrecognised kind that did not run", () => {
+    const out = summarizeStartupSafeState(
+      startup({ software_safe_state: "FULL_STOP", ran: false, safe_state_achieved: false }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.text).toContain("FULL_STOP");
+    expect(out.text).toMatch(/does not recognise/);
+    expect(out.text).not.toMatch(/No software safe state is declared/);
+  });
+
+  it("still says no safe state is declared for a literal none", () => {
+    const out = summarizeStartupSafeState(
+      startup({ software_safe_state: "none", ran: false, safe_state_achieved: false }),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.text).toMatch(/No software safe state is declared/);
+  });
+
+  it("reports a config entry as not driven, and a run failure as a failed call", () => {
+    const out = summarizeStartupSafeState(
+      startup({
+        safe_state_achieved: false,
+        failed_actions: [
+          { device_handle: "d/a", function: "f", success: false, cause: "config", error: "no zero" },
+          { device_handle: "d/b", function: "f", success: false, cause: "run", error: "timeout" },
+        ],
+      }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.text).toBe("Startup safe state (mixed): 1 call(s) failed. 1 action(s) not driven, nothing sent.");
+    expect(out.calls).toEqual(["d/b/f: timeout", "d/a/f not driven: no zero"]);
+  });
+
+  it("gives one line per reason, so a repeated output cannot make a duplicate line", () => {
+    const out = summarizeStartupSafeState(
+      startup({
+        safe_state_achieved: false,
+        failed_actions: [
+          { device_handle: "d/a", function: "f", success: false, cause: "config", error: "bad" },
+          { device_handle: "d/a", function: "f", success: false, cause: "config", error: "bad" },
+        ],
+      }),
+    );
+    expect(out.text).toBe("Startup safe state (mixed): 2 action(s) not driven, nothing sent.");
+    expect(out.calls).toEqual(["d/a/f, d/a/f not driven: bad"]);
   });
 });
 
@@ -1022,6 +1198,22 @@ describe("startupFailuresUntripped (wb#769)", () => {
     expect(startupFailuresUntripped(startup, health({ dcmt0: { watchdog_tripped: "false" }, rlht0: {} }))).toBe(false);
     expect(startupFailuresUntripped(startup, health({ dcmt0: { watchdog_tripped: "false" } }))).toBe(false);
     expect(startupFailuresUntripped(startup, [])).toBe(false);
+  });
+
+  it("makes no claim when an action was not driven: a config failure is no trip (#816)", () => {
+    const notDriven = extractStartupSafeState({
+      startup_safe_state: {
+        on_startup: "safe_state",
+        ran: true,
+        software_safe_state: "mixed",
+        safe_state_achieved: false,
+        failed_actions: [
+          { device_handle: "bread0/dcmt0", function: "set_pwm", success: false, cause: "config", error: "no zero" },
+        ],
+      },
+    });
+    if (!notDriven) throw new Error("fixture did not parse");
+    expect(startupFailuresUntripped(notDriven, health({ dcmt0: { watchdog_tripped: "false" } }))).toBe(false);
   });
 
   it("makes no claim when no call failed (only skipped ones)", () => {

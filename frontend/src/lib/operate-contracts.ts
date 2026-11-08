@@ -7,10 +7,12 @@ import type {
   Device,
   DeviceCapabilities,
   DeviceStateValue,
+  EstopAction,
   EstopStatus,
   ExecutionStatus,
   FunctionArgSpec,
   FunctionSpec,
+  ObservedSoftwareSafeState,
   OperatorBlock,
   OperatorRun,
   ParameterDefinition,
@@ -142,13 +144,14 @@ export function watchdogTrippedDevices(providers: ProviderHealth[]): string[] {
  * Whether every device a failed startup call named now reports the
  * `watchdog_tripped` health metric as "false" (wb#769). The startup report
  * holds until the runtime restarts; this says whether the devices it names
- * still report a trip. An absent metric makes no claim.
+ * still report a trip. An absent metric makes no claim, and neither does an
+ * action not driven (a config failure, which no trip clearing changes).
  */
 export function startupFailuresUntripped(
   s: StartupSafeStateStatus,
   providers: ProviderHealth[],
 ): boolean {
-  if (s.failed_actions.length === 0) return false;
+  if (s.failed_actions.length === 0 || s.failed_actions.some(isNotDriven)) return false;
   const tripped = new Map<string, unknown>();
   for (const provider of providers) {
     for (const device of provider.devices ?? []) {
@@ -390,8 +393,10 @@ export function normalizeProviderHealthQuality(
 /**
  * Software safe-state ladder rungs, mirroring the `SoftwareSafeState` enum in
  * the vendored runtime-http OpenAPI contract. A unit test guards against drift.
+ * "mixed" is ahead of the vendored copy until it is synced to the anolis
+ * release carrying it (wb#816).
  */
-export const SOFTWARE_SAFE_STATES = ["none", "hooks", "setpoints", "zero"] as const;
+export const SOFTWARE_SAFE_STATES = ["none", "hooks", "setpoints", "zero", "mixed"] as const;
 
 /**
  * The first runtime whose `uncovered_actuating_functions` counts the
@@ -420,15 +425,35 @@ export function versionAtLeast(version: string | null | undefined, min: string):
 }
 
 /**
- * Normalize a software-safe-state value. An unrecognized value degrades to the
- * *weakest* claim ("none"): the UI must never advertise a stop rung the runtime
- * did not declare.
+ * Normalize a software-safe-state value. A value this build does not know is
+ * "unknown", and only a literal "none" is "none": the contract makes an
+ * unrecognised value a declared safe state the client cannot describe, so
+ * reading it as "none" would say a working stop drives nothing (wb#816).
  */
-export function normalizeSoftwareSafeState(value: unknown): SoftwareSafeState {
-  const v = String(value ?? "")
-    .trim()
-    .toLowerCase() as SoftwareSafeState;
-  return (SOFTWARE_SAFE_STATES as readonly string[]).includes(v) ? v : "none";
+export function normalizeSoftwareSafeState(value: unknown): ObservedSoftwareSafeState {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return (SOFTWARE_SAFE_STATES as readonly string[]).includes(v)
+    ? (v as SoftwareSafeState)
+    : "unknown";
+}
+
+/** The kind, plus what the runtime sent when this build does not recognise it. */
+function observeSoftwareSafeState(
+  value: unknown,
+): Pick<EstopStatus, "software_safe_state" | "software_safe_state_reported"> {
+  const software_safe_state = normalizeSoftwareSafeState(value);
+  if (software_safe_state !== "unknown") return { software_safe_state };
+  const reported = typeof value === "string" ? value.trim() : "";
+  return { software_safe_state, software_safe_state_reported: reported || "no value" };
+}
+
+/**
+ * An entry nothing was sent for (`cause: "config"`): an output the stop could
+ * not plan, or a call refused before its provider (anolis#640). The error says
+ * why; it is not a call that was sent and failed.
+ */
+function isNotDriven(action: UnknownRecord): boolean {
+  return action.success === false && action.cause === "config";
 }
 
 /**
@@ -444,7 +469,7 @@ export function extractEstopStatus(payload: unknown): EstopStatus | null {
   const r = asObject(root.estop);
   return {
     latched: r.latched === true,
-    software_safe_state: normalizeSoftwareSafeState(r.software_safe_state),
+    ...observeSoftwareSafeState(r.software_safe_state),
     // toFinite(null) is 0, but an absent latch time must stay null.
     latched_at_epoch_ms: r.latched_at_epoch_ms == null ? null : toFinite(r.latched_at_epoch_ms),
     uncovered_actuating_functions: toFinite(r.uncovered_actuating_functions) ?? 0,
@@ -508,7 +533,7 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
   return {
     on_startup: r.on_startup === "leave" ? "leave" : "safe_state",
     ran: r.ran === true,
-    software_safe_state: normalizeSoftwareSafeState(r.software_safe_state),
+    ...observeSoftwareSafeState(r.software_safe_state),
     safe_state_achieved: r.safe_state_achieved === true,
     failed_actions: asArray(r.failed_actions)
       .map(asObject)
@@ -517,6 +542,7 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
         function: String(a.function ?? "?"),
         success: a.success === true,
         ...(typeof a.error === "string" ? { error: a.error } : {}),
+        ...(typeof a.cause === "string" ? { cause: a.cause } : {}),
       })),
     skipped_actions: asArray(r.skipped_actions)
       .map(asObject)
@@ -526,6 +552,16 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
         reason: String(a.reason ?? "absent"),
       })),
   };
+}
+
+/** Each error with the calls that hit it, in first-seen order; one entry per reason. */
+function groupByError(actions: EstopAction[], fallback: string): [string, string[]][] {
+  const byError = new Map<string, string[]>();
+  for (const a of actions) {
+    const error = a.error ?? fallback;
+    byError.set(error, [...(byError.get(error) ?? []), `${a.device_handle}/${a.function}`]);
+  }
+  return [...byError];
 }
 
 /**
@@ -541,14 +577,15 @@ export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
   /** One line per failure reason, naming the calls that hit it, then one per skipped call (wb#692). */
   calls: string[];
 } {
-  const head = `Startup safe state (${s.software_safe_state})`;
-  const byError = new Map<string, string[]>();
-  for (const a of s.failed_actions) {
-    const error = a.error ?? "failed";
-    byError.set(error, [...(byError.get(error) ?? []), `${a.device_handle}/${a.function}`]);
-  }
+  const kind = s.software_safe_state_reported ?? s.software_safe_state;
+  const head = `Startup safe state (${kind})`;
+  const notDriven = s.failed_actions.filter(isNotDriven);
+  const failed = s.failed_actions.filter((a) => !isNotDriven(a));
   const calls = [
-    ...[...byError].map(([error, names]) => `${names.join(", ")}: ${error}`),
+    ...groupByError(failed, "failed").map(([error, names]) => `${names.join(", ")}: ${error}`),
+    ...groupByError(notDriven, "no reason reported").map(
+      ([error, names]) => `${names.join(", ")} not driven: ${error}`,
+    ),
     ...s.skipped_actions.map((a) => `${a.device_handle}/${a.function} skipped: ${a.reason}`),
   ];
   // A skipped call's device was absent at startup, and is not driven when it
@@ -569,13 +606,25 @@ export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
     return { text: `${head} ran but issued no call, so nothing was driven.`, ok: false, calls };
   }
   if (s.ran) {
-    const text = `${head}: ${s.failed_actions.length} call(s) failed.`;
-    return { text: skipped ? `${text} ${skipped}` : text, ok: false, calls };
+    const outcome = [
+      failed.length > 0 ? `${failed.length} call(s) failed.` : "",
+      notDriven.length > 0 ? `${notDriven.length} action(s) not driven, nothing sent.` : "",
+      skipped,
+    ].filter(Boolean);
+    return { text: `${head}: ${outcome.join(" ")}`, ok: false, calls };
   }
   if (s.on_startup === "leave") {
     return {
       text: "Outputs were left as they were at startup (on_startup: leave).",
       ok: true,
+      calls,
+    };
+  }
+  if (s.software_safe_state === "unknown") {
+    // A declared safe state that did not run: not the "none" case below.
+    return {
+      text: `${head} did not run at startup, and this workbench does not recognise that safe state.`,
+      ok: false,
       calls,
     };
   }
@@ -637,36 +686,58 @@ export function summarizeRuntimeHealth(
 export function summarizeEstopResponse(payload: unknown): { text: string; ok: boolean } {
   const r = asObject(payload);
   const latched = r.latched === true;
-  const rung = normalizeSoftwareSafeState(r.software_safe_state);
+  const { software_safe_state: rung, software_safe_state_reported: reported } =
+    observeSoftwareSafeState(r.software_safe_state);
   const actions = asArray(r.actions).map(asObject);
-  const failures = actions.filter((a) => a.success === false);
+  const notDriven = actions.filter(isNotDriven);
+  const failures = actions.filter((a) => a.success === false && !isNotDriven(a));
+  const sent = actions.length - notDriven.length;
   const parts: string[] = [];
   let ok = true;
 
   // Never assert "engaged"/"latched" when the latch did not actually engage:
   // this defensive branch exists precisely to be honest about a failed stop.
   if (latched) {
-    parts.push(`Software stop engaged (${rung}).`);
+    parts.push(
+      rung === "unknown"
+        ? `Software stop engaged (${reported}, a safe state this workbench does not recognise).`
+        : `Software stop engaged (${rung}).`,
+    );
   } else {
     parts.push("WARNING: the latch did not engage. The machine may not be safe.");
     ok = false;
   }
 
-  if (actions.length === 0 && rung === "none") {
+  if (actions.length === 0 && (rung === "none" || rung === "unknown")) {
     if (latched) {
       const warning = typeof r.warning === "string" && r.warning.trim() ? r.warning.trim() : "";
       parts.push(
         warning ||
-          "Actuation is latched, but no software safe-state is declared, so outputs were NOT driven.",
+          (rung === "none"
+            ? "Actuation is latched, but no software safe-state is declared, so outputs were NOT driven."
+            : "Actuation is latched, but the runtime reported no safe-state actions for this stop."),
       );
     }
     // When the latch failed, the leading warning already conveys nothing is safe.
-  } else if (failures.length > 0) {
+    // A kind this build cannot describe that also reports no action is the case
+    // it knows least about, so it points at the hardware stop.
+    if (rung === "unknown") ok = false;
+  } else if (failures.length > 0 || notDriven.length > 0) {
     ok = false;
-    const detail = failures
-      .map((a) => `${a.device_handle ?? "?"}/${a.function ?? "?"}: ${a.error ?? "failed"}`)
-      .join("; ");
-    parts.push(`${failures.length} of ${actions.length} action(s) FAILED: ${detail}`);
+    const describe = (list: UnknownRecord[], fallback: string) =>
+      list
+        .map((a) => `${a.device_handle ?? "?"}/${a.function ?? "?"}: ${a.error ?? fallback}`)
+        .join("; ");
+    if (failures.length > 0) {
+      parts.push(`${failures.length} of ${sent} action(s) FAILED: ${describe(failures, "failed")}`);
+    } else if (sent > 0) {
+      parts.push(`${sent} safe-state action(s) succeeded.`);
+    }
+    if (notDriven.length > 0) {
+      parts.push(
+        `${notDriven.length} action(s) not driven, nothing sent: ${describe(notDriven, "no reason reported")}`,
+      );
+    }
   } else if (actions.length > 0) {
     parts.push(`${actions.length} safe-state action(s) succeeded.`);
   }

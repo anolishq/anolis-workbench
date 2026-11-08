@@ -55,7 +55,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
 
     expect(await screen.findByText('v0.1.44')).toBeInTheDocument();
     await openStopDetails();
-    expect(screen.getByText(/Latches actuation, then drives the declared safe setpoints/)).toBeInTheDocument();
+    expect(screen.getByText(/Latches actuation, then tries to drive the declared safe setpoints/)).toBeInTheDocument();
     const fix = screen.getByTestId('safe-state-fix');
     expect(fix).toHaveTextContent('safety.safe_state');
     expect(fix).toHaveTextContent("the project's config/anolis-runtime.manual.yaml for dev-launch");
@@ -91,7 +91,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
 
     it.each([
       ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
-      ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
+      ['setpoints', /Latches actuation, then tries to drive the declared safe setpoints/],
       ['zero', /latches actuation, then tries to drive every actuating function to zero/],
     ])('under %s with 0 undriven, shows its note and no count line', async (rung, note) => {
       renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: 0 }, NEW));

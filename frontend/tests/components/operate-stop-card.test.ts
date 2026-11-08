@@ -41,6 +41,8 @@ function renderOperate(
 /** The stop card's one row. */
 const row = () => screen.getByRole('button', { name: /^SOFTWARE STOP/ }).closest('.estop-row') as HTMLElement;
 const info = (label: string) => within(row()).getByRole('button', { name: label });
+/** The row's text with the template's line breaks collapsed. */
+const rowText = () => (row().textContent ?? '').replace(/\s+/g, ' ');
 
 describe('Operate.svelte — the software stop card is one row (#613)', () => {
   it('while loading: the stop, the state, the short disclaimer, and no heading', async () => {
@@ -65,7 +67,7 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
   it.each([
     ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
-    ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
+    ['setpoints', /Latches actuation, then tries to drive the declared safe setpoints/],
     ['zero', /latches actuation, then tries to drive every actuating function to zero/],
   ])('under %s: Stop ready in the row, the rung behind its ⓘ', async (rung, note) => {
     renderOperate(() => jsonResponse(200, status({ software_safe_state: rung })));
@@ -84,6 +86,151 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
     expect(state).toHaveClass('field-error');
     expect(within(row()).getByRole('button', { name: 'SOFTWARE STOP (latch only)' })).toBeInTheDocument();
     expect(screen.queryByTestId('estop-coverage')).not.toBeInTheDocument();
+  });
+
+  it('under setpoints: does not claim every setpoint drives its output (#816)', async () => {
+    renderOperate(() => jsonResponse(200, status({ software_safe_state: 'setpoints' })));
+
+    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+    await fireEvent.click(info('About the software stop'));
+    expect(rowText()).toContain(
+      "tries to drive the declared safe setpoints. An output it does not drive is left as it was. The stop's reply lists those the runtime reports as not driven.",
+    );
+    expect(rowText()).not.toMatch(/then drives the declared/);
+  });
+
+  describe('under mixed (#816)', () => {
+    const note =
+      /tries to drive each actuating function to its declared safe setpoint, or to zero where none applies \(zero_is_safe\)/;
+
+    it('does not promise that every undriven output is counted or named', async () => {
+      renderOperate(() => jsonResponse(200, status({ software_safe_state: 'mixed' })));
+
+      await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+      await fireEvent.click(info('About the software stop'));
+      expect(rowText()).toContain(
+        "An output it does not drive is left as it was. The stop's reply lists those the runtime reports as not driven.",
+      );
+      expect(rowText()).not.toMatch(/counted as not covered/);
+    });
+
+    it('with nothing counted as uncovered, the stop reply still names a refused setpoint', async () => {
+      // A refused setpoint beside a good one for the same function is not in
+      // the uncovered list: the runtime reports it only in the stop's reply.
+      renderOperate(
+        () => jsonResponse(200, status({ software_safe_state: 'mixed', uncovered_actuating_functions: 0 })),
+        () =>
+          jsonResponse(200, {
+            latched: true,
+            software_safe_state: 'mixed',
+            actions: [
+              { device_handle: 'bread0/dcmt0', function: 'set_pwm', success: true },
+              {
+                device_handle: 'bread0/dcmt0',
+                function: 'set_pwm',
+                success: false,
+                cause: 'config',
+                error: 'setpoint: refused',
+              },
+            ],
+          }),
+      );
+      await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+      expect(screen.queryByTestId('estop-coverage')).not.toBeInTheDocument();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+      const feedback = await screen.findByTestId('estop-feedback');
+      expect(feedback).toHaveTextContent(
+        '1 action(s) not driven, nothing sent: bread0/dcmt0/set_pwm: setpoint: refused',
+      );
+      expect(feedback).toHaveClass('field-error');
+    });
+
+    it('reads as a stop that drives outputs, with no latch-only claim', async () => {
+      renderOperate(() => jsonResponse(200, status({ software_safe_state: 'mixed' })));
+
+      await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+      expect(within(row()).getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
+      expect(screen.queryByTestId('estop-coverage')).not.toBeInTheDocument();
+      await fireEvent.click(info('About the software stop'));
+      expect(within(row()).getByText(note)).toBeInTheDocument();
+      expect(rowText()).not.toMatch(/latch only|drives nothing|No software safe-state/);
+    });
+
+    it('keeps the uncovered-functions chip, naming what the stop leaves', async () => {
+      renderOperate(() =>
+        jsonResponse(
+          200,
+          status({
+            software_safe_state: 'mixed',
+            uncovered_actuating_functions: 1,
+            uncovered_functions: ['bread0/dcmt0/motor1_value'],
+          }),
+        ),
+      );
+
+      expect(await screen.findByTestId('estop-coverage')).toHaveTextContent('⚠ 1 not covered');
+      await fireEvent.click(info('About uncovered functions'));
+      expect(within(row()).getByTestId('estop-uncovered-names')).toHaveTextContent(
+        'Not driven by the stop: bread0/dcmt0/motor1_value',
+      );
+    });
+
+    it('keeps the chip when the runtime version cannot be read', async () => {
+      renderOperate(() =>
+        jsonResponse(
+          200,
+          status({ software_safe_state: 'mixed', uncovered_actuating_functions: 1 }, { version: 'dev-build' }),
+        ),
+      );
+
+      expect(await screen.findByTestId('estop-coverage')).toHaveTextContent('⚠ 1 not covered');
+    });
+  });
+
+  describe('under a kind this workbench does not know (#816)', () => {
+    const unknown = (extra: Record<string, unknown> = {}, top: Record<string, unknown> = {}) =>
+      status({ software_safe_state: 'emergency_rack_v2', ...extra }, top);
+
+    it('says plainly it is not recognised, names the value, and makes no none claim', async () => {
+      renderOperate(() => jsonResponse(200, unknown()));
+
+      const state = await screen.findByText('⚠ Safe-state kind not recognised');
+      expect(state).toHaveClass('field-error');
+      expect(state).toHaveAttribute('data-testid', 'estop-state');
+      expect(within(row()).getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
+      await fireEvent.click(info('About the software stop'));
+      expect(rowText()).toContain('emergency_rack_v2');
+      expect(rowText()).toMatch(/does not recognise/);
+      expect(rowText()).toMatch(/update the workbench/);
+      expect(rowText()).not.toMatch(/latch only|drives nothing|No software safe-state/);
+    });
+
+    it('keeps the uncovered-functions chip, whatever the runtime version reads as', async () => {
+      renderOperate(() => jsonResponse(200, unknown({ uncovered_actuating_functions: 2 }, { version: 'dev-build' })));
+
+      expect(await screen.findByTestId('estop-coverage')).toHaveTextContent('⚠ 2 not covered');
+    });
+
+    it('after a stop, the feedback names the value and not none', async () => {
+      renderOperate(
+        () => jsonResponse(200, unknown()),
+        () =>
+          jsonResponse(200, {
+            latched: true,
+            software_safe_state: 'emergency_rack_v2',
+            actions: [{ device_handle: 'd/x', function: 'f', success: true }],
+          }),
+      );
+      await screen.findByText('⚠ Safe-state kind not recognised');
+
+      await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+      const feedback = await screen.findByTestId('estop-feedback');
+      expect(feedback).toHaveTextContent('emergency_rack_v2');
+      expect(feedback).not.toHaveTextContent('(none)');
+    });
   });
 
   it('names uncovered functions in a chip, with the count as the software stop, not the e-stop', async () => {
