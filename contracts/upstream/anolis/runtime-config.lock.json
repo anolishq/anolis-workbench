@@ -14,8 +14,8 @@
       "asset": "anolis-0.11.0-runtime-config-schema.tar.gz",
       "manifest_asset": "runtime-config-schema-manifest.json"
     },
-    "schema_sha256": "3ac5b834fe716b94f7b93efc7b3f85064296cafd8ea58e07f4d5b991ebecfe69",
-    "asset_sha256": "acacc50d743322635b88b468468fda8cca435e0d5227ff35f1020cf0583684be"
+    "schema_sha256": "d20ce3df445cac0a1a3512c6b58c0a9e0136387d72070c738bc75003fb984460",
+    "asset_sha256": "c18e3aa5b166630331a08a0cba7c2e5231c1b52ae48b0881557e0a592bbd8749"
   },
-  "synced_at_utc": "2026-11-03T02:40:14Z"
+  "synced_at_utc": "2026-11-08T21:25:59Z"
 }
