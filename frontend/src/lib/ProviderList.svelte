@@ -458,16 +458,17 @@
                 success reset (ms)
               </label>
               <span class="field-note restart-timeout-note" data-testid="restart-timeout-note">
-                Timeout bounds one whole restart attempt, at least 1000 ms. Empty: the runtime uses
-                hello + ready timeouts.
+                Timeout bounds one whole restart attempt, at least 1000 ms. Empty: anolis 0.11.0 and
+                later use hello + ready timeouts; earlier releases use 30000.
               </span>
               {#if restartTimeout !== undefined && restartTimeout >= 1000 && startupSum !== null && restartTimeout < startupSum}
                 <div
                   class="bus-note note-warning restart-timeout-note"
                   data-testid="restart-timeout-below-sum"
                 >
-                  Timeout is below hello + ready ({startupSum} ms). The runtime accepts it with a warning,
-                  and a restart fails whenever Hello and WaitReady together take longer than this.
+                  Timeout is below hello + ready ({startupSum} ms). From anolis 0.11.0 the runtime accepts
+                  it with a warning, and a restart fails whenever Hello and WaitReady together take longer
+                  than this.
                 </div>
               {/if}
             </div>

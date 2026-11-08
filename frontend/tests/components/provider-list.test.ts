@@ -406,7 +406,7 @@ describe("ProviderList.svelte", () => {
       expect(timeoutInput().value).toBe("");
       expect(timeoutInput()).toHaveAttribute("min", "1000");
       expect(screen.getByTestId("restart-timeout-note")).toHaveTextContent(
-        "Empty: the runtime uses hello + ready timeouts.",
+        "Empty: anolis 0.11.0 and later use hello + ready timeouts; earlier releases use 30000.",
       );
     });
 
@@ -439,7 +439,9 @@ describe("ProviderList.svelte", () => {
       renderWithRestart({ ...ENABLED, timeout_ms: 12999 });
 
       expect(belowSumNote()).toHaveTextContent("below hello + ready (13000 ms)");
-      expect(belowSumNote()).toHaveTextContent("accepts it with a warning");
+      expect(belowSumNote()).toHaveTextContent(
+        "From anolis 0.11.0 the runtime accepts it with a warning",
+      );
 
       await fireEvent.change(timeoutInput(), { target: { value: "13000" } });
       expect(belowSumNote()).not.toBeInTheDocument();
