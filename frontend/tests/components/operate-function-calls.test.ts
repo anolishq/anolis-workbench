@@ -293,15 +293,26 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     },
   };
 
-  it("shows the boxes in declared order and sends each value under its own name", async () => {
+  type PidArgs = Record<string, { type: string; required: boolean; position?: number }>;
+  const pidCaps = (args: PidArgs) => ({
+    capabilities: {
+      signals: [],
+      functions: [{ ...PID_CAPS.capabilities.functions[0], args }],
+    },
+  });
+
+  /** A runtime that can be stopped and brought back reporting other capabilities. */
+  function renderPid(caps: unknown) {
     const calls: Array<{ args: unknown }> = [];
+    const rt = { running: true, caps };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = pathFromInput(input);
-        if (path === "/api/status") return jsonResponse(200, RUNNING);
+        if (path === "/api/status")
+          return jsonResponse(200, rt.running ? RUNNING : { running: false, active_project: null });
         if (path === "/v0/devices") return jsonResponse(200, DEVICES);
-        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, PID_CAPS);
+        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, rt.caps);
         if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
         if (path === "/v0/call" && init?.method === "POST") {
           calls.push(JSON.parse(String(init.body)) as { args: unknown });
@@ -313,9 +324,97 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     render(Operate, {
       props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
     });
+    return { calls, rt };
+  }
+
+  const argRows = () => Array.from(document.querySelectorAll(".function-card .arg-row"));
+  const argName = (row: Element) => row.querySelector("label")?.textContent?.trim().split(" ")[0];
+  const argInput = (row: Element) => row.querySelector("input") as HTMLInputElement;
+  const shownValues = () => argRows().map((row) => [argName(row), argInput(row).value]);
+
+  async function typeInto(name: string, value: string) {
+    const row = argRows().find((r) => argName(r) === name) as Element;
+    await fireEvent.input(argInput(row), { target: { value } });
+  }
+
+  /** Stops the runtime under the mounted page, then brings it back with `caps`. */
+  async function restartWith(rt: { running: boolean; caps: unknown }, caps: unknown) {
+    rt.running = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(argRows()).toEqual([]));
+    rt.caps = caps;
+    rt.running = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(argRows()).not.toEqual([]));
+  }
+
+  it("keeps each typed value with its arg when the runtime returns them reordered", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const noPositions = pidCaps({
+      kd1: { type: "double", required: true },
+      kp1: { type: "double", required: true },
+      ki1: { type: "double", required: true },
+    });
+    const { calls, rt } = renderPid(noPositions);
+    await screen.findByLabelText(/^kp1/);
+    expect(argRows().map(argName)).toEqual(["kd1", "ki1", "kp1"]);
+    await typeInto("kd1", "0.75");
+    await typeInto("ki1", "0.25");
+    await typeInto("kp1", "1.5");
+
+    await restartWith(rt, PID_CAPS);
+
+    expect(shownValues()).toEqual([
+      ["kp1", "1.5"],
+      ["ki1", "0.25"],
+      ["kd1", "0.75"],
+    ]);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      {
+        kp1: { type: "double", double: 1.5 },
+        ki1: { type: "double", double: 0.25 },
+        kd1: { type: "double", double: 0.75 },
+      },
+    ]);
+  });
+
+  it("starts an added arg empty and does not send a removed arg's value", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(PID_CAPS);
+    await screen.findByLabelText(/^kp1/);
+    await typeInto("kp1", "1.5");
+    await typeInto("ki1", "0.25");
+    await typeInto("kd1", "0.75");
+
+    // ki1 is gone; an optional kf1 takes its row.
+    await restartWith(
+      rt,
+      pidCaps({
+        kd1: { type: "double", required: true, position: 2 },
+        kp1: { type: "double", required: true, position: 0 },
+        kf1: { type: "double", required: false, position: 1 },
+      }),
+    );
+
+    expect(shownValues()).toEqual([
+      ["kp1", "1.5"],
+      ["kf1", ""],
+      ["kd1", "0.75"],
+    ]);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      { kp1: { type: "double", double: 1.5 }, kd1: { type: "double", double: 0.75 } },
+    ]);
+  });
+
+  it("shows the boxes in declared order and sends each value under its own name", async () => {
+    const { calls } = renderPid(PID_CAPS);
     await screen.findByLabelText(/^kp1/);
 
-    const rows = Array.from(document.querySelectorAll(".function-card .arg-row"));
+    const rows = argRows();
     expect(rows.map((row) => row.querySelector("label")?.textContent?.trim())).toEqual([
       "kp1 *",
       "ki1 *",
