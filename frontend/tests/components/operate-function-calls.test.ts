@@ -410,6 +410,39 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     ]);
   });
 
+  it("still renders args whose names collide once trimmed", async () => {
+    // The runtime passes arg names through unchecked, so object keys that
+    // differ only by outer whitespace reach the form with equal names.
+    renderPid(
+      pidCaps({
+        kp: { type: "double", required: true, position: 0 },
+        "kp ": { type: "double", required: true, position: 1 },
+        z: { type: "double", required: true, position: 2 },
+      }),
+    );
+
+    await waitFor(() => expect(argRows().map(argName)).toEqual(["kp", "kp", "z"]));
+    expect(executeButtons()).toHaveLength(1);
+  });
+
+  it("gives each of two args with a colliding name its own box", async () => {
+    const { calls } = renderPid(
+      pidCaps({
+        kp: { type: "double", required: true, position: 0 },
+        "kp ": { type: "bool", required: true, position: 1 },
+      }),
+    );
+    await waitFor(() => expect(argRows()).toHaveLength(2));
+
+    await fireEvent.input(argInput(argRows()[0]), { target: { value: "1.5" } });
+
+    expect(argInput(argRows()[0]).value).toBe("1.5");
+    expect(argInput(argRows()[1]).checked).toBe(false);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([{ kp: { type: "bool", bool: false } }]);
+  });
+
   it("shows the boxes in declared order and sends each value under its own name", async () => {
     const { calls } = renderPid(PID_CAPS);
     await screen.findByLabelText(/^kp1/);
