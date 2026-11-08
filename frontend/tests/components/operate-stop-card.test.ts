@@ -67,7 +67,7 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
 
   it.each([
     ['hooks', /Latches actuation, then runs the declared safe-state hooks/],
-    ['setpoints', /Latches actuation, then drives the declared safe setpoints/],
+    ['setpoints', /Latches actuation, then tries to drive the declared safe setpoints/],
     ['zero', /latches actuation, then tries to drive every actuating function to zero/],
   ])('under %s: Stop ready in the row, the rung behind its ⓘ', async (rung, note) => {
     renderOperate(() => jsonResponse(200, status({ software_safe_state: rung })));
@@ -86,6 +86,17 @@ describe('Operate.svelte — the software stop card is one row (#613)', () => {
     expect(state).toHaveClass('field-error');
     expect(within(row()).getByRole('button', { name: 'SOFTWARE STOP (latch only)' })).toBeInTheDocument();
     expect(screen.queryByTestId('estop-coverage')).not.toBeInTheDocument();
+  });
+
+  it('under setpoints: does not claim every setpoint drives its output (#816)', async () => {
+    renderOperate(() => jsonResponse(200, status({ software_safe_state: 'setpoints' })));
+
+    await waitFor(() => expect(screen.getByTestId('estop-state')).toHaveTextContent('Stop ready'));
+    await fireEvent.click(info('About the software stop'));
+    expect(rowText()).toContain(
+      "tries to drive the declared safe setpoints. An output it does not drive is left as it was. The stop's reply lists those the runtime reports as not driven.",
+    );
+    expect(rowText()).not.toMatch(/then drives the declared/);
   });
 
   describe('under mixed (#816)', () => {

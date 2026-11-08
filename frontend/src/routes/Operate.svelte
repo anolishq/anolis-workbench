@@ -1728,7 +1728,9 @@
             {#if estop.software_safe_state === "hooks"}
               Latches actuation, then runs the declared safe-state hooks.
             {:else if estop.software_safe_state === "setpoints"}
-              Latches actuation, then drives the declared safe setpoints.
+              Latches actuation, then tries to drive the declared safe setpoints. An output it does
+              not drive is left as it was. The stop's reply lists those the runtime reports as not
+              driven.
             {:else if estop.software_safe_state === "zero"}
               The project declares zero_is_safe: latches actuation, then tries to drive every
               actuating function to zero.
