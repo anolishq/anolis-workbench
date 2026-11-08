@@ -53,7 +53,7 @@ jobs:
     name: Docs
     needs: [changes]
     if: needs.changes.outputs.docs == 'true'
-    uses: anolishq/.github/.github/workflows/docs-check.yml@7a3a0624c056ea20fcb901968c482f9ed2ffb818 # v2
+    uses: anolishq/.github/.github/workflows/docs-check.yml@721e8a07128cd274efe6a17e0a51c0a9b1caf6b9 # v2
 
   frontend:
     name: Frontend (Node / Vite build)
@@ -313,7 +313,7 @@ jobs:
   version-sync:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: anolishq/.github/.github/workflows/version-sync.yml@7a3a0624c056ea20fcb901968c482f9ed2ffb818 # v2
+    uses: anolishq/.github/.github/workflows/version-sync.yml@721e8a07128cd274efe6a17e0a51c0a9b1caf6b9 # v2
     with:
       python-version: '3.12'
       working-directory: '.'
