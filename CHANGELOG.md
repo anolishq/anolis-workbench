@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-11-08
+
 ### Changed
 
 - **The packaged ezo config schema is anolis-provider-ezo 0.6.0's**, so a
