@@ -271,9 +271,13 @@
   // operator.run, or its deprecated alias operator.experiment (anolis#696).
   const run = $derived(operatorRun(operator));
   // What `uncovered_actuating_functions` means depends on the runtime
-  // version; see DISPATCHABLE_COVERAGE_SINCE.
+  // version; see DISPATCHABLE_COVERAGE_SINCE. A runtime that reports mixed, or
+  // a kind this build does not know, is newer than that whatever its version
+  // string reads as, so its count is never hidden as the older meaning (wb#816).
   const dispatchableCoverage = $derived(
-    versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE),
+    versionAtLeast(runtimeStatusData?.version, DISPATCHABLE_COVERAGE_SINCE) ||
+      estop?.software_safe_state === "mixed" ||
+      estop?.software_safe_state === "unknown",
   );
   const faultUncovered = $derived(runtimeStatusData?.fault_uncovered_functions ?? []);
   let parameters = $state<ParameterDefinition[]>([]);
@@ -1711,6 +1715,10 @@
             <span class="estop-chip field-error" data-testid="estop-state">
               No safe state declared: latch only
             </span>
+          {:else if estop.software_safe_state === "unknown"}
+            <span class="estop-chip field-error" data-testid="estop-state">
+              ⚠ Safe-state kind not recognised
+            </span>
           {:else}
             <!-- About the stop only (wb#748): the machine line says whether the
                  machine is ready, and why not. The stop is armed either way. -->
@@ -1724,6 +1732,15 @@
             {:else if estop.software_safe_state === "zero"}
               The project declares zero_is_safe: latches actuation, then tries to drive every
               actuating function to zero.
+            {:else if estop.software_safe_state === "mixed"}
+              Latches actuation, then tries to drive each output to its declared safe setpoint, or
+              to zero where none applies (zero_is_safe). An output it can do neither for is left as
+              it was and counted as not covered.
+            {:else if estop.software_safe_state === "unknown"}
+              This runtime reports a software safe state this version of the workbench does not
+              recognise (<code>{estop.software_safe_state_reported}</code>). The stop latches
+              actuation and runs the runtime's declared safe state, but this workbench cannot say
+              what that drives. Check any functions shown as not covered, and update the workbench.
             {:else}
               No software safe-state is declared for this machine. The software stop drives nothing:
               it only latches actuation (blocks new commands). Use the hardware emergency stop to

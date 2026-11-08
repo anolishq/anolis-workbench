@@ -21,6 +21,15 @@ Historical note:
 
 ### Fixed
 
+- **Operate no longer calls a working software stop "latch only" when it
+  does not know its kind** (#816). The `mixed` safe state (anolis#640), where
+  some outputs get their setpoint and others their zero, read as `none`, so
+  the card said the stop drives nothing and hid the uncovered-functions chip.
+  `mixed` is now shown as its own kind. A value this version does not
+  recognise is shown as a declared safe state it cannot describe, named as
+  the runtime sent it; only a literal `none` reads as latch only. An output
+  the stop could not plan (`cause: "config"`) is reported as not driven, with
+  the reason, rather than as a call that failed.
 - **A release no longer ships without its SBOMs** (#673). The release
   workflow's SBOM job could fail without failing the run, and every later
   step accepted an empty match, so PyPI, the tag and the GitHub Release

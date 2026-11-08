@@ -390,14 +390,24 @@ export interface RuntimeApiStatus extends UnknownRecord {
  * Which rung of the safe-state ladder a `POST /v0/estop` would run now.
  * "none" = no software safe-state declared (hardware cut only).
  * MUST stay in sync with the `SoftwareSafeState` enum in the vendored
- * runtime-http OpenAPI contract; a unit test guards against drift.
+ * runtime-http OpenAPI contract; a unit test guards against drift. "mixed" is
+ * ahead of the vendored copy until it is synced to the release carrying it.
  */
-export type SoftwareSafeState = "none" | "hooks" | "setpoints" | "zero";
+export type SoftwareSafeState = "none" | "hooks" | "setpoints" | "zero" | "mixed";
+
+/**
+ * A safe-state kind as read from the runtime. "unknown" is a kind this build
+ * does not recognise: per the contract a declared safe state it cannot
+ * describe, so never to be read as "none" (wb#816).
+ */
+export type ObservedSoftwareSafeState = SoftwareSafeState | "unknown";
 
 /** The `estop` block on `GET /v0/runtime/status` (anolis#219). */
 export interface EstopStatus extends UnknownRecord {
   latched: boolean;
-  software_safe_state: SoftwareSafeState;
+  software_safe_state: ObservedSoftwareSafeState;
+  /** Set only when `software_safe_state` is "unknown": what the runtime sent. */
+  software_safe_state_reported?: string;
   latched_at_epoch_ms: number | null;
   uncovered_actuating_functions: number;
   /** The functions that count names, as provider/device/function (anolis 0.9.0); empty before. */
@@ -445,6 +455,8 @@ export interface EstopAction extends UnknownRecord {
   function: string;
   success: boolean;
   error?: string;
+  /** config: nothing reached the device, and it fails the same way every run. */
+  cause?: string;
 }
 
 /**
@@ -462,7 +474,9 @@ export interface SkippedAction extends UnknownRecord {
 export interface StartupSafeStateStatus extends UnknownRecord {
   on_startup: "safe_state" | "leave";
   ran: boolean;
-  software_safe_state: SoftwareSafeState;
+  software_safe_state: ObservedSoftwareSafeState;
+  /** Set only when `software_safe_state` is "unknown": what the runtime sent. */
+  software_safe_state_reported?: string;
   safe_state_achieved: boolean;
   failed_actions: EstopAction[];
   /** Empty from a runtime older than anolis 0.1.51, which does not send it. */
