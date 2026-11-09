@@ -273,6 +273,238 @@ describe("Operate.svelte — a string arg with allowed_values (#576)", () => {
   });
 });
 
+describe("Operate.svelte — args in declared order (#807)", () => {
+  const PID_CAPS = {
+    capabilities: {
+      signals: [],
+      functions: [
+        {
+          function_id: 9,
+          name: "set_pid",
+          category: "CONFIG",
+          actuating: true,
+          args: {
+            kd1: { type: "double", required: true, position: 2 },
+            kp1: { type: "double", required: true, position: 0 },
+            ki1: { type: "double", required: true, position: 1 },
+          },
+        },
+      ],
+    },
+  };
+
+  type PidArgs = Record<string, { type: string; required: boolean; position?: number }>;
+  const pidCaps = (args: PidArgs) => ({
+    capabilities: {
+      signals: [],
+      functions: [{ ...PID_CAPS.capabilities.functions[0], args }],
+    },
+  });
+
+  /** A runtime that can be stopped and brought back reporting other capabilities. */
+  function renderPid(caps: unknown) {
+    const calls: Array<{ args: unknown }> = [];
+    const rt = { running: true, caps };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === "/api/status")
+          return jsonResponse(200, rt.running ? RUNNING : { running: false, active_project: null });
+        if (path === "/v0/devices") return jsonResponse(200, DEVICES);
+        if (path === "/v0/devices/bread0/dcmt0/capabilities") return jsonResponse(200, rt.caps);
+        if (path === "/v0/runtime/status") return jsonResponse(200, statusBody(false));
+        if (path === "/v0/call" && init?.method === "POST") {
+          calls.push(JSON.parse(String(init.body)) as { args: unknown });
+          return jsonResponse(200, { status: { code: "OK" } });
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName: "demo", system: createProjectDocument("demo"), runtimeStatus: RUNNING },
+    });
+    return { calls, rt };
+  }
+
+  const argRows = () => Array.from(document.querySelectorAll(".function-card .arg-row"));
+  const argName = (row: Element) => row.querySelector("label")?.textContent?.trim().split(" ")[0];
+  const argInput = (row: Element) => row.querySelector("input") as HTMLInputElement;
+  const shownValues = () => argRows().map((row) => [argName(row), argInput(row).value]);
+
+  async function typeInto(name: string, value: string) {
+    const row = argRows().find((r) => argName(r) === name) as Element;
+    await fireEvent.input(argInput(row), { target: { value } });
+  }
+
+  /** Stops the runtime under the mounted page, then brings it back with `caps`. */
+  async function restartWith(rt: { running: boolean; caps: unknown }, caps: unknown) {
+    rt.running = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(argRows()).toEqual([]));
+    rt.caps = caps;
+    rt.running = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(argRows()).not.toEqual([]));
+  }
+
+  it("keeps each typed value with its arg when the runtime returns them reordered", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const noPositions = pidCaps({
+      kd1: { type: "double", required: true },
+      kp1: { type: "double", required: true },
+      ki1: { type: "double", required: true },
+    });
+    const { calls, rt } = renderPid(noPositions);
+    await screen.findByLabelText(/^kp1/);
+    expect(argRows().map(argName)).toEqual(["kd1", "ki1", "kp1"]);
+    await typeInto("kd1", "0.75");
+    await typeInto("ki1", "0.25");
+    await typeInto("kp1", "1.5");
+
+    await restartWith(rt, PID_CAPS);
+
+    expect(shownValues()).toEqual([
+      ["kp1", "1.5"],
+      ["ki1", "0.25"],
+      ["kd1", "0.75"],
+    ]);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      {
+        kp1: { type: "double", double: 1.5 },
+        ki1: { type: "double", double: 0.25 },
+        kd1: { type: "double", double: 0.75 },
+      },
+    ]);
+  });
+
+  it("starts an added arg empty and does not send a removed arg's value", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(PID_CAPS);
+    await screen.findByLabelText(/^kp1/);
+    await typeInto("kp1", "1.5");
+    await typeInto("ki1", "0.25");
+    await typeInto("kd1", "0.75");
+
+    // ki1 is gone; an optional kf1 takes its row.
+    await restartWith(
+      rt,
+      pidCaps({
+        kd1: { type: "double", required: true, position: 2 },
+        kp1: { type: "double", required: true, position: 0 },
+        kf1: { type: "double", required: false, position: 1 },
+      }),
+    );
+
+    expect(shownValues()).toEqual([
+      ["kp1", "1.5"],
+      ["kf1", ""],
+      ["kd1", "0.75"],
+    ]);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      { kp1: { type: "double", double: 1.5 }, kd1: { type: "double", double: 0.75 } },
+    ]);
+  });
+
+  it("sends a ticked checkbox as true and keeps it with its name across a reorder", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(
+      pidCaps({
+        enable: { type: "bool", required: true },
+        gain: { type: "double", required: true },
+      }),
+    );
+    await screen.findByLabelText(/^enable/);
+    expect(argRows().map(argName)).toEqual(["enable", "gain"]);
+    await fireEvent.click(argInput(argRows()[0]));
+    await typeInto("gain", "2.5");
+
+    await restartWith(
+      rt,
+      pidCaps({
+        enable: { type: "bool", required: true, position: 1 },
+        gain: { type: "double", required: true, position: 0 },
+      }),
+    );
+
+    expect(argRows().map(argName)).toEqual(["gain", "enable"]);
+    expect(argInput(argRows()[0]).value).toBe("2.5");
+    expect(argInput(argRows()[1]).type).toBe("checkbox");
+    expect(argInput(argRows()[1]).checked).toBe(true);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      { gain: { type: "double", double: 2.5 }, enable: { type: "bool", bool: true } },
+    ]);
+  });
+
+  it("still renders args whose names collide once trimmed", async () => {
+    // The runtime passes arg names through unchecked, so object keys that
+    // differ only by outer whitespace reach the form with equal names.
+    renderPid(
+      pidCaps({
+        kp: { type: "double", required: true, position: 0 },
+        "kp ": { type: "double", required: true, position: 1 },
+        z: { type: "double", required: true, position: 2 },
+      }),
+    );
+
+    await waitFor(() => expect(argRows().map(argName)).toEqual(["kp", "kp", "z"]));
+    expect(executeButtons()).toHaveLength(1);
+  });
+
+  it("gives each of two args with a colliding name its own box", async () => {
+    const { calls } = renderPid(
+      pidCaps({
+        kp: { type: "double", required: true, position: 0 },
+        "kp ": { type: "bool", required: true, position: 1 },
+      }),
+    );
+    await waitFor(() => expect(argRows()).toHaveLength(2));
+
+    await fireEvent.input(argInput(argRows()[0]), { target: { value: "1.5" } });
+
+    expect(argInput(argRows()[0]).value).toBe("1.5");
+    expect(argInput(argRows()[1]).checked).toBe(false);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([{ kp: { type: "bool", bool: false } }]);
+  });
+
+  it("shows the boxes in declared order and sends each value under its own name", async () => {
+    const { calls } = renderPid(PID_CAPS);
+    await screen.findByLabelText(/^kp1/);
+
+    const rows = argRows();
+    expect(rows.map((row) => row.querySelector("label")?.textContent?.trim())).toEqual([
+      "kp1 *",
+      "ki1 *",
+      "kd1 *",
+    ]);
+
+    // Typed down the form, as an operator enters gains in the declared order.
+    for (const [i, value] of ["1.5", "0.25", "0.75"].entries()) {
+      await fireEvent.input(rows[i].querySelector("input") as HTMLInputElement, {
+        target: { value },
+      });
+    }
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+
+    expect(calls.map((c) => c.args)).toEqual([
+      {
+        kp1: { type: "double", double: 1.5 },
+        ki1: { type: "double", double: 0.25 },
+        kd1: { type: "double", double: 0.75 },
+      },
+    ]);
+  });
+});
+
 describe("Operate.svelte — an arg's range hint names its unit", () => {
   // ph0's calibrate as anolis 0.10.2 reports it for anolis-provider-ezo 0.5.0.
   const UNIT_CAPS = {

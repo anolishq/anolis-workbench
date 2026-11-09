@@ -18,6 +18,7 @@
     DeviceCapabilities,
     DeviceStateValue,
     EstopStatus,
+    FunctionArgSpec,
     FunctionSpec,
     OperatorAction,
     ParameterDefinition,
@@ -839,11 +840,11 @@
       if (unknown.length) {
         throw new Error(`${func.name} takes no argument ${unknown.join(", ")}`);
       }
-      // buildArgsPayload reads a form by position; the profile names them.
+      // buildArgsPayload reads a form's strings; the profile holds typed values.
       const form: Record<string, unknown> = {};
       specArgs.forEach((a, i) => {
         const v = named[a.name];
-        if (v !== undefined) form[`arg_${i}`] = a.type === "bool" ? v : String(v);
+        if (v !== undefined) form[funcFormField(specArgs, i)] = a.type === "bool" ? v : String(v);
       });
       await fetchJson<UnknownRecord>("/v0/call", {
         method: "POST",
@@ -936,9 +937,10 @@
     const INT64_MAX = 9223372036854775807n;
     const JS_SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
     const args: Record<string, TypedValue> = {};
-    for (const [i, argDef] of (func.args ?? []).entries()) {
+    const specArgs = func.args ?? [];
+    for (const [i, argDef] of specArgs.entries()) {
       const argType = argDef.type || "string";
-      const raw = formData[`arg_${i}`];
+      const raw = formData[funcFormField(specArgs, i)];
       if (argType === "bool") {
         args[argDef.name] = { type: "bool", bool: Boolean(raw) };
         continue;
@@ -1547,11 +1549,23 @@
   function getFuncFormData(deviceKey: string, func: FunctionSpec): Record<string, unknown> {
     return funcFormData[getFuncFormKey(deviceKey, func)] ?? {};
   }
-  function setFuncArg(deviceKey: string, func: FunctionSpec, argIdx: number, value: unknown): void {
+  /**
+   * A form holds each value under its arg's name, so a capability reload that
+   * reorders, adds or removes args cannot move it to a different arg (#807).
+   * Names can collide once trimmed, so the count of earlier rows with the same
+   * name gives each row its own value. The prefix keeps a name like
+   * `constructor` off Object.prototype.
+   */
+  function funcFormField(args: FunctionArgSpec[], index: number): string {
+    const name = args[index].name;
+    const earlier = args.slice(0, index).filter((a) => a.name === name).length;
+    return `arg${earlier}_${name}`;
+  }
+  function setFuncArg(deviceKey: string, func: FunctionSpec, field: string, value: unknown): void {
     const k = getFuncFormKey(deviceKey, func);
     funcFormData = {
       ...funcFormData,
-      [k]: { ...(funcFormData[k] ?? {}), [`arg_${argIdx}`]: value },
+      [k]: { ...(funcFormData[k] ?? {}), [field]: value },
     };
   }
 
@@ -2457,6 +2471,7 @@
                     }}
                   >
                     {#each func.args ?? [] as arg, ai (ai)}
+                      {@const field = funcFormField(func.args, ai)}
                       <div class="arg-row">
                         <label for="fn-{fbKey}-{ai}">
                           {arg.name}{arg.required !== false ? " *" : ""}
@@ -2472,16 +2487,16 @@
                           <input
                             id="fn-{fbKey}-{ai}"
                             type="checkbox"
-                            checked={Boolean(getFuncFormData(selectedKey, func)[`arg_${ai}`])}
+                            checked={Boolean(getFuncFormData(selectedKey, func)[field])}
                             onchange={(e: Event) =>
-                              setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
+                              setFuncArg(selectedKey, func, field, inputTarget(e).checked)}
                           />
                         {:else if argAllowedValues(arg).length > 0}
                           <select
                             id="fn-{fbKey}-{ai}"
-                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
                             onchange={(e: Event) =>
-                              setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                              setFuncArg(selectedKey, func, field, selectTarget(e).value)}
                           >
                             <option value="">Choose…</option>
                             {#each argAllowedValues(arg) as av (av)}
@@ -2493,9 +2508,9 @@
                             id="fn-{fbKey}-{ai}"
                             type="number"
                             step="any"
-                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
                             oninput={(e: Event) =>
-                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                              setFuncArg(selectedKey, func, field, inputTarget(e).value)}
                           />
                         {:else}
                           <input
@@ -2505,9 +2520,9 @@
                               ? "numeric"
                               : "text"}
                             placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
-                            value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
                             oninput={(e: Event) =>
-                              setFuncArg(selectedKey, func, ai, inputTarget(e).value)}
+                              setFuncArg(selectedKey, func, field, inputTarget(e).value)}
                           />
                         {/if}
                       </div>

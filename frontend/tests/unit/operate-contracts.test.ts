@@ -868,6 +868,121 @@ describe("normalizeFunctionSpecs", () => {
       "2:B",
     ]);
   });
+
+  it("lists each function's args in declared order (#807)", () => {
+    const [func] = normalizeFunctionSpecs([
+      {
+        function_id: 1,
+        name: "set_pid",
+        args: {
+          kd1: { type: "double", position: 2 },
+          kp1: { type: "double", position: 0 },
+          ki1: { type: "double", position: 1 },
+        },
+      },
+    ]);
+    expect(func.args.map((a) => a.name)).toEqual(["kp1", "ki1", "kd1"]);
+  });
+});
+
+describe("normalizeFunctionArgs declared order (#807)", () => {
+  const names = (args: unknown) => normalizeFunctionArgs(args).map((a) => a.name);
+
+  it("sorts the runtime's args object by position, not name", () => {
+    expect(names({ kd1: { position: 2 }, kp1: { position: 0 }, ki1: { position: 1 } })).toEqual([
+      "kp1",
+      "ki1",
+      "kd1",
+    ]);
+  });
+
+  it("falls back to name order when an older runtime sends no positions", () => {
+    expect(names({ kd1: {}, kp1: {}, ki1: {} })).toEqual(["kd1", "ki1", "kp1"]);
+  });
+
+  it("puts args with a position first, then the rest by name", () => {
+    expect(names({ zeta: {}, alpha: {}, kp1: { position: 1 }, kd1: { position: 0 } })).toEqual([
+      "kd1",
+      "kp1",
+      "alpha",
+      "zeta",
+    ]);
+  });
+
+  it("orders non-contiguous positions, as when a provider declares two args with one name", () => {
+    expect(names({ b: { position: 3 }, a: { position: 5 }, c: { position: 0 } })).toEqual([
+      "c",
+      "b",
+      "a",
+    ]);
+  });
+
+  it("breaks a position tie by name", () => {
+    expect(names({ z: { position: 1 }, a: { position: 1 }, m: { position: 0 } })).toEqual([
+      "m",
+      "a",
+      "z",
+    ]);
+  });
+
+  it.each([
+    ["fractional", 1.5],
+    ["negative", -1],
+    ["a numeric string", "5"],
+    ["null", null],
+    ["NaN", Number.NaN],
+    ["infinite", Number.POSITIVE_INFINITY],
+    ["a boolean", true],
+  ])("treats a position that is %s as missing", (_label, position) => {
+    const args = { a: {}, b: { position: 0 }, c: { position } };
+    expect(names(args)).toEqual(["b", "a", "c"]);
+    expect(normalizeFunctionArgs(args)[2].position).toBeUndefined();
+  });
+
+  it("applies positions to the array form too", () => {
+    expect(
+      names([
+        { name: "kd1", position: 2 },
+        { name: "kp1", position: 0 },
+        { name: "ki1", position: 1 },
+      ]),
+    ).toEqual(["kp1", "ki1", "kd1"]);
+  });
+
+  it("keeps the array form's own order where it has no positions", () => {
+    expect(names([{ name: "kp1" }, { name: "ki1" }, { name: "kd1" }])).toEqual([
+      "kp1",
+      "ki1",
+      "kd1",
+    ]);
+    expect(names([{ name: "z" }, { name: "b", position: 0 }, { name: "a" }])).toEqual([
+      "b",
+      "z",
+      "a",
+    ]);
+  });
+
+  it("normalizeArgSpec carries a valid position, including 0", () => {
+    expect(normalizeArgSpec({ name: "kp1", position: 0 }).position).toBe(0);
+    expect(normalizeArgSpec({ name: "kp1", position: 4 }).position).toBe(4);
+    expect(normalizeArgSpec({ name: "kp1" }).position).toBeUndefined();
+  });
+});
+
+describe("ArgSpec contract (#807)", () => {
+  it("declares position as a non-negative integer in the vendored contract", () => {
+    // normalizeFunctionArgs depends on this field. No YAML parser is vendored,
+    // so take ArgSpec's own block: every line indented deeper than its key.
+    const contract = readFileSync(
+      fileURLToPath(new URL("../../../contracts/runtime-http.openapi.v0.yaml", import.meta.url)),
+      "utf8",
+    );
+    const match = contract.match(/^ {4}ArgSpec:\n((?: {5,}.*\n)+)/m);
+    expect(match, "ArgSpec not found in contract").not.toBeNull();
+    expect((match as RegExpMatchArray)[1]).toMatch(
+      /^ {8}position:\n {10}type: integer\n {10}minimum: 0\n/m,
+    );
+  });
 });
 
 describe("versionAtLeast", () => {

@@ -513,6 +513,8 @@ export interface FunctionArgSpec extends UnknownRecord {
   name: string;
   type: string;
   required: boolean;
+  /** Where the provider declared this arg; runtimes before anolis 0.11.0 omit it. */
+  position?: number;
   min?: number | string;
   max?: number | string;
   /** The value's engineering unit, as the provider declares it (e.g. "pH"). */

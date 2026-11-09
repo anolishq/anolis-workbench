@@ -207,17 +207,37 @@ export function normalizeFunctionSpecs(functions: unknown): FunctionSpec[] {
 
 export function normalizeFunctionArgs(args: unknown): FunctionArgSpec[] {
   if (Array.isArray(args)) {
-    return (args as UnknownRecord[])
-      .map((a, i) => normalizeArgSpec(asObject(a), `arg_${i + 1}`))
-      .filter((a) => a.name !== "");
+    return byDeclaredPosition(
+      (args as UnknownRecord[])
+        .map((a, i) => normalizeArgSpec(asObject(a), `arg_${i + 1}`))
+        .filter((a) => a.name !== ""),
+    );
   }
   if (args && typeof args === "object") {
-    return Object.entries(args as UnknownRecord)
-      .map(([name, spec]) => normalizeArgSpec(asObject(spec), name))
-      .filter((a) => a.name !== "")
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return byDeclaredPosition(
+      Object.entries(args as UnknownRecord)
+        .map(([name, spec]) => normalizeArgSpec(asObject(spec), name))
+        .filter((a) => a.name !== "")
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
   }
   return [];
+}
+
+/**
+ * Orders args by the provider's declared `position` (anolis#731). Args with no
+ * position follow those with one; the sort is stable, so they, and any that
+ * share a position, keep the order they came in. Positions may have gaps, so
+ * they rank args and are never indexes.
+ */
+function byDeclaredPosition(args: FunctionArgSpec[]): FunctionArgSpec[] {
+  const rank = (arg: FunctionArgSpec) => arg.position ?? Number.MAX_VALUE;
+  return args.sort((a, b) => rank(a) - rank(b));
+}
+
+/** The arg's declared position, or undefined unless it is a non-negative integer. */
+function argPosition(position: unknown): number | undefined {
+  return Number.isInteger(position) && (position as number) >= 0 ? (position as number) : undefined;
 }
 
 export function normalizeArgSpec(arg: UnknownRecord, fallback = ""): FunctionArgSpec {
@@ -227,6 +247,7 @@ export function normalizeArgSpec(arg: UnknownRecord, fallback = ""): FunctionArg
     name: name.trim(),
     type: (typeof arg.type === "string" && arg.type.trim()) || "string",
     required: arg.required !== false,
+    position: argPosition(arg.position),
     min: arg.min as number | string | undefined,
     max: arg.max as number | string | undefined,
     unit: typeof arg.unit === "string" && arg.unit.trim() ? arg.unit.trim() : undefined,

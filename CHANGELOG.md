@@ -15,6 +15,15 @@ Historical note:
 
 ### Fixed
 
+- **Operate lists a function's arguments in the order the provider declared
+  them** (#807). They were sorted by name, so `set_pid_x10` showed
+  `kd1, kd2, ki1, …` instead of `kp1, ki1, kd1, …` and gains typed in the
+  declared order landed in the wrong boxes. Arguments now follow the runtime's
+  `position`, from anolis 0.11.0. A runtime that sends no `position` still
+  gets the name order. A call's arguments are still sent by name. Values
+  typed into a form now stay with their argument when the runtime returns
+  with its arguments reordered, added or removed, and a value for an argument
+  that no longer exists is not sent.
 - **Enabling a provider's restart policy no longer writes `timeout_ms: 30000`**
   (#824). That value is below the `hello_timeout_ms + ready_timeout_ms` the
   runtime now derives (anolis 0.11.0) whenever those timeouts add up to more
