@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-11-08
+
 ### Fixed
 
 - **Operate lists a function's arguments in the order the provider declared
