@@ -13,6 +13,20 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Enabling a provider's restart policy no longer writes `timeout_ms: 30000`**
+  (#824). That value is below the `hello_timeout_ms + ready_timeout_ms` the
+  runtime now derives (anolis 0.11.0) whenever those timeouts add up to more
+  than 30000, so the runtime warned about a number nobody chose. Compose leaves
+  the field unset and shows it empty with a note on what empty means; clearing
+  it unsets it rather than writing `0`. A provider Compose creates has
+  hello 3000 + ready 10000, so on anolis 0.11.0 and later its restart budget
+  is 13000 ms rather than 30000. An authored value is kept. A value
+  below the sum of the two timeouts now shows the runtime's warning in Compose
+  when both are set. Migrating a legacy project no longer fails when its
+  enabled restart policy has no `timeout_ms`.
+
 ## [0.33.2] - 2026-11-08
 
 ### Changed

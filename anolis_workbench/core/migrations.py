@@ -214,7 +214,8 @@ def _legacy_runtime_doc(system: dict[str, Any]) -> dict[str, Any]:
             if rp.get("enabled"):
                 rp_out["max_attempts"] = rp["max_attempts"]
                 rp_out["backoff_ms"] = rp["backoff_ms"]
-                rp_out["timeout_ms"] = rp["timeout_ms"]
+                if "timeout_ms" in rp:
+                    rp_out["timeout_ms"] = rp["timeout_ms"]
                 if "success_reset_ms" in rp:
                     rp_out["success_reset_ms"] = rp["success_reset_ms"]
             entry["restart_policy"] = rp_out
