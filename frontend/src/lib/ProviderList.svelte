@@ -242,6 +242,15 @@
     onChanged();
   }
 
+  /**
+   * What the runtime checks an explicit restart timeout against, or null when
+   * either timeout is unset: its defaults are not copied here (#340).
+   */
+  function helloPlusReady(prov: RuntimeProviderEntry): number | null {
+    const { hello_timeout_ms: hello, ready_timeout_ms: ready } = prov;
+    return hello === undefined || ready === undefined ? null : hello + ready;
+  }
+
   function formatBackoff(v: unknown): string {
     return Array.isArray(v) ? v.join(", ") : "";
   }
@@ -368,7 +377,6 @@
                   prov.restart_policy.backoff_ms = Array.isArray(prov.restart_policy.backoff_ms)
                     ? prov.restart_policy.backoff_ms
                     : [200, 500, 1000];
-                  prov.restart_policy.timeout_ms = prov.restart_policy.timeout_ms ?? 30000;
                 }
                 onChanged();
               }}
@@ -377,6 +385,8 @@
           </label>
 
           {#if prov.restart_policy?.enabled}
+            {@const restartTimeout = prov.restart_policy.timeout_ms}
+            {@const startupSum = helloPlusReady(prov)}
             <div class="restart-fields">
               <label class="inline-label">
                 <input
@@ -412,15 +422,18 @@
               <label class="inline-label">
                 <input
                   type="number"
-                  min="0"
-                  value={prov.restart_policy.timeout_ms ?? 30000}
+                  min="1000"
+                  value={prov.restart_policy.timeout_ms ?? ""}
                   onchange={(e: Event) => {
-                    const n = Number(inputTarget(e).value);
-                    if (!isNaN(n)) {
-                      const rp = prov.restart_policy ?? (prov.restart_policy = {});
-                      rp.timeout_ms = n;
-                      onChanged();
+                    const rp = prov.restart_policy ?? (prov.restart_policy = {});
+                    const v = inputTarget(e).value.trim();
+                    if (v === "") {
+                      delete rp.timeout_ms;
+                    } else {
+                      const n = Number(v);
+                      if (!isNaN(n)) rp.timeout_ms = n;
                     }
+                    onChanged();
                   }}
                 />
                 timeout (ms)
@@ -444,6 +457,20 @@
                 />
                 success reset (ms)
               </label>
+              <span class="field-note restart-timeout-note" data-testid="restart-timeout-note">
+                Timeout bounds one whole restart attempt, at least 1000 ms. Empty: anolis 0.11.0 and
+                later use hello + ready timeouts; earlier releases use 30000.
+              </span>
+              {#if restartTimeout !== undefined && restartTimeout >= 1000 && startupSum !== null && restartTimeout < startupSum}
+                <div
+                  class="bus-note note-warning restart-timeout-note"
+                  data-testid="restart-timeout-below-sum"
+                >
+                  Timeout is below hello + ready ({startupSum} ms). From anolis 0.11.0 the runtime accepts
+                  it with a warning, and a restart fails whenever Hello and WaitReady together take longer
+                  than this.
+                </div>
+              {/if}
             </div>
           {/if}
         </div>

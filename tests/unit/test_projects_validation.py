@@ -191,6 +191,41 @@ def test_save_project_writes_the_canonical_layout(_systems_root: pathlib.Path) -
     assert reread["providers"]["sim0"]["config"] == document["providers"]["sim0"]["config"]
 
 
+# What the Compose form writes when restart is enabled and nothing else is
+# touched: asserted to the key by provider-list.test.ts (#824).
+COMPOSED_RESTART_POLICY = {"enabled": True, "max_attempts": 3, "backoff_ms": [200, 500, 1000]}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param({}, id="unset-so-the-runtime-derives-it"),
+        pytest.param({"timeout_ms": 30000}, id="authored-value-is-kept"),
+        pytest.param({"timeout_ms": 1000}, id="below-hello-plus-ready-only-warns-at-runtime"),
+    ],
+)
+def test_restart_timeout_saves_and_round_trips_as_authored(_systems_root: pathlib.Path, extra: dict) -> None:
+    """The restart timeout is optional, and what is authored is what comes back:
+    never a filled-in default, never dropped (#824)."""
+    document = _load_template("sim-quickstart")
+    policy = {**COMPOSED_RESTART_POLICY, **extra}
+    _manual(document)["providers"][0]["restart_policy"] = policy
+
+    assert projects.validate_project_payload(document) == []
+    projects.save_project("restart-timeout", document)
+
+    reread = canonical.read_project(_systems_root / "restart-timeout")
+    assert _manual(reread)["providers"][0]["restart_policy"] == policy
+
+
+def test_restart_timeout_below_the_runtime_minimum_is_rejected() -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["providers"][0]["restart_policy"] = {**COMPOSED_RESTART_POLICY, "timeout_ms": 999}
+
+    errors = projects.validate_project_payload(document)
+    assert any("999" in err.get("message", "") for err in errors), errors
+
+
 def test_save_project_rejects_an_off_host_bind_without_auth(_systems_root: pathlib.Path) -> None:
     """install.sh refuses this too, but only in its config phase — AFTER the
     binaries on the target have already been replaced. Catching it at save time

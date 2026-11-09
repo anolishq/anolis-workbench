@@ -118,6 +118,21 @@ def test_migrated_configs_match_the_old_renderer_values() -> None:
     assert sim["devices"][1] == {"id": "motorctl0", "type": "motorctl", "max_speed": 3000.0}
 
 
+@pytest.mark.parametrize("extra", [{}, {"timeout_ms": 30000}], ids=["unset", "authored"])
+def test_restart_timeout_migrates_as_authored(extra: dict, tmp_path: pathlib.Path) -> None:
+    """The runtime derives an unset restart timeout, so a v1 document without
+    one migrates without one, and an authored value is carried (#824)."""
+    v1 = _load_v1("sim-quickstart")
+    policy = {"enabled": True, "max_attempts": 3, "backoff_ms": [200, 500, 1000], **extra}
+    v1["topology"]["runtime"]["providers"][0]["restart_policy"] = policy
+
+    migrated, _ = migrations.migrate_system(v1)
+    assert _validate_through_canonical(tmp_path, migrated) == []
+
+    manual = canonical.read_project(tmp_path / "migrated")["variants"][canonical.MANUAL_VARIANT]
+    assert manual["providers"][0]["restart_policy"] == policy
+
+
 def test_empty_provider_name_is_omitted_not_migrated_invalid(tmp_path: pathlib.Path) -> None:
     """The old composer seeded provider_name: "" on new bread/ezo providers;
     migrating that to provider.name "" would violate the envelope pattern on a
