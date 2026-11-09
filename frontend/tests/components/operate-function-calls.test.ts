@@ -410,6 +410,38 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     ]);
   });
 
+  it("sends a ticked checkbox as true and keeps it with its name across a reorder", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(
+      pidCaps({
+        enable: { type: "bool", required: true },
+        gain: { type: "double", required: true },
+      }),
+    );
+    await screen.findByLabelText(/^enable/);
+    expect(argRows().map(argName)).toEqual(["enable", "gain"]);
+    await fireEvent.click(argInput(argRows()[0]));
+    await typeInto("gain", "2.5");
+
+    await restartWith(
+      rt,
+      pidCaps({
+        enable: { type: "bool", required: true, position: 1 },
+        gain: { type: "double", required: true, position: 0 },
+      }),
+    );
+
+    expect(argRows().map(argName)).toEqual(["gain", "enable"]);
+    expect(argInput(argRows()[0]).value).toBe("2.5");
+    expect(argInput(argRows()[1]).type).toBe("checkbox");
+    expect(argInput(argRows()[1]).checked).toBe(true);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([
+      { gain: { type: "double", double: 2.5 }, enable: { type: "bool", bool: true } },
+    ]);
+  });
+
   it("still renders args whose names collide once trimmed", async () => {
     // The runtime passes arg names through unchecked, so object keys that
     // differ only by outer whitespace reach the form with equal names.
