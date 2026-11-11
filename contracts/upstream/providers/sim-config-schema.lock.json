@@ -1,11 +1,11 @@
 {
   "schema_version": 3,
   "kind": "sim",
-  "provider_version": "0.2.8",
+  "provider_version": "0.3.0",
   "source": {
     "repo": "anolishq/anolis-provider-sim",
-    "path": "anolis-provider-sim-0.2.8-config-schema.json",
-    "tag": "v0.2.8"
+    "path": "anolis-provider-sim-0.3.0-config-schema.json",
+    "tag": "v0.3.0"
   },
   "distribution": {
     "mode": "release-artifact",
@@ -16,12 +16,12 @@
     },
     "release": {
       "repo": "anolishq/anolis-provider-sim",
-      "tag": "v0.2.8",
-      "asset": "anolis-provider-sim-0.2.8-config-schema.json",
-      "manifest_asset": "anolis-provider-sim-0.2.8-config-schema-manifest.json"
+      "tag": "v0.3.0",
+      "asset": "anolis-provider-sim-0.3.0-config-schema.json",
+      "manifest_asset": "anolis-provider-sim-0.3.0-config-schema-manifest.json"
     },
-    "schema_sha256": "9f8797bb9465972cdd7ba7f76a494b2bdd5c797e63f98f990b38d0bd6000db11",
-    "asset_sha256": "9f8797bb9465972cdd7ba7f76a494b2bdd5c797e63f98f990b38d0bd6000db11"
+    "schema_sha256": "7a78e4a6e49c631e800d761b32419dbcc752be071c119545b94e960215262aa6",
+    "asset_sha256": "7a78e4a6e49c631e800d761b32419dbcc752be071c119545b94e960215262aa6"
   },
-  "synced_at_utc": "2026-10-18T15:54:26Z"
+  "synced_at_utc": "2026-11-11T23:23:39Z"
 }
