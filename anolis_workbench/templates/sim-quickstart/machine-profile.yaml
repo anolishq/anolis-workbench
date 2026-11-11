@@ -13,12 +13,12 @@ compatibility:
   providers:
     sim0:
       strategy: pinned-ref
-      version: 0.2.8
+      version: 0.3.0
 components:
   runtime:
     repo: anolishq/anolis
-    version: 0.11.0
+    version: 0.14.0
   providers:
     sim:
       repo: anolishq/anolis-provider-sim
-      version: 0.2.8
+      version: 0.3.0
