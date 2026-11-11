@@ -20,8 +20,8 @@
       "asset": "anolis-provider-ezo-0.7.0-config-schema.json",
       "manifest_asset": "anolis-provider-ezo-0.7.0-config-schema-manifest.json"
     },
-    "schema_sha256": "fe23b4b0e4ea9a4dcfbb77eb51c256eae3268e0775dedec03fee674fac217237",
-    "asset_sha256": "fe23b4b0e4ea9a4dcfbb77eb51c256eae3268e0775dedec03fee674fac217237"
+    "schema_sha256": "13c0340b2b6ebeb7ba4438f40ecaf81e5f7d469554d4785784e8cb964fcf3592",
+    "asset_sha256": "13c0340b2b6ebeb7ba4438f40ecaf81e5f7d469554d4785784e8cb964fcf3592"
   },
-  "synced_at_utc": "2026-11-03T01:31:34Z"
+  "synced_at_utc": "2026-11-11T22:36:38Z"
 }
