@@ -69,7 +69,7 @@ jobs:
     # checks it, and Renovate moves both in one PR. --user 1001 is the
     # runner's uid, which Firefox needs to own HOME.
     container:
-      image: mcr.microsoft.com/playwright:v1.64.1-resolute@sha256:d89d0e4a7058330a8334306a5aef1e00807863d31af27cf11348eed696d6e0ba
+      image: mcr.microsoft.com/playwright:v1.65.0-resolute@sha256:916c9fb63a8340822589dd5c821dae82e8012106bb8515a72f278d97f277446a
       options: --user 1001
 
     steps:
