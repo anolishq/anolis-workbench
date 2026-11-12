@@ -13,6 +13,17 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Operate no longer reads an old watchdog reading as current** (#809). A
+  provider may report the watchdog keys from a cached reading, with its age in
+  `watchdog_status_age_ms`, and keep its last good reading after later reads
+  fail. "No trip reported now" on the startup warning now needs every refused
+  device's reading to say untripped and be at most 30 s old, the bound the
+  runtime's startup check uses (anolishq/anolis#732). A reading with no age is
+  a live read and counts as current. A trip from an older reading still refuses
+  Start and stays under Watchdog trips, labelled with how long ago it was read.
+
 ## [0.33.3] - 2026-11-08
 
 ### Fixed

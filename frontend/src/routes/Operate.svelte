@@ -81,6 +81,7 @@
     summarizeStream,
     versionAtLeast,
     watchdogTrippedDevices,
+    watchdogTripStaleNotes,
     startupFailuresUntripped,
   } from "../lib/operate-contracts";
   import {
@@ -204,6 +205,8 @@
   // Devices whose command watchdog tripped, and the one being cleared (wb#572).
   // Each step of the clear is the operator's click; nothing runs on its own.
   const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
+  // A trip from an old cached reading still counts, labelled with its age (wb#809).
+  const tripStaleNotes = $derived(watchdogTripStaleNotes(providerHealth));
   let tripKey = $state<string>("");
   let tripCleared = $state<boolean>(false);
   // Each profile step after the clear, by index: done or skipped (wb#750).
@@ -1926,6 +1929,11 @@
             {#each trippedKeys as key (key)}
               <li>
                 <span>{key}</span>
+                {#if tripStaleNotes[key]}
+                  <span class="field-note" data-testid={`trip-stale-${key}`}
+                    >({tripStaleNotes[key]})</span
+                  >
+                {/if}
                 <button
                   type="button"
                   class="btn-secondary btn-sm"

@@ -82,6 +82,8 @@ function fakeRuntime(
     mode?: string;
     automation?: boolean;
     tripped?: Record<string, boolean>;
+    /** Each board's watchdog_status_age_ms; a board left out reports none. */
+    ageMs?: Record<string, number>;
     startup?: Record<string, unknown>;
     /** The profile's operator block; default: dcmt0's brakes released after the clear. */
     operator?: Record<string, unknown> | null;
@@ -139,7 +141,15 @@ function fakeRuntime(
               devices: ["dcmt0", "rlht0"].map((id) => ({
                 device_id: id,
                 health: "OK",
-                reported: { state: "OK", metrics: { watchdog_tripped: String(rt.tripped[id]) } },
+                reported: {
+                  state: "OK",
+                  metrics: {
+                    watchdog_tripped: String(rt.tripped[id]),
+                    ...(opts.ageMs?.[id] !== undefined
+                      ? { watchdog_status_age_ms: String(opts.ageMs[id]) }
+                      : {}),
+                  },
+                },
               })),
             },
           ],
@@ -500,6 +510,33 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     expect(detail.textContent?.replace(/\s+/g, " ")).toContain(
       "a restart re-applies the safe state. None of the devices whose calls failed reports a watchdog trip now.",
     );
+  });
+
+  it("makes no 'no trip now' claim from an old reading (wb#809)", async () => {
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: false, rlht0: false },
+      ageMs: { dcmt0: 1000, rlht0: 120_000 },
+      startup: refusedAtStartup,
+    });
+    const chip = await screen.findByTestId("estop-startup");
+    // The health poll has landed once Provider Health lists bread0; only then
+    // does the absence below mean anything.
+    await waitFor(() =>
+      expect(within(screen.getByTestId("provider-health")).getByText(/bread0/)).toBeInTheDocument(),
+    );
+    expect(chip).toHaveTextContent("⚠ At startup, safe state not achieved");
+    expect(chip).not.toHaveTextContent("no trip reported now");
+  });
+
+  it("keeps an old trip in the list, with its age (wb#809)", async () => {
+    fakeRuntime({ latched: false, mode: "MANUAL", tripped: { dcmt0: true, rlht0: true }, ageMs: { dcmt0: 600_000 } });
+    await screen.findByTestId("watchdog-trips");
+    await waitFor(() => expect(within(trips()).getByText("bread0/rlht0")).toBeInTheDocument());
+    expect(within(trips()).getByText("bread0/dcmt0")).toBeInTheDocument();
+    expect(within(trips()).getByTestId("trip-stale-bread0/dcmt0")).toHaveTextContent("last read 600 s ago");
+    expect(within(trips()).queryByTestId("trip-stale-bread0/rlht0")).not.toBeInTheDocument();
   });
 
   it("shows a refused clear and leaves the step to retry", async () => {

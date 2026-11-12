@@ -37,6 +37,10 @@ import {
   summarizeRuntimeHealth,
   summarizeStartupSafeState,
   versionAtLeast,
+  WATCHDOG_READING_MAX_AGE_MS,
+  watchdogReadingStale,
+  watchdogTripStaleNotes,
+  watchdogTrippedDevices,
 } from "../../src/lib/operate-contracts";
 
 type FakeTreeNode = {
@@ -1337,5 +1341,64 @@ describe("startupFailuresUntripped (wb#769)", () => {
     });
     if (!skippedOnly) throw new Error("fixture did not parse");
     expect(startupFailuresUntripped(skippedOnly, health({ dcmt0: { watchdog_tripped: "false" } }))).toBe(false);
+  });
+
+  // A cached reading (anolis-provider-sdk docs/metrics.md, wb#809) says "now"
+  // only while it is recent.
+  it("makes no claim from a reading older than the bound, or with an unreadable age", () => {
+    if (!startup) throw new Error("fixture did not parse");
+    const fresh = { watchdog_tripped: "false", watchdog_status_age_ms: String(WATCHDOG_READING_MAX_AGE_MS) };
+    const old = { watchdog_tripped: "false", watchdog_status_age_ms: String(WATCHDOG_READING_MAX_AGE_MS + 1) };
+    const unreadable = { watchdog_tripped: "false", watchdog_status_age_ms: "soon" };
+    expect(startupFailuresUntripped(startup, health({ dcmt0: fresh, rlht0: fresh }))).toBe(true);
+    expect(startupFailuresUntripped(startup, health({ dcmt0: fresh, rlht0: old }))).toBe(false);
+    expect(startupFailuresUntripped(startup, health({ dcmt0: fresh, rlht0: unreadable }))).toBe(false);
+  });
+});
+
+describe("watchdogReadingStale (wb#809)", () => {
+  it("treats a reading with no age as current: the provider read it live", () => {
+    expect(watchdogReadingStale({ watchdog_tripped: "false" })).toBeNull();
+    expect(watchdogReadingStale(undefined)).toBeNull();
+  });
+
+  it("treats a reading up to the bound as current", () => {
+    expect(watchdogReadingStale({ watchdog_status_age_ms: "0" })).toBeNull();
+    expect(watchdogReadingStale({ watchdog_status_age_ms: String(WATCHDOG_READING_MAX_AGE_MS) })).toBeNull();
+  });
+
+  it("says how old a reading over the bound is", () => {
+    expect(watchdogReadingStale({ watchdog_status_age_ms: String(WATCHDOG_READING_MAX_AGE_MS + 1) })).toBe(
+      "last read 30 s ago",
+    );
+    expect(watchdogReadingStale({ watchdog_status_age_ms: "125400" })).toBe("last read 125 s ago");
+  });
+
+  it("does not trust an age that is not a non-negative integer", () => {
+    for (const age of ["", "soon", "-1", "1.5", " 10"]) {
+      expect(watchdogReadingStale({ watchdog_status_age_ms: age })).toBe("reading age unreadable");
+    }
+  });
+});
+
+describe("watchdogTrippedDevices with an old reading (wb#809)", () => {
+  const providers = extractProvidersHealth({
+    providers: [
+      {
+        provider_id: "bread0",
+        devices: [
+          { device_id: "dcmt0", reported: { metrics: { watchdog_tripped: "true", watchdog_status_age_ms: "600000" } } },
+          { device_id: "dcmt1", reported: { metrics: { watchdog_tripped: "true" } } },
+        ],
+      },
+    ],
+  });
+
+  it("still lists a tripped device whose reading is old, so Start stays refused", () => {
+    expect(watchdogTrippedDevices(providers)).toEqual(["bread0/dcmt0", "bread0/dcmt1"]);
+  });
+
+  it("notes the age of each tripped device whose reading is not current", () => {
+    expect(watchdogTripStaleNotes(providers)).toEqual({ "bread0/dcmt0": "last read 600 s ago" });
   });
 });
