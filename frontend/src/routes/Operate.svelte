@@ -1924,7 +1924,8 @@
         {#if trippedKeys.length}
           <p class="field-note">
             These devices report a command watchdog trip, and a tripped device refuses every command
-            until cleared. A trip from a reading that is not current shows its age.
+            until cleared. A trip from a reading that is not current shows how old it is, or that
+            its age is unreadable.
           </p>
           <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
