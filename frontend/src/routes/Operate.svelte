@@ -1923,7 +1923,8 @@
         <h3>Watchdog trips</h3>
         {#if trippedKeys.length}
           <p class="field-note">
-            These devices' command watchdogs tripped, so they refuse every command until cleared.
+            These devices report a command watchdog trip, and a tripped device refuses every command
+            until cleared. A trip from a reading that is not current shows its age.
           </p>
           <ul class="operate-trip-list">
             {#each trippedKeys as key (key)}
@@ -2399,6 +2400,11 @@
                     <span class="badge fault" data-testid="device-watchdog-tripped"
                       >WATCHDOG TRIPPED</span
                     >
+                    {#if tripStaleNotes[key]}
+                      <span class="field-note" data-testid="device-watchdog-stale"
+                        >({tripStaleNotes[key]})</span
+                      >
+                    {/if}
                   {/if}
                   {#if stopChain?.expectations[key]}
                     <span class="badge" data-testid="device-stop-expect">

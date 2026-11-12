@@ -535,8 +535,13 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await screen.findByTestId("watchdog-trips");
     await waitFor(() => expect(within(trips()).getByText("bread0/rlht0")).toBeInTheDocument());
     expect(within(trips()).getByText("bread0/dcmt0")).toBeInTheDocument();
-    expect(within(trips()).getByTestId("trip-stale-bread0/dcmt0")).toHaveTextContent("last read 600 s ago");
+    expect(within(trips()).getByTestId("trip-stale-bread0/dcmt0")).toHaveTextContent("last good read 600 s ago");
     expect(within(trips()).queryByTestId("trip-stale-bread0/rlht0")).not.toBeInTheDocument();
+    // The device list's badge carries the same age, and only for the old one.
+    await waitFor(() => expect(screen.getAllByTestId("device-watchdog-tripped")).toHaveLength(2));
+    const stale = screen.getAllByTestId("device-watchdog-stale");
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toHaveTextContent("last good read 600 s ago");
   });
 
   it("shows a refused clear and leaves the step to retry", async () => {

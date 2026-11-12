@@ -1369,9 +1369,9 @@ describe("watchdogReadingStale (wb#809)", () => {
 
   it("says how old a reading over the bound is", () => {
     expect(watchdogReadingStale({ watchdog_status_age_ms: String(WATCHDOG_READING_MAX_AGE_MS + 1) })).toBe(
-      "last read 30 s ago",
+      "last good read 31 s ago",
     );
-    expect(watchdogReadingStale({ watchdog_status_age_ms: "125400" })).toBe("last read 125 s ago");
+    expect(watchdogReadingStale({ watchdog_status_age_ms: "125400" })).toBe("last good read 126 s ago");
   });
 
   it("does not trust an age that is not a non-negative integer", () => {
@@ -1399,6 +1399,6 @@ describe("watchdogTrippedDevices with an old reading (wb#809)", () => {
   });
 
   it("notes the age of each tripped device whose reading is not current", () => {
-    expect(watchdogTripStaleNotes(providers)).toEqual({ "bread0/dcmt0": "last read 600 s ago" });
+    expect(watchdogTripStaleNotes(providers)).toEqual({ "bread0/dcmt0": "last good read 600 s ago" });
   });
 });

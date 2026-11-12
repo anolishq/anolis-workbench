@@ -125,7 +125,7 @@ export function extractProvidersHealth(payload: unknown): ProviderHealth[] {
 
 /**
  * How old a watchdog reading may be and still say "now" (wb#809). The same
- * bound as the runtime's startup check (anolis#732).
+ * bound anolishq/anolis#803 gives the runtime's startup check (anolis#732).
  */
 export const WATCHDOG_READING_MAX_AGE_MS = 30000;
 
@@ -133,9 +133,9 @@ export const WATCHDOG_READING_MAX_AGE_MS = 30000;
  * Why a device's watchdog reading is not current, or null when it is. A
  * provider may report the `watchdog_*` keys from a cached reading, with its
  * age in `watchdog_status_age_ms`, and keeps its last good reading after
- * later reads fail (anolis-provider-sdk docs/metrics.md). No age key is a
- * live read; an age over the bound, or one that is not a non-negative
- * integer, is not current.
+ * later reads fail (anolis-provider-sdk docs/metrics.md), so the age is that
+ * of the last good read. No age key is a live read; an age over the bound, or
+ * one that is not a non-negative integer, is not current.
  */
 export function watchdogReadingStale(metrics: Record<string, string> | undefined): string | null {
   const age = metrics?.watchdog_status_age_ms;
@@ -143,7 +143,8 @@ export function watchdogReadingStale(metrics: Record<string, string> | undefined
   if (!/^\d+$/.test(age)) return "reading age unreadable";
   const ms = Number(age);
   if (ms <= WATCHDOG_READING_MAX_AGE_MS) return null;
-  return `last read ${Math.floor(ms / 1000)} s ago`;
+  // Rounded up, so a reading just over the bound never reads as within it.
+  return `last good read ${Math.ceil(ms / 1000)} s ago`;
 }
 
 /**
