@@ -23,7 +23,8 @@ Historical note:
   anolishq/anolis#803 gives the runtime's startup check. A reading with no age
   is a live read and counts as current. A trip from an older reading still
   refuses Start and stays under Watchdog trips and on the device list, each
-  labelled with how long ago the last good read was.
+  labelled with how long ago the last good read was, or that its age is
+  unreadable.
 
 ## [0.33.3] - 2026-11-08
 
