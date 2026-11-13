@@ -124,6 +124,49 @@ export function extractProvidersHealth(payload: unknown): ProviderHealth[] {
 }
 
 /**
+ * How old a watchdog reading may be and still say "now" (wb#809). The same
+ * bound anolishq/anolis#803 gives the runtime's startup check (anolis#732).
+ */
+export const WATCHDOG_READING_MAX_AGE_MS = 30000;
+
+/**
+ * Why a device's watchdog reading is not current, or null when it is. A
+ * provider may report the `watchdog_*` keys from a cached reading, with its
+ * age in `watchdog_status_age_ms`, and keeps its last good reading after
+ * later reads fail (anolis-provider-sdk docs/metrics.md), so the age is that
+ * of the last good read. No age key is a live read; an age over the bound, or
+ * one that is not a non-negative integer, is not current.
+ */
+export function watchdogReadingStale(metrics: Record<string, string> | undefined): string | null {
+  const age = metrics?.watchdog_status_age_ms;
+  if (age === undefined) return null;
+  if (!/^\d+$/.test(age)) return "reading age unreadable";
+  const ms = Number(age);
+  if (ms <= WATCHDOG_READING_MAX_AGE_MS) return null;
+  // Rounded up, so a reading just over the bound never reads as within it.
+  return `last good read ${Math.ceil(ms / 1000)} s ago`;
+}
+
+/**
+ * For each device watchdogTrippedDevices lists whose reading is not current,
+ * what to say about its age, by "provider/device" (wb#809). An old trip still
+ * refuses Start; this only keeps it from reading as current.
+ */
+export function watchdogTripStaleNotes(providers: ProviderHealth[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const provider of providers) {
+    for (const device of provider.devices ?? []) {
+      const metrics = device.reported?.metrics;
+      const stale = watchdogReadingStale(metrics ?? undefined);
+      if (metrics?.watchdog_tripped === "true" && stale !== null) {
+        out[`${provider.provider_id}/${device.device_id}`] = stale;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Devices whose provider reports the SDK-reserved `watchdog_tripped` health
  * metric as "true", as "provider/device" (wb#572). Only the exact value
  * counts; an absent key makes no claim.
@@ -145,23 +188,26 @@ export function watchdogTrippedDevices(providers: ProviderHealth[]): string[] {
  * `watchdog_tripped` health metric as "false" (wb#769). The startup report
  * holds until the runtime restarts; this says whether the devices it names
  * still report a trip. An absent metric makes no claim, and neither does an
- * action not driven (a config failure, which no trip clearing changes).
+ * action not driven (a config failure, which no trip clearing changes), nor a
+ * reading that is not current (wb#809).
  */
 export function startupFailuresUntripped(
   s: StartupSafeStateStatus,
   providers: ProviderHealth[],
 ): boolean {
   if (s.failed_actions.length === 0 || s.failed_actions.some(isNotDriven)) return false;
-  const tripped = new Map<string, unknown>();
+  const untripped = new Map<string, boolean>();
   for (const provider of providers) {
     for (const device of provider.devices ?? []) {
-      tripped.set(
+      const metrics = device.reported?.metrics;
+      untripped.set(
         `${provider.provider_id}/${device.device_id}`,
-        device.reported?.metrics?.watchdog_tripped,
+        metrics?.watchdog_tripped === "false" &&
+          watchdogReadingStale(metrics ?? undefined) === null,
       );
     }
   }
-  return s.failed_actions.every((a) => tripped.get(a.device_handle) === "false");
+  return s.failed_actions.every((a) => untripped.get(a.device_handle) === true);
 }
 
 export function extractCapabilities(payload: unknown): DeviceCapabilities {
