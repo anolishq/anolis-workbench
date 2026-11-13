@@ -13,7 +13,7 @@ Historical note:
 
 ## [Unreleased]
 
-## [0.33.4] - 2026-11-12
+## [0.33.4] - 2026-11-13
 
 ### Fixed
 
