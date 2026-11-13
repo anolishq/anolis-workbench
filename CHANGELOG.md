@@ -13,6 +13,8 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.33.4] - 2026-11-12
+
 ### Fixed
 
 - **Operate no longer reads an old watchdog reading as current** (#809). A
