@@ -15,7 +15,7 @@
       "manifest_asset": "runtime-http-schema-manifest.json"
     },
     "schema_sha256": "3bcf7ddff4e15810fcc08b0d48b1620d39f029ddc4fa501d97f33d5c016a0edb",
-    "asset_sha256": "7785c34c3d509f44f101c07523dd72cd316baec94e108acae746aff214a17c3b"
+    "asset_sha256": "a3b6e96656bf4cc2c7ca678d99cdd297794fdfb8deb5916a65822b48025e68bf"
   },
-  "synced_at_utc": "2026-11-11T06:56:43Z"
+  "synced_at_utc": "2026-11-14T18:11:53Z"
 }
