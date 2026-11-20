@@ -1547,7 +1547,9 @@
     wasLatched = latched;
   });
   function getFuncFormKey(deviceKey: string, func: FunctionSpec): string {
-    return `${deviceKey}:${func.function_id}`;
+    // The name as well as the id: a provider rebuild can give an id to a
+    // different function, which must not inherit the old one's values (#839).
+    return `${deviceKey}:${func.function_id}:${func.name}`;
   }
   function getFuncFormData(deviceKey: string, func: FunctionSpec): Record<string, unknown> {
     return funcFormData[getFuncFormKey(deviceKey, func)] ?? {};
