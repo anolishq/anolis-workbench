@@ -40,6 +40,16 @@ const CAPS: Record<string, unknown> = {
             lower: { type: "double", required: true, position: 0 },
           },
         },
+        {
+          // #838: an argument named after an Object.prototype member.
+          function_id: 9,
+          name: "tag",
+          category: "CONFIG",
+          args: [
+            { name: "constructor", type: "string", required: false },
+            { name: "value", type: "string", required: true },
+          ],
+        },
       ],
     },
   },
@@ -329,7 +339,11 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
             device: "bread0/dcmt0",
             after_clear: [
               { label: "Back to open loop", function: "set_mode", args: { mode: "open_loop" } },
-              { label: "Release both brakes", function: "set_brake", args: { motor1_brake: false, motor2_brake: false } },
+              {
+                label: "Release both brakes",
+                function: "set_brake",
+                args: { motor1_brake: false, motor2_brake: false },
+              },
             ],
           },
         ],
@@ -341,13 +355,19 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await press(3, "Clear the trip");
     await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
     // In order: the second waits for the first.
-    expect(await within(step(5)).findByRole("button", { name: "Release both brakes" })).toBeDisabled();
+    expect(
+      await within(step(5)).findByRole("button", { name: "Release both brakes" }),
+    ).toBeDisabled();
     await press(4, "Back to open loop");
     await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
     await press(5, "Release both brakes");
     await waitFor(() => expect(step(5)).toHaveTextContent("Done"));
 
-    expect(actionPosts(rt).slice(1).map((p) => p.body?.args)).toEqual([
+    expect(
+      actionPosts(rt)
+        .slice(1)
+        .map((p) => p.body?.args),
+    ).toEqual([
       { mode: { type: "string", string: "open_loop" } },
       { motor1_brake: { type: "bool", bool: false }, motor2_brake: { type: "bool", bool: false } },
     ]);
@@ -376,9 +396,41 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await press(4, "Set limits");
     await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
 
-    expect(actionPosts(rt).slice(1).map((p) => p.body?.args)).toEqual([
-      { upper: { type: "double", double: 10 }, lower: { type: "double", double: 2 } },
-    ]);
+    expect(
+      actionPosts(rt)
+        .slice(1)
+        .map((p) => p.body?.args),
+    ).toEqual([{ upper: { type: "double", double: 10 }, lower: { type: "double", double: 2 } }]);
+  });
+
+  // #838: a step that does not supply an argument leaves it unsupplied, even
+  // when its name is an Object.prototype member such as constructor.
+  it("does not send an inherited value for an argument the step does not supply", async () => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [{ label: "Tag it", function: "tag", args: { value: "x" } }],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    await press(4, "Tag it");
+    await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
+
+    expect(
+      actionPosts(rt)
+        .slice(1)
+        .map((p) => p.body?.args),
+    ).toEqual([{ value: { type: "string", string: "x" } }]);
   });
 
   it("refuses a step whose argument the function doesn't take, and sends nothing", async () => {
@@ -401,7 +453,9 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
     await press(4, "Release");
 
-    expect(await within(step(4)).findByText(/set_brake takes no argument brake1/)).toBeInTheDocument();
+    expect(
+      await within(step(4)).findByText(/set_brake takes no argument brake1/),
+    ).toBeInTheDocument();
     expect(actionPosts(rt).map((p) => p.body?.function_id)).toEqual([6]);
   });
 
@@ -419,7 +473,9 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     await fireEvent.click(
       await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/rlht0…" }),
     );
-    expect(await within(step(4)).findByText("This device offers no set_brake function.")).toBeInTheDocument();
+    expect(
+      await within(step(4)).findByText("This device offers no set_brake function."),
+    ).toBeInTheDocument();
   });
 
   it("skips MANUAL when the runtime has no automation layer, and never posts a mode", async () => {
@@ -504,7 +560,9 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     const chip = await screen.findByTestId("estop-startup");
     await waitFor(() => expect(chip).toHaveTextContent("· no trip reported now"));
     await fireEvent.click(screen.getByRole("button", { name: "About the startup safe state" }));
-    expect(screen.getByText(/stays until it restarts; a restart re-applies the safe state/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/stays until it restarts; a restart re-applies the safe state/),
+    ).toBeInTheDocument();
     // One text node per sentence, so read the whole detail: the space between them is easy to lose (wb#773).
     const detail = screen.getByText(/stays until it restarts/).closest("[id]") as HTMLElement;
     expect(detail.textContent?.replace(/\s+/g, " ")).toContain(
@@ -531,11 +589,18 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
   });
 
   it("keeps an old trip in the list, with its age (wb#809)", async () => {
-    fakeRuntime({ latched: false, mode: "MANUAL", tripped: { dcmt0: true, rlht0: true }, ageMs: { dcmt0: 600_000 } });
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: true, rlht0: true },
+      ageMs: { dcmt0: 600_000 },
+    });
     await screen.findByTestId("watchdog-trips");
     await waitFor(() => expect(within(trips()).getByText("bread0/rlht0")).toBeInTheDocument());
     expect(within(trips()).getByText("bread0/dcmt0")).toBeInTheDocument();
-    expect(within(trips()).getByTestId("trip-stale-bread0/dcmt0")).toHaveTextContent("last good read 600 s ago");
+    expect(within(trips()).getByTestId("trip-stale-bread0/dcmt0")).toHaveTextContent(
+      "last good read 600 s ago",
+    );
     expect(within(trips()).queryByTestId("trip-stale-bread0/rlht0")).not.toBeInTheDocument();
     // The device list's badge carries the same age, and only for the old one.
     await waitFor(() => expect(screen.getAllByTestId("device-watchdog-tripped")).toHaveLength(2));

@@ -846,7 +846,9 @@
       // buildArgsPayload reads a form's strings; the profile holds typed values.
       const form: Record<string, unknown> = {};
       specArgs.forEach((a, i) => {
-        const v = named[a.name];
+        // Own keys only: an unsupplied name such as constructor must not read
+        // Object.prototype's (#838).
+        const v = Object.hasOwn(named, a.name) ? named[a.name] : undefined;
         if (v !== undefined) form[funcFormField(specArgs, i)] = a.type === "bool" ? v : String(v);
       });
       await fetchJson<UnknownRecord>("/v0/call", {
@@ -939,7 +941,9 @@
     const INT64_MIN = -9223372036854775808n;
     const INT64_MAX = 9223372036854775807n;
     const JS_SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
-    const args: Record<string, TypedValue> = {};
+    // No prototype, so an argument named __proto__ is an own key like any other
+    // and reaches the call body (#838).
+    const args: Record<string, TypedValue> = Object.create(null);
     const specArgs = func.args ?? [];
     for (const [i, argDef] of specArgs.entries()) {
       const argType = argDef.type || "string";
