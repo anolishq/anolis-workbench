@@ -266,6 +266,11 @@ def is_authored(name: str) -> bool:
     return canonical.is_authored(_read_sidecar(pdir))
 
 
+# Why a legacy project could not be migrated, by project dir, so the degraded
+# project it opens as can say so (#841).
+_MIGRATION_FAILURES: dict[pathlib.Path, str] = {}
+
+
 def _dir_format(pdir: pathlib.Path, *, migrate: bool = True) -> str | None:
     """Project format for a workspace dir, or None if it isn't a project.
 
@@ -284,7 +289,9 @@ def _dir_format(pdir: pathlib.Path, *, migrate: bool = True) -> str | None:
             # and keep going: this runs from list_projects, so raising here
             # would make EVERY other project unreachable in the UI.
             print(f"[projects] Could not migrate '{pdir.name}' to the canonical layout: {exc}")
+            _MIGRATION_FAILURES[pdir] = str(exc)
             return FORMAT_SYSTEM
+        _MIGRATION_FAILURES.pop(pdir, None)
     sidecar = _read_sidecar(pdir)
     if sidecar and sidecar.get("format") == FORMAT_MACHINE_PROFILE:
         return FORMAT_MACHINE_PROFILE
@@ -535,8 +542,13 @@ def get_project(name: str) -> dict:
         return document
     if fmt == FORMAT_SYSTEM:
         # Listed (hiding it would look like deletion) but not migratable, so
-        # serve the degraded shape rather than 404ing a project the UI shows.
-        return _degraded_project(name)
+        # serve the degraded shape rather than 404ing a project the UI shows,
+        # and say why it could not be migrated.
+        degraded = _degraded_project(name)
+        reason = _MIGRATION_FAILURES.get(project_dir(name))
+        if reason:
+            degraded["warnings"] = [f"Could not migrate system.json to the canonical layout: {reason}"]
+        return degraded
     raise FileNotFoundError(f"Project '{name}' not found")
 
 

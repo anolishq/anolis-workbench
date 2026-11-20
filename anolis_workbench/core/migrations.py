@@ -212,6 +212,11 @@ def _legacy_runtime_doc(system: dict[str, Any]) -> dict[str, Any]:
         if rp is not None:
             rp_out: dict[str, Any] = {"enabled": rp.get("enabled", False)}
             if rp.get("enabled"):
+                # The runtime config schema requires both when the policy is
+                # enabled, so the document was already invalid; say where (#841).
+                for key in ("max_attempts", "backoff_ms"):
+                    if key not in rp:
+                        raise ValueError(f"provider '{pid}': restart_policy is enabled but has no '{key}'")
                 rp_out["max_attempts"] = rp["max_attempts"]
                 rp_out["backoff_ms"] = rp["backoff_ms"]
                 if "timeout_ms" in rp:
