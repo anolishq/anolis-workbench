@@ -945,7 +945,9 @@
       const argType = argDef.type || "string";
       const raw = formData[funcFormField(specArgs, i)];
       if (argType === "bool") {
-        args[argDef.name] = { type: "bool", bool: Boolean(raw) };
+        // Only a real boolean counts: a value kept from another type, such as
+        // the text "false" from when this arg was a string, is unset (#840).
+        args[argDef.name] = { type: "bool", bool: raw === true };
         continue;
       }
       const value = typeof raw === "string" ? raw.trim() : "";
@@ -2502,7 +2504,7 @@
                           <input
                             id="fn-{fbKey}-{ai}"
                             type="checkbox"
-                            checked={Boolean(getFuncFormData(selectedKey, func)[field])}
+                            checked={getFuncFormData(selectedKey, func)[field] === true}
                             onchange={(e: Event) =>
                               setFuncArg(selectedKey, func, field, inputTarget(e).checked)}
                           />
