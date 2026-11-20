@@ -442,6 +442,31 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     ]);
   });
 
+  // #839: function ids are the provider's, and a rebuild can give one to a
+  // different function; a value typed for the old one is not offered to it.
+  it("does not carry a typed value to a different function that reuses the id", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const named = (name: string) => ({
+      capabilities: {
+        signals: [],
+        functions: [
+          {
+            ...PID_CAPS.capabilities.functions[0],
+            name,
+            args: { value: { type: "double", required: true } },
+          },
+        ],
+      },
+    });
+    const { rt } = renderPid(named("set_speed"));
+    await screen.findByLabelText(/^value/);
+    await typeInto("value", "42");
+
+    await restartWith(rt, named("set_power"));
+
+    expect(shownValues()).toEqual([["value", ""]]);
+  });
+
   // #840: a value kept from another type is not read for truthiness, so the
   // text "false" typed while the arg was a string does not become true.
   it("treats a value kept from a string arg as unset when the arg comes back a bool", async () => {
