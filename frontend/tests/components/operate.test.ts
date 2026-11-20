@@ -232,6 +232,27 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     ]);
   });
 
+  // wb#828: two setpoints for one function on an absent device are two
+  // identical skipped lines. Keyed by text, the list threw each_key_duplicate
+  // and the section stayed on "Loading runtime status…".
+  it('lists two identical skipped calls, both, and still renders the section', async () => {
+    const skipped = { device_handle: 'bread0/dcmt0', function: 'set_pwm', reason: 'UNREACHABLE: bus off' };
+    renderOperate(
+      withStartup({
+        software_safe_state: 'setpoints',
+        safe_state_achieved: false,
+        skipped_actions: [skipped, skipped],
+      }),
+    );
+
+    expect(await screen.findByTestId('startup-safe-state')).toBeInTheDocument();
+    expect(calls()).toEqual([
+      'bread0/dcmt0/set_pwm skipped: UNREACHABLE: bus off',
+      'bread0/dcmt0/set_pwm skipped: UNREACHABLE: bus off',
+    ]);
+    expect(screen.getByText('v0.1.45')).toBeInTheDocument();
+  });
+
   // The runtime's verdict is false with no failed call only when the rung
   // issued no call at all: zero, on a machine with no actuating function.
   it('under zero with no call issued, says nothing was driven, not that a call failed', async () => {

@@ -68,7 +68,8 @@
       </p>
       {#if startup.calls.length}
         <ul class="operate-meta field-error" data-testid="startup-safe-state-calls">
-          {#each startup.calls as call (call)}
+          <!-- Keyed by position: two skipped calls can read the same (wb#828). -->
+          {#each startup.calls as call, i (i)}
             <li>{call}</li>
           {/each}
         </ul>
