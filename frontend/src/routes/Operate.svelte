@@ -945,7 +945,9 @@
       const argType = argDef.type || "string";
       const raw = formData[funcFormField(specArgs, i)];
       if (argType === "bool") {
-        args[argDef.name] = { type: "bool", bool: Boolean(raw) };
+        // Only a real boolean counts: a value kept from another type, such as
+        // the text "false" from when this arg was a string, is unset (#840).
+        args[argDef.name] = { type: "bool", bool: raw === true };
         continue;
       }
       const value = typeof raw === "string" ? raw.trim() : "";
@@ -1547,7 +1549,9 @@
     wasLatched = latched;
   });
   function getFuncFormKey(deviceKey: string, func: FunctionSpec): string {
-    return `${deviceKey}:${func.function_id}`;
+    // The name as well as the id: a provider rebuild can give an id to a
+    // different function, which must not inherit the old one's values (#839).
+    return `${deviceKey}:${func.function_id}:${func.name}`;
   }
   function getFuncFormData(deviceKey: string, func: FunctionSpec): Record<string, unknown> {
     return funcFormData[getFuncFormKey(deviceKey, func)] ?? {};
@@ -2502,7 +2506,7 @@
                           <input
                             id="fn-{fbKey}-{ai}"
                             type="checkbox"
-                            checked={Boolean(getFuncFormData(selectedKey, func)[field])}
+                            checked={getFuncFormData(selectedKey, func)[field] === true}
                             onchange={(e: Event) =>
                               setFuncArg(selectedKey, func, field, inputTarget(e).checked)}
                           />
