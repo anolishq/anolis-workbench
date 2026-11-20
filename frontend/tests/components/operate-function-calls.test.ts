@@ -484,6 +484,29 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     expect(calls.map((c) => c.args)).toEqual([{ flag: { type: "bool", bool: false } }]);
   });
 
+  // #838: an argument named __proto__ reaches the call body under its name.
+  it("sends an argument named __proto__ under its own name", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls } = renderPid(
+      pidCaps({
+        ["__proto__"]: { type: "string", required: true, position: 0 },
+        speed: { type: "double", required: true, position: 1 },
+      }),
+    );
+    await screen.findByLabelText(/^speed/);
+    await typeInto("__proto__", "typed-value");
+    await typeInto("speed", "1.5");
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+
+    expect(JSON.stringify(calls[0].args)).toBe(
+      JSON.stringify({
+        ["__proto__"]: { type: "string", string: "typed-value" },
+        speed: { type: "double", double: 1.5 },
+      }),
+    );
+  });
+
   it("still renders args whose names collide once trimmed", async () => {
     // The runtime passes arg names through unchecked, so object keys that
     // differ only by outer whitespace reach the form with equal names.
