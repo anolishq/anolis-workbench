@@ -467,6 +467,23 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     expect(shownValues()).toEqual([["value", ""]]);
   });
 
+  // #840: a value kept from another type is not read for truthiness, so the
+  // text "false" typed while the arg was a string does not become true.
+  it("treats a value kept from a string arg as unset when the arg comes back a bool", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(pidCaps({ flag: { type: "string", required: true } }));
+    await screen.findByLabelText(/^flag/);
+    await typeInto("flag", "false");
+
+    await restartWith(rt, pidCaps({ flag: { type: "bool", required: true } }));
+
+    expect(argInput(argRows()[0]).type).toBe("checkbox");
+    expect(argInput(argRows()[0]).checked).toBe(false);
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([{ flag: { type: "bool", bool: false } }]);
+  });
+
   it("still renders args whose names collide once trimmed", async () => {
     // The runtime passes arg names through unchecked, so object keys that
     // differ only by outer whitespace reach the form with equal names.
