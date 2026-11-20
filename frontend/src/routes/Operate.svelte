@@ -1770,15 +1770,17 @@
               actuation and runs the runtime's declared safe state, but this workbench cannot say
               what that drives. Check any functions shown as not covered, and update the workbench.
             {:else}
-              No software safe-state is declared for this machine. The software stop drives nothing:
-              it only latches actuation (blocks new commands). Use the hardware emergency stop to
-              make the machine safe.
+              No software safe-state is declared for this machine, so the software stop drives no
+              safe state of its own: it latches actuation (blocks new commands). On a machine with
+              automation, pressing it enters FAULT, and any matching <code>-&gt; FAULT</code> mode-transition
+              hooks still run and can move the outputs they drive; the runtime does not count them as
+              a safe state. Use the hardware emergency stop to make the machine safe.
             {/if}
             {@render safeStateFix()}
           </InfoToggle>
           {#if dispatchableCoverage}
             <!-- The functions the active rung will not drive. Under none it
-                 drives nothing, which the state chip already says. -->
+                 drives no safe state, which the state chip already says. -->
             {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
               <span class="estop-chip field-error" data-testid="estop-coverage">
                 ⚠ {estop.uncovered_actuating_functions} not covered

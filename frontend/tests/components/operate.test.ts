@@ -101,11 +101,19 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
       expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
     });
 
-    it('under none, says the software stop drives nothing and shows no count', async () => {
+    // wb#829: under none the stop has no safe state of its own, but on an
+    // automation machine its entry into FAULT still runs the matching
+    // -> FAULT hooks, so it must not say nothing moves.
+    it('under none, says the stop drives no safe state, that FAULT hooks still run, and shows no count', async () => {
       renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }, NEW));
       await openStopDetails();
 
-      expect(await screen.findByText(/The software stop drives nothing/)).toBeInTheDocument();
+      const note = await screen.findByText(/No software safe-state is declared/);
+      const text = note.textContent?.replace(/\s+/g, ' ') ?? '';
+      expect(text).not.toMatch(/drives nothing/);
+      expect(text).toContain('-> FAULT mode-transition hooks still run');
+      expect(text).toContain('the runtime does not count them as a safe state');
+      expect(text).toContain('Use the hardware emergency stop');
       expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
     });
   });
