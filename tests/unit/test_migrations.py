@@ -233,3 +233,57 @@ def test_unknown_schema_version_left_untouched() -> None:
     out, changed = migrations.migrate_system(doc)
     assert not changed
     assert out is doc
+
+
+# #841: an enabled restart_policy missing max_attempts or backoff_ms raised a
+# bare KeyError, the project opened empty with a "no machine-profile.yaml"
+# warning, and migrate_workspace stopped at it.
+def _v2_without_restart_key(key: str) -> tuple[dict, str]:
+    doc = _load_v2_template("bioreactor-manual")
+    provider = doc["topology"]["runtime"]["providers"][0]
+    del provider["restart_policy"][key]
+    return doc, provider["id"]
+
+
+@pytest.mark.parametrize("key", ["max_attempts", "backoff_ms"])
+def test_enabled_restart_policy_without_a_key_names_the_provider_and_key(key: str, tmp_path: pathlib.Path) -> None:
+    doc, pid = _v2_without_restart_key(key)
+    pdir = tmp_path / "bad"
+    pdir.mkdir()
+    (pdir / "system.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        migrations.migrate_project_dir(pdir, project_name="bad")
+
+    assert pid in str(excinfo.value)
+    assert key in str(excinfo.value)
+
+
+def test_a_project_that_cannot_migrate_says_why_in_its_warnings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    systems_root = tmp_path / "systems"
+    monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
+    doc, pid = _v2_without_restart_key("max_attempts")
+    (systems_root / "bad").mkdir(parents=True)
+    (systems_root / "bad" / "system.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    document = projects.get_project("bad")
+
+    assert any(pid in w and "max_attempts" in w for w in document["warnings"]), document["warnings"]
+
+
+def test_migrate_workspace_carries_on_past_a_project_it_cannot_migrate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    systems_root = tmp_path / "systems"
+    monkeypatch.setattr(projects, "SYSTEMS_ROOT", systems_root)
+    doc, _ = _v2_without_restart_key("backoff_ms")
+    (systems_root / "a-bad").mkdir(parents=True)
+    (systems_root / "a-bad" / "system.json").write_text(json.dumps(doc), encoding="utf-8")
+    (systems_root / "b-good").mkdir(parents=True)
+    (systems_root / "b-good" / "system.json").write_text(json.dumps(_load_v1("sim-quickstart")), encoding="utf-8")
+
+    migrated = projects.migrate_workspace()
+
+    assert migrated == ["b-good"]
