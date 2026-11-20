@@ -83,6 +83,7 @@
     watchdogTrippedDevices,
     watchdogTripStaleNotes,
     startupFailuresUntripped,
+    startupFailedOnConfig,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -1879,9 +1880,15 @@
               ⚠ At startup, safe state not achieved{#if untripped}&nbsp;· no trip reported now{/if}
             </span>
             <InfoToggle label="About the startup safe state">
-              {startup.text} This is from the runtime's last start and stays until it restarts; a restart
-              re-applies the safe state.{#if untripped}&nbsp;None of the devices whose calls failed
-                reports a watchdog trip now.{/if}
+              {#if startupFailedOnConfig(startupSafeState)}
+                {startup.text} This is from the runtime's last start. It was planned from the config,
+                so a restart fails the same way until <code>safety.safe_state</code> is fixed.
+                {@render safeStateFix()}
+              {:else}
+                {startup.text} This is from the runtime's last start and stays until it restarts; a restart
+                re-applies the safe state.
+              {/if}{#if untripped}&nbsp;None of the devices whose calls failed reports a watchdog
+                trip now.{/if}
             </InfoToggle>
           {/if}
         {/if}

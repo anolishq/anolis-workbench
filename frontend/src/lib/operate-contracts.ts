@@ -524,6 +524,15 @@ function isNotDriven(action: UnknownRecord): boolean {
 }
 
 /**
+ * Whether the startup safe state failed on the config (an entry with `cause:
+ * "config"`). A restart re-plans the same calls and fails the same way, so
+ * the remedy is to fix `safety.safe_state` (wb#830).
+ */
+export function startupFailedOnConfig(s: StartupSafeStateStatus): boolean {
+  return s.failed_actions.some(isNotDriven);
+}
+
+/**
  * Extract the `estop` block from a `GET /v0/runtime/status` body. Returns null
  * when the block is absent or not an object (the contract keeps it optional);
  * the UI must not render a stop control it cannot describe.
