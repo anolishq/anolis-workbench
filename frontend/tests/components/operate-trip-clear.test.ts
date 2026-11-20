@@ -570,6 +570,39 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     );
   });
 
+  // wb#830: a cause "config" entry is planned from the config, so a restart
+  // fails the same way; the note must send the operator to the config.
+  it("says to fix the config, not restart, when a startup action could not be planned (wb#830)", async () => {
+    fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      tripped: { dcmt0: false },
+      startup: {
+        on_startup: "safe_state",
+        ran: true,
+        software_safe_state: "zero",
+        safe_state_achieved: false,
+        skipped_actions: [],
+        failed_actions: [
+          {
+            device_handle: "bread0/dcmt0",
+            function: "set_flag",
+            success: false,
+            error: "cannot zero required non-numeric argument 'enable'",
+            cause: "config",
+          },
+        ],
+      },
+    });
+    await screen.findByTestId("estop-startup");
+    await fireEvent.click(screen.getByRole("button", { name: "About the startup safe state" }));
+    const detail = screen.getByText(/from the runtime's last start/).closest("[id]") as HTMLElement;
+    const text = detail.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).not.toContain("a restart re-applies the safe state");
+    expect(text).toContain("a restart fails the same way until safety.safe_state is fixed");
+    expect(within(detail).getByTestId("safe-state-fix")).toBeInTheDocument();
+  });
+
   it("makes no 'no trip now' claim from an old reading (wb#809)", async () => {
     fakeRuntime({
       latched: false,
