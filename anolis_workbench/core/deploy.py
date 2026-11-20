@@ -69,6 +69,9 @@ ProgressCallback = Callable[[str, str], None]
 DOWNGRADE_GUARD_VERSION = (0, 1, 45)
 # The first install.sh with --replace-config (anolishq/anolis#470).
 REPLACE_CONFIG_VERSION = (0, 1, 56)
+# From this anolis release install.sh rewrites every project path to the
+# directory it installs, whatever the token names (anolishq/anolis#694).
+PATH_REWRITE_BY_DIRECTORY_VERSION = (0, 11, 0)
 _XYZ_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -182,7 +185,7 @@ def materialize_project_dir(
     if profile_dir_name in ("", ".", "..") or "/" in profile_dir_name or "\\" in profile_dir_name:
         raise DeployError(f"invalid project directory name {profile_dir_name!r} in the imported project sidecar")
 
-    _assert_path_tokens_name(project_dir, profile, profile_dir_name)
+    _assert_path_tokens_name(project_dir, profile, profile_dir_name, runtime_version)
     _assert_no_crlf(project_dir, profile)
     _assert_no_influx_token(project_dir, runtime_profiles)
 
@@ -219,15 +222,23 @@ def materialize_project_dir(
     )
 
 
-def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_dir_name: str) -> None:
-    """The deploy directory basename must equal what the config tokens name.
+def _assert_path_tokens_name(
+    project_dir: pathlib.Path, profile: dict, profile_dir_name: str, runtime_version: str
+) -> None:
+    """Up to anolis 0.10.2, the deploy directory basename must equal what the
+    config tokens name.
 
-    install.sh rewrites `../anolis-projects/projects/<X>/...` using the TOKEN's
-    own `<X>`, but installs the project under the directory it is handed. When
-    the two disagree the install SUCCEEDS and the rig is broken: configs
-    resolve to a path nothing was written to. There is no check for this on the
-    install.sh side, so it has to happen here.
+    install.sh up to 0.10.2 rewrites `../anolis-projects/projects/<X>/...` using
+    the TOKEN's own `<X>`, but installs the project under the directory it is
+    handed. When the two disagree the install SUCCEEDS and the machine is
+    broken: configs resolve to a path nothing was written to. From 0.11.0
+    install.sh rewrites every project path to the directory it installs
+    (anolishq/anolis#694), so the check applies only to a project pinning an
+    earlier release, whose install.sh is the one deploy fetches.
     """
+    pinned = _xyz(runtime_version)
+    if pinned is not None and pinned >= PATH_REWRITE_BY_DIRECTORY_VERSION:
+        return
     named: set[str] = set()
     # install.sh's renderer is GLOB-driven, not profile-driven, so scan what it
     # scans: a stray config the profile never mentions is still rendered, and
@@ -243,8 +254,9 @@ def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_d
     if wrong:
         raise DeployError(
             f"project configs reference project directory {', '.join(repr(w) for w in wrong)} "
-            f"but this project deploys as '{profile_dir_name}'. install.sh keys its path rewrites "
-            "on the token, so the installed configs would point at a directory that does not exist."
+            f"but this project deploys as '{profile_dir_name}'. install.sh from anolis 0.10.2 and earlier, "
+            f"which this project pins ({runtime_version}), keys its path rewrites on the token, so the "
+            "installed configs would point at a directory that does not exist."
         )
 
 

@@ -951,6 +951,35 @@ def test_materialize_refuses_when_tokens_name_another_project(
         deploy.materialize_project_dir(project_dir, tmp_path / "out")
 
 
+def test_materialize_lets_tokens_name_another_project_from_anolis_0_11_0(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """From anolis 0.11.0 (anolishq/anolis#694) install.sh rewrites every
+    project path to the directory it installs, whatever the token names, so the
+    mismatch installs correctly and is not refused (#821)."""
+    _pin_runtime(project_dir, "0.11.0")
+    variant = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("/projects/deploy-fixture/", "/projects/some-other-rig/"),
+        encoding="utf-8",
+    )
+    mat = deploy.materialize_project_dir(project_dir, tmp_path / "out")
+    assert mat.runtime_version == "0.11.0"
+
+
+def test_materialize_refuses_tokens_naming_another_project_up_to_anolis_0_10_2(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    _pin_runtime(project_dir, "0.10.2")
+    variant = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("/projects/deploy-fixture/", "/projects/some-other-rig/"),
+        encoding="utf-8",
+    )
+    with pytest.raises(deploy.DeployError, match="anolis 0.10.2 and earlier"):
+        deploy.materialize_project_dir(project_dir, tmp_path / "out")
+
+
 def test_stage_bundle_does_not_pass_variant_to_install_sh(
     project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
