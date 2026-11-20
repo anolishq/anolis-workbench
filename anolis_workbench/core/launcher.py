@@ -595,10 +595,20 @@ def _check_config_binary(check_name: str, exe: pathlib.Path | None, yaml_path: p
         )
         if result.returncode == 0:
             return {"name": check_name, "ok": True, "error": None, "hint": None}
-        stderr_lower = (result.stderr or "").lower()
-        if any(kw in stderr_lower for kw in ("unknown", "unrecognized", "invalid option")):
+        stderr = result.stderr or ""
+        # Only the binary refusing the flag itself means the check cannot run:
+        # a line that names --check-config as unknown ("Unknown argument:
+        # --check-config" from the runtime, "unknown option: --check-config"
+        # elsewhere). "unknown" on any other line, such as the runtime's
+        # unknown-key warning, is part of a config it refused (#852).
+        if any(
+            "--check-config" in line and any(kw in line for kw in ("unknown", "unrecognized", "invalid option"))
+            for line in stderr.lower().splitlines()
+        ):
             return {"name": check_name, "ok": None, "note": "Not yet available"}
-        error = (result.stderr or result.stdout or "Non-zero exit").strip()[:200]
+        # The last ERROR: line, in full, is the reason the config was refused.
+        error_lines = [line.strip() for line in stderr.splitlines() if line.strip().startswith("ERROR:")]
+        error = error_lines[-1] if error_lines else (stderr or result.stdout or "Non-zero exit").strip()
         return {"name": check_name, "ok": False, "error": error, "hint": None}
     except subprocess.TimeoutExpired:
         return {"name": check_name, "ok": False, "error": "Timed out (10s)", "hint": None}
