@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import os
 import pathlib
 import tempfile
 import uuid
@@ -59,6 +60,9 @@ def status(handler, *, host: str, port: int) -> None:
         "version": 1,
         "package_version": _package_version(),
         "instance": _INSTANCE,
+        # Set by the desktop shell for the sidecar it spawned, so its readiness
+        # check accepts this server and not another workbench on the port.
+        "launch_id": os.environ.get("ANOLIS_WORKBENCH_LAUNCH_ID") or None,
     }
     handler._json(200, payload)
 
