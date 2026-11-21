@@ -234,13 +234,15 @@ def test_fetch_install_sh_refuses_a_mismatch(tmp_path: pathlib.Path, monkeypatch
         pytest.param(_FakeResponse(404), id="404"),
     ],
 )
-def test_fetch_install_sh_warns_when_the_release_cannot_check_it(
+def test_fetch_install_sh_refuses_when_the_release_cannot_check_it(
     sums: _FakeResponse, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # #533: a release that cannot vouch for install.sh (no SHA256SUMS, or no
+    # line for it, as every anolis release through v0.1.49) stops the deploy.
     _serve_release(monkeypatch, sums)
-    path, warning = deploy.fetch_install_sh("0.1.27", tmp_path)
-    assert path.read_bytes() == _SCRIPT
-    assert warning == _UNVERIFIED
+    with pytest.raises(deploy.DeployError, match="cannot be verified; refusing to run it.*v0.1.50 or later"):
+        deploy.fetch_install_sh("0.1.27", tmp_path)
+    assert not (tmp_path / "install.sh").exists()
 
 
 @pytest.mark.parametrize(

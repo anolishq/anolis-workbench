@@ -179,6 +179,12 @@ tagged `v<version>` and publish `anolis-provider-<kind>-<version>-linux-<arch>.t
 a `SHA256SUMS` that lists the tarball: `install.sh` refuses a provider it
 can't verify.
 
+The workbench checks `install.sh` itself the same way, against the
+`SHA256SUMS` of the anolis release the project pins
+(`components.runtime.version`), and refuses to run one it can't verify. The
+oldest anolis release it deploys is v0.1.50, the first whose `SHA256SUMS`
+lists `install.sh`.
+
 `anolis-workbench provider remove foo@0.1.0` removes an import. It refuses
 while a project pins that kind at that version and uses it, naming the
 projects, unless you pass `--force`; saving such a project then fails until

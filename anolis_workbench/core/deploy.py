@@ -330,9 +330,10 @@ def _assert_no_crlf(project_dir: pathlib.Path, profile: dict) -> None:
 def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> tuple[pathlib.Path, str | None]:
     """Download install.sh from the anolis release the profile pins and check it.
 
-    Returns the script's path and, when the release's SHA256SUMS has no
-    line for it, the warning to show. Raises DeployError when it does not
-    match, or SHA256SUMS cannot be fetched.
+    Returns the script's path and the verifier's warning, which is None now
+    that an unverifiable release is refused (#533). Raises DeployError when
+    install.sh does not match its release's SHA256SUMS, the release has no
+    SHA256SUMS or no line for it, or SHA256SUMS cannot be fetched.
     """
     url = f"https://github.com/{releases.RUNTIME_REPO}/releases/download/v{runtime_version}/install.sh"
     try:
