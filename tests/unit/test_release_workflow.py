@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 from typing import Any
@@ -207,3 +208,37 @@ def test_an_sbom_that_is_not_a_cyclonedx_inventory_is_refused(tmp_path: pathlib.
     assert (
         "release-assets/sbom-node.cdx.json is missing, is not a CycloneDX SBOM, or lists no components" in result.stdout
     )
+
+
+# ---------------------------------------------------------------------------
+# The version the release accepts is one every manifest can carry (#675)
+# ---------------------------------------------------------------------------
+
+
+def _input_version_regex() -> str:
+    run = _step("validate", "Validate version alignment across all manifests")["run"]
+    match = re.search(r'\[\[ ! "\$VERSION" =~ (\S+) \]\]', run)
+    assert match, "the validate step no longer checks VERSION with =~"
+    return match.group(1)
+
+
+def _location_captures() -> list[tuple[str, str]]:
+    captures = []
+    for line in (REPO / "version-locations.txt").read_text("utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        location, regex = line.split(":", 1)
+        group = re.search(r"\(([^()]*)\)", regex)
+        assert group, f"{location}: no capture group in {regex}"
+        captures.append((location, group.group(1)))
+    return captures
+
+
+@pytest.mark.parametrize("version", ["0.23.0", "10.2.33", "0.23.0-rc.1", "0.23.0rc1", "1.2", "v1.2.3"])
+def test_the_release_input_accepts_exactly_what_every_version_location_captures(version: str) -> None:
+    """The input check and version-locations.txt must agree: a version the
+    input accepts but a manifest cannot carry fails the lockstep check later,
+    looking like a missed bump."""
+    accepted = re.fullmatch(_input_version_regex(), version) is not None
+    carried = {location: re.fullmatch(capture, version) is not None for location, capture in _location_captures()}
+    assert accepted == all(carried.values()), f"{version}: input accepts={accepted}, locations={carried}"
