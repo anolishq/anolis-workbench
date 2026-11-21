@@ -155,26 +155,86 @@ def test_a_tag_disagreeing_with_the_envelope_is_refused_before_anything_is_writt
     assert not provider_locks.lock_path(tmp_path, "acme").is_file()
 
 
+NEW_ACME = ["--new-provider", "acme", "--repo", "vendor/anolis-provider-acme", "--tag", "v1.0.0"]
+
+
 def test_an_envelope_without_provider_version_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     envelope = {k: v for k, v in ENVELOPE.items() if k != "provider_version"}
     _stub_network(monkeypatch, envelope)
 
-    with pytest.raises(RuntimeError, match="provider_version"):
-        _run(
-            monkeypatch,
-            [
-                "--new-provider",
-                "acme",
-                "--repo",
-                "vendor/anolis-provider-acme",
-                "--tag",
-                "v1.0.0",
-                "--repo-root",
-                str(tmp_path),
-            ],
-        )
+    assert _run(monkeypatch, [*NEW_ACME, "--repo-root", str(tmp_path)]) == 1
+    assert "provider_version" in capsys.readouterr().err
+    assert not provider_locks.lock_path(tmp_path, "acme").is_file()
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, asset: bytes, manifest: bytes | Exception) -> None:
+    def _fetch(url: str, timeout_seconds: int = 45) -> bytes:
+        if url.endswith("-manifest.json"):
+            if isinstance(manifest, Exception):
+                raise manifest
+            return manifest
+        return asset
+
+    monkeypatch.setattr(sync, "fetch_url_bytes", _fetch)
+
+
+def _asset_and_digest() -> tuple[bytes, str]:
+    payload = json.dumps(ENVELOPE).encode("utf-8")
+    return payload, sync.sha256_bytes(payload)
+
+
+def _manifest(asset: str, sha: str) -> bytes:
+    return json.dumps({"asset": asset, "sha256": sha}).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("case", "manifest", "message"),
+    [
+        ("fetch fails", RuntimeError("HTTP error while fetching x: 404 Not Found"), "404 Not Found"),
+        ("not JSON", b"not json", "failed to parse schema manifest asset as JSON"),
+        ("not UTF-8", b"\xff\xfe", "failed to parse schema manifest asset as JSON"),
+        ("not an object", b"[]", "schema manifest asset must be a JSON object"),
+        ("names another asset", None, "schema manifest asset mismatch"),
+        ("sha256 differs", None, "schema manifest sha256 mismatch"),
+    ],
+)
+def test_a_bad_release_is_one_error_line_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    case: str,
+    manifest: bytes | Exception | None,
+    message: str,
+) -> None:
+    asset, digest = _asset_and_digest()
+    if case == "names another asset":
+        manifest = _manifest("other.json", digest)
+    elif case == "sha256 differs":
+        manifest = _manifest("anolis-provider-acme-1.0.0-config-schema.json", "0" * 64)
+    assert manifest is not None
+    _serve(monkeypatch, asset, manifest)
+
+    assert _run(monkeypatch, [*NEW_ACME, "--repo-root", str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR: ") and message in err
+    assert "Traceback" not in err
+    assert not provider_locks.envelope_path(tmp_path, "acme").is_file()
+    assert not provider_locks.lock_path(tmp_path, "acme").is_file()
+
+
+def test_an_asset_that_is_not_a_tarball_is_one_error_line(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-gzip asset makes tarfile raise its own error, not RuntimeError."""
+    monkeypatch.setattr(sync, "fetch_url_bytes", lambda url, timeout_seconds=45: b"not a tarball")
+    monkeypatch.setattr(
+        sys, "argv", ["x", "--schema", "runtime-config", "--tag", "v0.1.0", "--repo-root", str(tmp_path)]
+    )
+
+    assert int(sync.main()) == 1
+    assert capsys.readouterr().err.startswith("ERROR: ")
 
 
 # ---------------------------------------------------------------------------
@@ -367,3 +427,49 @@ def test_from_lock_takes_no_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: pathl
 
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--from-lock", str(lock_file), "--tag", "v1.0.0", "--repo-root", str(tmp_path)])
+
+
+# ---------------------------------------------------------------------------
+# The verifier refuses a release manifest that is not an object (#674)
+# ---------------------------------------------------------------------------
+
+
+def _load_verify() -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location("verify_upstream", SCRIPTS / "verify-upstream-schema.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("manifest", [b"[]", b'"hello"', b"42", b"null"])
+def test_the_verifier_refuses_a_manifest_that_is_not_an_object(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], manifest: bytes
+) -> None:
+    _stub_network(monkeypatch, ENVELOPE)
+    rc = _run(
+        monkeypatch,
+        [
+            "--new-provider",
+            "acme",
+            "--repo",
+            "vendor/anolis-provider-acme",
+            "--tag",
+            "v1.0.0",
+            "--repo-root",
+            str(tmp_path),
+        ],
+    )
+    assert rc == 0
+
+    verify = _load_verify()
+    asset = json.dumps(ENVELOPE).encode("utf-8")
+    monkeypatch.setattr(
+        verify,
+        "fetch_url_bytes",
+        lambda url, timeout_seconds=30: manifest if url.endswith("-manifest.json") else asset,
+    )
+    rc = verify.verify_one(tmp_path, "provider-config-acme", offline=False, require_release_artifact=True)
+
+    assert rc != 0
+    assert "schema manifest asset must be a JSON object" in capsys.readouterr().err

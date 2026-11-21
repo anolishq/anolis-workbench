@@ -217,6 +217,47 @@ def test_two_declared_behaviors_with_one_file_name_fail_the_export(
         exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
 
 
+def _reference_behavior(project_dir: pathlib.Path, name: str, content: bytes) -> None:
+    (project_dir / "behaviors" / name).write_bytes(content)
+    _patch_variant(
+        project_dir,
+        canonical.MANUAL_VARIANT,
+        automation={"enabled": True, "behavior_tree": f"behaviors/{name}"},
+    )
+
+
+def test_a_behavior_file_the_secret_scan_does_not_parse_is_carried_as_is(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """The secret scan reads only YAML and JSON. A behavior file with another
+    extension is not decoded, so bytes that are not UTF-8 do not fail the
+    export (#674)."""
+    _reference_behavior(project_dir, "tree.bt", b"\xff\xfe<root/>")
+    out = tmp_path / "out.anpkg"
+    exporter.build_package(project_dir=project_dir, out_path=out)
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("runtime/behaviors/tree.bt") == b"\xff\xfe<root/>"
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("tree.yaml", b"key: [unclosed"),
+        ("tree.yml", b"\xff\xfe: x"),
+        ("tree.json", b"{not json"),
+    ],
+)
+def test_a_behavior_file_the_secret_scan_cannot_read_is_an_export_error(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, name: str, content: bytes
+) -> None:
+    """A YAML or JSON package file that is not UTF-8 or does not parse was a
+    raw UnicodeDecodeError or YAMLError: a traceback from the CLI and a 500
+    over HTTP, where both expect ExportError (#674)."""
+    _reference_behavior(project_dir, name, content)
+    with pytest.raises(exporter.ExportError, match=f"runtime/behaviors/{name}"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
 def test_missing_machine_profile_raises_export_error(tmp_path: pathlib.Path) -> None:
     project_dir = tmp_path / "no-profile"
     project_dir.mkdir()
@@ -370,3 +411,28 @@ def test_the_archive_keeps_the_mode_an_export_has_always_had(tmp_path: pathlib.P
 
     assert stat.S_IMODE(out.stat().st_mode) == 0o666 & ~umask
     assert _leftover_temp_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--config"], ["--config", "providers/x.yaml"]),
+        (["--foo", "--config"], ["--foo", "--config", "providers/x.yaml"]),
+        (["--config", "old.yaml"], ["--config", "providers/x.yaml"]),
+        ([], ["--config", "providers/x.yaml"]),
+    ],
+)
+def test_a_trailing_bare_config_gets_the_packaged_path_and_validates(
+    tmp_path: pathlib.Path, args: list[str], expected: list[str]
+) -> None:
+    """A bare --config in the last position was left in place and a second
+    --config pair appended, which the package validator rejects (#674)."""
+    from anolis_workbench.core import package_validator
+
+    runtime = {"providers": [{"id": "x", "args": list(args)}]}
+    exporter._rewrite_provider_args(runtime)
+    assert runtime["providers"][0]["args"] == expected
+
+    (tmp_path / "providers").mkdir()
+    (tmp_path / "providers" / "x.yaml").write_text("{}\n", encoding="utf-8")
+    package_validator._validate_runtime_provider_args(package_root=tmp_path, runtime_payload=runtime)
