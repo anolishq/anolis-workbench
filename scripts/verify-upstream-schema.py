@@ -223,12 +223,14 @@ def validate_release_mode(
         try:
             manifest_bytes = fetch_url_bytes(manifest_url)
             manifest = json.loads(manifest_bytes.decode("utf-8"))
-            if isinstance(manifest, dict):
-                manifest_asset_name = manifest.get("asset")
-                manifest_sha = manifest.get("sha256")
-                if manifest_asset_name != asset or manifest_sha != expected_asset_sha:
-                    print("\nERROR: schema manifest does not match pinned lock values", file=sys.stderr)
-                    return 1
+            if not isinstance(manifest, dict):
+                print("\nERROR: schema manifest asset must be a JSON object", file=sys.stderr)
+                return 1
+            manifest_asset_name = manifest.get("asset")
+            manifest_sha = manifest.get("sha256")
+            if manifest_asset_name != asset or manifest_sha != expected_asset_sha:
+                print("\nERROR: schema manifest does not match pinned lock values", file=sys.stderr)
+                return 1
         except Exception as exc:
             print(f"\nERROR: failed to validate manifest asset '{manifest_asset}': {exc}", file=sys.stderr)
             return 1
