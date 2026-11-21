@@ -354,3 +354,28 @@ def test_the_archive_keeps_the_mode_an_export_has_always_had(tmp_path: pathlib.P
 
     assert stat.S_IMODE(out.stat().st_mode) == 0o666 & ~umask
     assert _leftover_temp_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--config"], ["--config", "providers/x.yaml"]),
+        (["--foo", "--config"], ["--foo", "--config", "providers/x.yaml"]),
+        (["--config", "old.yaml"], ["--config", "providers/x.yaml"]),
+        ([], ["--config", "providers/x.yaml"]),
+    ],
+)
+def test_a_trailing_bare_config_gets_the_packaged_path_and_validates(
+    tmp_path: pathlib.Path, args: list[str], expected: list[str]
+) -> None:
+    """A bare --config in the last position was left in place and a second
+    --config pair appended, which the package validator rejects (#674)."""
+    from anolis_workbench.core import package_validator
+
+    runtime = {"providers": [{"id": "x", "args": list(args)}]}
+    exporter._rewrite_provider_args(runtime)
+    assert runtime["providers"][0]["args"] == expected
+
+    (tmp_path / "providers").mkdir()
+    (tmp_path / "providers" / "x.yaml").write_text("{}\n", encoding="utf-8")
+    package_validator._validate_runtime_provider_args(package_root=tmp_path, runtime_payload=runtime)
