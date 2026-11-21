@@ -49,9 +49,8 @@ tar xzf <bundle>.tar.gz
 sudo <bundle>/install.sh --local <bundle>.tar.gz
 ```
 
-`anolis-provision bundle` prints `sudo ./install.sh --local <bundle>.tar.gz`,
-which assumes an `install.sh` beside the tarball; the bundle step leaves none
-there.
+`anolis-provision bundle` prints these same steps with the bundle's name
+filled in.
 
 Online convenience path: when the target can reach the GitHub release
 downloads, deploy straight from the workbench, with Commission's Deploy to

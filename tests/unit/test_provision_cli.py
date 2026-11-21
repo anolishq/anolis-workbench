@@ -640,3 +640,39 @@ class TestRemoteVariant:
         err = capsys.readouterr().err
         assert "variant 'telemetry' not in the profile's runtime_profiles (known: manual)" in err, err
         assert ran == [["uname", "-m"]], ran
+
+
+class TestBundleHint:
+    """The printed steps run the install.sh inside the bundle: nothing puts one
+    beside the tarball (#674)."""
+
+    @staticmethod
+    def _run(tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *, sha: bool) -> str:
+        from anolis_workbench.cli import provision_cli
+
+        def _stage(**kwargs: object) -> object:
+            out_dir = kwargs["out_dir"]
+            assert isinstance(out_dir, pathlib.Path)
+            tarball = out_dir / "anolis-demo-0.16.0-x86_64.tar.gz"
+            tarball.write_bytes(b"\0")
+            if sha:
+                (out_dir / (tarball.name + ".sha256")).write_text("x  " + tarball.name + "\n")
+            return tarball
+
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "stage_bundle", _stage)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "bundle", "--arch", "x86_64", "--out", str(tmp_path)])
+        assert provision_cli._run_bundle(provision_cli._parse_args()) == 0
+        return capsys.readouterr().out
+
+    def test_the_hint_runs_the_bundled_install_sh(self, tmp_path, monkeypatch, capsys) -> None:
+        out = self._run(tmp_path, monkeypatch, capsys, sha=True)
+        assert "sha256sum -c anolis-demo-0.16.0-x86_64.tar.gz.sha256" in out
+        assert "tar xzf anolis-demo-0.16.0-x86_64.tar.gz" in out
+        assert "sudo anolis-demo-0.16.0-x86_64/install.sh --local anolis-demo-0.16.0-x86_64.tar.gz" in out
+        assert "./install.sh" not in out
+
+    def test_no_checksum_step_without_a_checksum_file(self, tmp_path, monkeypatch, capsys) -> None:
+        out = self._run(tmp_path, monkeypatch, capsys, sha=False)
+        assert "sha256sum" not in out
+        assert "sudo anolis-demo-0.16.0-x86_64/install.sh --local" in out
