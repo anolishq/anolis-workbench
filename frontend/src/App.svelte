@@ -448,6 +448,8 @@
         {commissionRunningForCurrent}
         {editingVariant}
         bind:saved
+        unsaved={dirty}
+        onOpenCompose={() => onTabClick("compose")}
       />
     {/key}
   {:else if workspace === "operate"}

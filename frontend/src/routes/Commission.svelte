@@ -33,6 +33,8 @@
     commissionRunningForCurrent,
     editingVariant = "",
     saved = $bindable(null),
+    unsaved = false,
+    onOpenCompose,
   }: {
     projectName: string | null;
     system: ProjectDoc | null;
@@ -42,6 +44,10 @@
     editingVariant?: string;
     /** The saved project's variants and launch variant; null until known. */
     saved?: SavedLaunch | null;
+    /** Compose holds edits not yet saved: Launch, Deploy and Restart leave them out (#599). */
+    unsaved?: boolean;
+    /** Switches to Compose, where the edits can be saved. */
+    onOpenCompose?: () => void;
   } = $props();
 
   // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
@@ -829,6 +835,19 @@
   }
 </script>
 
+{#snippet unsavedNotice(where: string)}
+  {#if unsaved}
+    <p class="field-note unsaved-notice" data-testid="unsaved-notice-{where}">
+      Uses the saved project: your unsaved Compose edits are not included.
+      {#if onOpenCompose}
+        <button class="btn-secondary btn-sm" type="button" onclick={onOpenCompose}>
+          Save them in Compose
+        </button>
+      {/if}
+    </p>
+  {/if}
+{/snippet}
+
 {#snippet deployResult(outcome: DeployOutcome)}
   <div id="deploy-result">
     {#if outcome.ok}
@@ -1002,6 +1021,7 @@
           </span>
         {/if}
       </div>
+      {@render unsavedNotice("launch")}
 
       {#if preflightResults?.checks?.length}
         <div class="preflight-results">
@@ -1061,6 +1081,7 @@
           </button>
         {/if}
       </div>
+      {#if !runtimeIsService}{@render unsavedNotice("restart")}{/if}
     {/if}
 
     {#if actionError}
@@ -1230,7 +1251,7 @@
         </option>
       {/each}
     </select>
-    <p class="field-note">Deploys the saved project; unsaved edits are not included.</p>
+    {@render unsavedNotice("deploy")}
     <p class="field-note">
       A fresh install accepts only a variant that boots inert. On a device that already has a
       runtime config, install.sh keeps that config: this project's runtime config and the variant
