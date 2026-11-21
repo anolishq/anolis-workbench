@@ -39,7 +39,7 @@ def validate_package(package_path: pathlib.Path, runtime_bin: pathlib.Path | Non
         runtime_validator = jsonschema.Draft7Validator(runtime_schema)
 
         manifest_path = package_root / "machine-profile.yaml"
-        manifest_payload = _load_yaml_mapping(manifest_path)
+        manifest_payload = _load_yaml_mapping(manifest_path, package_root)
         _validate_schema(machine_validator, manifest_payload, "machine-profile.yaml")
         _validate_manifest_refs(
             package_root=package_root,
@@ -69,8 +69,11 @@ def _materialize_package_root(package_path: pathlib.Path) -> Iterator[pathlib.Pa
 
     with tempfile.TemporaryDirectory(prefix="anolis-package-validate-") as tmp_dir:
         root = pathlib.Path(tmp_dir).resolve()
-        with zipfile.ZipFile(path, mode="r") as archive:
-            archive.extractall(root)
+        try:
+            with zipfile.ZipFile(path, mode="r") as archive:
+                archive.extractall(root)
+        except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError) as exc:
+            raise PackageValidationError(f"Package archive {path.name} could not be read: {exc}") from exc
         yield root
 
 
@@ -94,8 +97,7 @@ def _validate_structure(package_root: pathlib.Path) -> None:
 
 
 def _validate_checksums(package_root: pathlib.Path) -> None:
-    checksum_path = package_root / "meta" / "checksums.sha256"
-    raw = checksum_path.read_text(encoding="utf-8")
+    raw = _read_package_text(package_root, "meta/checksums.sha256")
     entries: dict[str, str] = {}
     for idx, line in enumerate(raw.splitlines(), start=1):
         text = line.strip()
@@ -142,12 +144,7 @@ def _assert_no_secret_leak(package_root: pathlib.Path) -> None:
     for rel in _iter_package_files(package_root):
         if not rel.endswith((".yaml", ".yml", ".json")):
             continue
-        full = package_root / rel
-        text = full.read_text(encoding="utf-8")
-        if rel.endswith(".json"):
-            payload = json.loads(text)
-        else:
-            payload = yaml.safe_load(text)
+        payload = _parse_package_file(package_root, rel)
         for key_path, value in _iter_key_values(payload):
             if "token" in key_path.split(".")[-1].lower():
                 if isinstance(value, str) and value.strip() != "":
@@ -189,8 +186,26 @@ def _validate_schema(validator: jsonschema.Draft7Validator, payload: dict[str, A
         raise PackageValidationError(f"Schema validation failed for {label}: {path}: {first.message}")
 
 
-def _load_yaml_mapping(path: pathlib.Path) -> dict[str, Any]:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _read_package_text(package_root: pathlib.Path, rel: str) -> str:
+    try:
+        return (package_root / rel).read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise PackageValidationError(f"{rel} is not UTF-8 text: {exc}") from exc
+
+
+def _parse_package_file(package_root: pathlib.Path, rel: str) -> Any:
+    """Read and parse a package's YAML or JSON file. A file that does not
+    decode or parse is a validation failure naming it, not a traceback (#674)."""
+    text = _read_package_text(package_root, rel)
+    try:
+        return json.loads(text) if rel.endswith(".json") else yaml.safe_load(text)
+    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+        kind = "JSON" if rel.endswith(".json") else "YAML"
+        raise PackageValidationError(f"{rel} is not valid {kind}: {exc}") from exc
+
+
+def _load_yaml_mapping(path: pathlib.Path, package_root: pathlib.Path) -> dict[str, Any]:
+    payload = _parse_package_file(package_root, path.relative_to(package_root).as_posix())
     if payload is None:
         return {}
     if not isinstance(payload, dict):
@@ -219,7 +234,7 @@ def _validate_manifest_refs(
             raw=profile_rel,
             label=f"runtime_profiles.{profile_name}",
         )
-        runtime_payload = _load_yaml_mapping(runtime_path)
+        runtime_payload = _load_yaml_mapping(runtime_path, package_root)
         _validate_schema(runtime_validator, runtime_payload, runtime_path.relative_to(package_root).as_posix())
         runtime_provider_ids = _extract_runtime_provider_ids(runtime_payload)
         missing_in_manifest = sorted(runtime_provider_ids - manifest_provider_ids)
