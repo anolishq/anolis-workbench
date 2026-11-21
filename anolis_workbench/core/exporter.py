@@ -16,7 +16,7 @@ import re
 import secrets
 import zipfile
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -158,9 +158,14 @@ def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
         raw_args = entry.get("args")
         args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
         replaced = False
-        for idx, token in enumerate(args[:-1]):
+        for idx, token in enumerate(args):
             if token == "--config":
-                args[idx + 1] = expected_cfg
+                # A bare --config in the last position takes the path too,
+                # rather than being left behind a second pair (#674).
+                if idx + 1 < len(args):
+                    args[idx + 1] = expected_cfg
+                else:
+                    args.append(expected_cfg)
                 replaced = True
                 break
         if not replaced:
@@ -273,16 +278,18 @@ def _normalize_iso_timestamp(raw: str) -> str | None:
 
 def _assert_no_secret_leak(files: dict[str, bytes]) -> None:
     for rel_path, content in sorted(files.items()):
-        if rel_path.endswith(".xml"):
-            continue
-
-        text = content.decode("utf-8")
-        if rel_path.endswith(".yaml") or rel_path.endswith(".yml"):
-            payload = yaml.safe_load(text)
+        # Only YAML and JSON are scanned, so nothing else is decoded: a
+        # behavior file may be any extension and any bytes (#674).
+        if rel_path.endswith((".yaml", ".yml")):
+            parse: Callable[[str], Any] = yaml.safe_load
         elif rel_path.endswith(".json"):
-            payload = json.loads(text)
+            parse = json.loads
         else:
             continue
+        try:
+            payload = parse(content.decode("utf-8"))
+        except (UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as exc:
+            raise ExportError(f"Package file '{rel_path}' could not be read for the secret scan: {exc}") from exc
 
         for key_path, value in _iter_key_values(payload):
             if "token" in key_path.split(".")[-1].lower():
