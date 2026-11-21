@@ -27,21 +27,25 @@ def _expected_digest(sums: str, asset: str) -> str | None:
     return None
 
 
-def _unverified(repo: str, version: str) -> str:
-    # TODO(anolishq/anolis-workbench#533): refuse instead of warning once the
-    # oldest supported anolis release lists install.sh in its SHA256SUMS.
-    # Releases through anolis v0.1.49 do not (anolishq/anolis#446).
+# The oldest anolis release the workbench deploys: the first whose SHA256SUMS
+# lists install.sh (anolishq/anolis#449). Releases through v0.1.49 do not.
+OLDEST_VERIFIABLE_RELEASE = "0.1.50"
+
+
+def _unverifiable(repo: str, version: str, what: str) -> ReleaseVerificationError:
     product = repo.rsplit("/", 1)[-1]
-    return f"WARNING: install.sh not verified: {product} v{version} predates install.sh in SHA256SUMS"
+    return ReleaseVerificationError(
+        f"{product} v{version} has {what}, so install.sh cannot be verified; refusing to run it. "
+        f"Pin {product} v{OLDEST_VERIFIABLE_RELEASE} or later (#533)."
+    )
 
 
 def verify_install_sh(repo: str, version: str, content: bytes, *, timeout: float = 30) -> str | None:
     """Check ``content`` against the install.sh line of ``repo``'s v``version`` SHA256SUMS.
 
-    Returns None when it matches, or the warning to show when the release has
-    no SHA256SUMS (HTTP 404) or no line for install.sh. Raises
-    ReleaseVerificationError on a mismatch, or when SHA256SUMS cannot be
-    fetched for any other reason.
+    Returns None when it matches. Raises ReleaseVerificationError on a
+    mismatch, when the release has no SHA256SUMS (HTTP 404) or no line for
+    install.sh, or when SHA256SUMS cannot be fetched (#533).
     """
     url = f"https://github.com/{repo}/releases/download/v{version}/SHA256SUMS"
     try:
@@ -51,7 +55,7 @@ def verify_install_sh(repo: str, version: str, content: bytes, *, timeout: float
             f"could not fetch SHA256SUMS for {repo} v{version} ({exc}); refusing to run install.sh unverified"
         ) from exc
     if resp.status_code == 404:
-        return _unverified(repo, version)
+        raise _unverifiable(repo, version, "no SHA256SUMS")
     if resp.status_code != 200:
         raise ReleaseVerificationError(
             f"could not fetch SHA256SUMS for {repo} v{version} (HTTP {resp.status_code}); "
@@ -59,7 +63,7 @@ def verify_install_sh(repo: str, version: str, content: bytes, *, timeout: float
         )
     expected = _expected_digest(resp.content.decode("utf-8", errors="replace"), INSTALL_SH)
     if expected is None:
-        return _unverified(repo, version)
+        raise _unverifiable(repo, version, "no install.sh line in its SHA256SUMS")
     actual = hashlib.sha256(content).hexdigest()
     if actual != expected:
         raise ReleaseVerificationError(
