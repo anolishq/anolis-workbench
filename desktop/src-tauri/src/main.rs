@@ -154,14 +154,24 @@ fn wait_for_workbench_ready(timeout: Duration) -> bool {
     false
 }
 
-fn show_startup_error(app: &AppHandle, message: String) {
+/// Shows why startup failed and exits with status 1 once the user dismisses
+/// it. The dialog does not block, and setup() runs on the main thread, where
+/// a blocking dialog is not safe on every platform, so the exit happens in the
+/// dialog's callback rather than straight after showing it, which closed the
+/// app before the dialog could be read (wb#674).
+fn fail_startup(app: &AppHandle, message: String) {
     eprintln!("[desktop] {message}");
+    // The window from tauri.conf.json already exists and would load nothing.
+    for window in app.webview_windows().values() {
+        let _ = window.hide();
+    }
+    let handle = app.clone();
     app.dialog()
         .message(message)
         .title("Anolis Workbench startup failed")
         .buttons(MessageDialogButtons::Ok)
         .kind(MessageDialogKind::Error)
-        .show(|_| {});
+        .show(move |_| handle.exit(1));
 }
 
 fn main() {
@@ -175,19 +185,19 @@ fn main() {
             app.manage(SidecarState::default());
 
             if let Err(reason) = start_sidecar(app.handle()) {
-                show_startup_error(
+                fail_startup(
                     app.handle(),
                     format!(
                         "Anolis Workbench could not start.\n\n{reason}\n\n\
 The installation may be incomplete. Reinstalling the app may fix it."
                     ),
                 );
-                std::process::exit(1);
+                return Ok(());
             }
 
             if !wait_for_workbench_ready(STARTUP_TIMEOUT) {
                 stop_sidecar(app.handle());
-                show_startup_error(
+                fail_startup(
                     app.handle(),
                     format!(
                         "Anolis Workbench started, but it did not answer on port \
@@ -197,7 +207,7 @@ needs. If so, stop it and relaunch the app.",
                         STARTUP_TIMEOUT.as_secs()
                     ),
                 );
-                std::process::exit(1);
+                return Ok(());
             }
 
             Ok(())
