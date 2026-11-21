@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import os
 import sys
 import threading
 import time
+import traceback
 import urllib.parse
 import webbrowser
 from dataclasses import dataclass
@@ -110,7 +112,32 @@ def _open_browser(url: str) -> None:
     webbrowser.open(url)
 
 
+def _http_boundary(handler_method):
+    """Answer an unexpected error in a route with a JSON 500 instead of
+    closing the connection with no response (#674). A route that has already
+    started its response is left as it is; the traceback is printed either
+    way, as BaseHTTPRequestHandler would."""
+
+    @functools.wraps(handler_method)
+    def wrapper(self: "_Handler") -> None:
+        self._response_started = False
+        try:
+            handler_method(self)
+        except Exception as exc:  # noqa: BLE001 - HTTP boundary
+            traceback.print_exc()
+            if not self._response_started:
+                self._json(500, {"error": str(exc)})
+
+    return wrapper
+
+
 class _Handler(BaseHTTPRequestHandler):
+    _response_started = False
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self._response_started = True
+        super().send_response(code, message)
+
     @property
     def config(self) -> ServerConfig:
         return cast("_WorkbenchServer", self.server).config
@@ -129,6 +156,7 @@ class _Handler(BaseHTTPRequestHandler):
     # HTTP verb dispatch
     # ------------------------------------------------------------------
 
+    @_http_boundary
     def do_GET(self) -> None:
         if self._refuse_foreign():
             return
@@ -176,6 +204,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._serve_static(path)
 
+    @_http_boundary
     def do_POST(self) -> None:
         if self._refuse_foreign():
             return
@@ -228,6 +257,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._not_found()
 
+    @_http_boundary
     def do_PUT(self) -> None:
         if self._refuse_foreign():
             return
@@ -243,6 +273,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._not_found()
 
+    @_http_boundary
     def do_DELETE(self) -> None:
         if self._refuse_foreign():
             return
