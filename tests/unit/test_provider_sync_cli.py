@@ -427,3 +427,49 @@ def test_from_lock_takes_no_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: pathl
 
     with pytest.raises(SystemExit):
         _run(monkeypatch, ["--from-lock", str(lock_file), "--tag", "v1.0.0", "--repo-root", str(tmp_path)])
+
+
+# ---------------------------------------------------------------------------
+# The verifier refuses a release manifest that is not an object (#674)
+# ---------------------------------------------------------------------------
+
+
+def _load_verify() -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location("verify_upstream", SCRIPTS / "verify-upstream-schema.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("manifest", [b"[]", b'"hello"', b"42", b"null"])
+def test_the_verifier_refuses_a_manifest_that_is_not_an_object(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], manifest: bytes
+) -> None:
+    _stub_network(monkeypatch, ENVELOPE)
+    rc = _run(
+        monkeypatch,
+        [
+            "--new-provider",
+            "acme",
+            "--repo",
+            "vendor/anolis-provider-acme",
+            "--tag",
+            "v1.0.0",
+            "--repo-root",
+            str(tmp_path),
+        ],
+    )
+    assert rc == 0
+
+    verify = _load_verify()
+    asset = json.dumps(ENVELOPE).encode("utf-8")
+    monkeypatch.setattr(
+        verify,
+        "fetch_url_bytes",
+        lambda url, timeout_seconds=30: manifest if url.endswith("-manifest.json") else asset,
+    )
+    rc = verify.verify_one(tmp_path, "provider-config-acme", offline=False, require_release_artifact=True)
+
+    assert rc != 0
+    assert "schema manifest asset must be a JSON object" in capsys.readouterr().err
