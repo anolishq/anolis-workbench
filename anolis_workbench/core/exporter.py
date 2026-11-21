@@ -158,9 +158,14 @@ def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
         raw_args = entry.get("args")
         args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
         replaced = False
-        for idx, token in enumerate(args[:-1]):
+        for idx, token in enumerate(args):
             if token == "--config":
-                args[idx + 1] = expected_cfg
+                # A bare --config in the last position takes the path too,
+                # rather than being left behind a second pair (#674).
+                if idx + 1 < len(args):
+                    args[idx + 1] = expected_cfg
+                else:
+                    args.append(expected_cfg)
                 replaced = True
                 break
         if not replaced:
