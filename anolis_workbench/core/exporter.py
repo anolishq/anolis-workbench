@@ -1,7 +1,8 @@
 """Deterministic commissioning handoff package exporter.
 
-Core export logic with no HTTP/UI dependency. Thin wrappers in server.py and
-tools/package.py should call build_package().
+Core export logic with no HTTP/UI dependency. Its callers are thin wrappers
+around build_package(): the export route in server/routes/commission.py and
+the `anolis-package` CLI in cli/package_cli.py.
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
         runtime_payload=runtime_payload,
         project_dir=project_root,
     )
+    _collect_declared_behaviors(profile, project_dir=project_root, behavior_files=behavior_rel_paths)
 
     redaction_applied = _redact_runtime_secrets(runtime_payload)
     runtime_text = yaml.safe_dump(runtime_payload, sort_keys=False)
@@ -197,10 +199,36 @@ def _rewrite_and_collect_behaviors(
     return behavior_files
 
 
-def _resolve_behavior_path(raw: str, project_dir: pathlib.Path) -> pathlib.Path:
+def _collect_declared_behaviors(
+    profile: dict[str, Any], *, project_dir: pathlib.Path, behavior_files: dict[str, pathlib.Path]
+) -> None:
+    """Carry every behavior the profile declares, not only the one the
+    exported variant references: the package contract rewrites each
+    `behaviors[]` entry to runtime/behaviors/<file> (#675). Two different
+    files with one name would overwrite each other there, so that refuses."""
+    declared = profile.get("behaviors") or []
+    if not isinstance(declared, list):
+        raise ExportError("machine-profile behaviors must be a list of paths")
+    for raw in declared:
+        if not isinstance(raw, str) or raw.strip() == "":
+            raise ExportError(f"machine-profile behaviors entry must be a path: {raw!r}")
+        source = _resolve_behavior_path(raw.strip(), project_dir, field="behaviors")
+        rel = f"runtime/behaviors/{source.name}"
+        existing = behavior_files.get(rel)
+        if existing is not None and existing != source:
+            raise ExportError(
+                f"Behaviors {existing} and {source} share the file name "
+                f"{source.name}, which the package keeps under runtime/behaviors/; rename one"
+            )
+        behavior_files[rel] = source
+
+
+def _resolve_behavior_path(
+    raw: str, project_dir: pathlib.Path, field: str = "automation.behavior_tree"
+) -> pathlib.Path:
     raw_path = pathlib.Path(raw)
     if raw_path.is_absolute():
-        raise ExportError("automation.behavior_tree must be a relative path")
+        raise ExportError(f"{field} must be a relative path")
 
     data_root = paths_module.DATA_ROOT.resolve()
     candidates = [
@@ -210,7 +238,7 @@ def _resolve_behavior_path(raw: str, project_dir: pathlib.Path) -> pathlib.Path:
     for candidate in candidates:
         if candidate.is_file() and (_is_within(candidate, project_dir) or _is_within(candidate, data_root)):
             return candidate
-    raise ExportError(f"Behavior tree file not found for automation.behavior_tree='{raw}'")
+    raise ExportError(f"Behavior tree file not found for {field}='{raw}'")
 
 
 def _is_within(path: pathlib.Path, root: pathlib.Path) -> bool:
