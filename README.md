@@ -111,16 +111,14 @@ anolis-provision workbench-service
 
 ```sh
 uv sync --locked --extra dev
+cd frontend && npm ci && npm run build && cd ..
 ./start.sh
 ```
 
-Or via module entry point:
-
-```sh
-python -m anolis_workbench.server.app
-```
-
-Windows launcher: `start.cmd`.
+`./start.sh` runs `uv run anolis-workbench` (Windows: `start.cmd`). The
+frontend build writes `anolis_workbench/frontend/dist`, which the server
+serves; rebuild it after changing the frontend, or use the frontend dev
+server described in CONTRIBUTING.md.
 
 ## CLI
 

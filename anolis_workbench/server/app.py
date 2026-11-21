@@ -96,6 +96,7 @@ def verify_environment() -> None:
     if not FRONTEND_DIR.is_dir():
         print("ERROR: Workbench frontend directory not found.", file=sys.stderr)
         print(f"  Expected: {FRONTEND_DIR}", file=sys.stderr)
+        print("  In a source checkout, build it with: cd frontend && npm ci && npm run build", file=sys.stderr)
         sys.exit(1)
     # Packaged only: imports must not hide an install missing its own envelopes.
     if not provider_schemas.packaged_kinds():

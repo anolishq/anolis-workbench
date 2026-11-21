@@ -1,9 +1,6 @@
 @echo off
+rem Run the workbench from a source checkout, in the project's uv environment.
+rem Set it up first: see "Build from source" in README.md.
 setlocal
-
-where python >nul 2>nul
-if %errorlevel%==0 (
-    python -m anolis_workbench.server.app
-) else (
-    python3 -m anolis_workbench.server.app
-)
+cd /d "%~dp0"
+uv run anolis-workbench %*
