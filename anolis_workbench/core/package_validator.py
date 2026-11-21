@@ -16,6 +16,7 @@ from typing import Any, Iterator
 import jsonschema
 import yaml
 
+from anolis_workbench.core import canonical
 from anolis_workbench.core.child_env import child_env
 
 
@@ -251,6 +252,7 @@ def _validate_manifest_refs(
             )
 
         _validate_runtime_provider_args(package_root=package_root, runtime_payload=runtime_payload)
+        _validate_runtime_provider_commands(runtime_payload)
         _validate_runtime_behavior_path(package_root=package_root, runtime_payload=runtime_payload)
 
     for provider_id, provider_cfg in providers.items():
@@ -335,6 +337,23 @@ def _validate_runtime_provider_args(*, package_root: pathlib.Path, runtime_paylo
         if not rel.startswith("providers/"):
             raise PackageValidationError(
                 f"runtime provider '{provider_id}' config path must resolve under providers/: {config_path}"
+            )
+
+
+def _validate_runtime_provider_commands(runtime_payload: dict[str, Any]) -> None:
+    """A package records each provider `command` as the deploy token install.sh
+    rewrites, not a path that resolves inside the package: a package is a
+    provenance record and carries no binaries (handoff-package-v1.md). A
+    command that is not that token, such as a host path edited in, is refused
+    (#666)."""
+    for idx, entry in enumerate(runtime_payload.get("providers", []) or []):
+        if not isinstance(entry, dict):
+            continue
+        command = entry.get("command")
+        if canonical.command_kind(command) is None:
+            raise PackageValidationError(
+                f"runtime.providers[{idx}].command is not a canonical deploy token "
+                f"(../anolis-provider-<kind>/build/<preset>/anolis-provider-<kind>): {command!r}"
             )
 
 

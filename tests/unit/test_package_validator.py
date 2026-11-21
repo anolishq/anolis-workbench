@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import pathlib
+import shutil
 import zipfile
 from typing import Callable
 
@@ -177,3 +178,47 @@ def test_an_archive_that_is_not_a_zip_fails_validation(
         package_validator.validate_package(corrupt)
     assert _run_validate_cli(monkeypatch, corrupt) == 1
     assert capsys.readouterr().err.startswith("Validation failed: ")
+
+
+# ---------------------------------------------------------------------------
+# A package carries each provider command as the deploy token (#666)
+# ---------------------------------------------------------------------------
+
+
+def _export_sim_quickstart(tmp_path: pathlib.Path) -> pathlib.Path:
+    from importlib import resources
+
+    template = pathlib.Path(str(resources.files("anolis_workbench") / "templates" / "sim-quickstart"))
+    project_dir = tmp_path / "sim"
+    shutil.copytree(template, project_dir)
+    package = tmp_path / "sim.anpkg"
+    exporter.build_package(project_dir=project_dir, out_path=package)
+    return package
+
+
+def test_an_exported_package_carries_the_provider_deploy_token(tmp_path: pathlib.Path) -> None:
+    package = _export_sim_quickstart(tmp_path)
+    with zipfile.ZipFile(package) as archive:
+        runtime = yaml.safe_load(archive.read("runtime/anolis-runtime.yaml"))
+    commands = [p["command"] for p in runtime["providers"]]
+    assert commands == [canonical.provider_command_token("sim")]
+    package_validator.validate_package(package)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["/usr/local/bin/anolis-provider-sim", "anolis-provider-sim", "../anolis-provider-sim/build/x/anolis-provider-ezo"],
+)
+def test_a_provider_command_that_is_not_a_deploy_token_fails_validation(tmp_path: pathlib.Path, command: str) -> None:
+    package = _export_sim_quickstart(tmp_path)
+    extract = tmp_path / "extract"
+    with zipfile.ZipFile(package) as archive:
+        archive.extractall(extract)
+    runtime_path = extract / "runtime" / "anolis-runtime.yaml"
+    runtime = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
+    runtime["providers"][0]["command"] = command
+    runtime_path.write_text(yaml.safe_dump(runtime, sort_keys=False), encoding="utf-8")
+    _recompute_checksums(extract)
+
+    with pytest.raises(package_validator.PackageValidationError, match="not a canonical deploy token"):
+        package_validator.validate_package(extract)

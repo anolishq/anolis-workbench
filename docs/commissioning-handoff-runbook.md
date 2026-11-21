@@ -133,7 +133,7 @@ Static package validation:
 anolis-validate <path-to-package.anpkg>
 ```
 
-Replay hardening with runtime binary:
+Runtime config check, with a runtime binary:
 
 ```bash
 anolis-validate \
@@ -141,26 +141,12 @@ anolis-validate \
   --runtime-bin <path-to-anolis-runtime>
 ```
 
-Manual replay, as a validation step only: extract the package into a
-scratch directory and start a runtime against it. This checks that the
-package's configs are self-contained. It does not deploy: nothing is installed, no
-service is created, and the target's `/opt/anolis` is not touched.
-
-```bash
-unzip <machine>.anpkg -d <scratch-dir>
-cd <scratch-dir>
-export INFLUXDB_TOKEN='<token-value>'   # only if telemetry is enabled
-<path-to-anolis-runtime> --config runtime/anolis-runtime.yaml
-```
-
-Expected: the runtime loads its config from inside the package, with no
-dependency on `systems/<project>/`. The exported `manual` variant has
-automation disabled, so the runtime loads no behavior tree. Each provider
-process reads `providers/<id>.yaml` through its `--config` argument once it
-starts. Provider binaries are not in the package: each
-provider's `command` is carried as authored and a relative one resolves
-against `<scratch-dir>`, so providers start only if their binaries exist at
-those paths.
+This runs the runtime's `--check-config` on the package's runtime config,
+from the extracted package root. It checks that the config loads with no
+dependency on `systems/<project>/`. It starts no provider: a package carries
+each provider's `command` as the deploy token `install.sh` rewrites, and no
+binaries, so it is a record to check, not a machine to run. To run the
+commissioned configs, deploy the staged bundle.
 
 ## 6) Operator Handoff Package Contents
 
