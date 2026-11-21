@@ -104,11 +104,12 @@ more than the sync.
 | 2 | `upstream/anolis/*` | `source`, `distribution.{mode,asset_format,release,schema_sha256,asset_sha256}`, `synced_at_utc`. Anolis locks carry `distribution.asset_format: "tar-member"`. |
 | 3 | `upstream/providers/*` | v2 plus top-level `kind` and `provider_version`, and `distribution.templates.{asset,manifest_asset}`. Provider locks carry `distribution.asset_format: "raw"`, which they had at v2. |
 
-**v2 → v3 migration** (providers only): add `kind` (must equal the filename
-stem before `-config-schema.lock.json`), add `provider_version` copied from the
-vendored envelope, and add `distribution.templates` — the asset-name patterns
-with the version replaced by `{version}`. The sync fails on a lock without
-`distribution.templates`, and `--new-provider` refuses a kind that already has
-a lock, so add the templates by hand; re-running the sync for that kind then
-rewrites the lock as v3. The anolis locks stay at v2: they are a fixed set
-of three, not a registry.
+**v2 → v3 migration** (providers only): re-run the sync for that kind,
+`--schema provider-config-<kind>`. A lock without `distribution.templates` is
+re-synced with the conventional asset names and rewritten as v3, which adds
+`kind` (the filename stem before `-config-schema.lock.json`),
+`provider_version` (from the envelope it fetches) and
+`distribution.templates` (the asset-name patterns with the version replaced
+by `{version}`). A vendor whose asset names differ from the convention adds
+`distribution.templates` to the lock by hand first. The anolis locks stay at
+v2: they are a fixed set of three, not a registry.

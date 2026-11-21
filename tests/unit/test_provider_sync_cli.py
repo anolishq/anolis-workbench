@@ -473,3 +473,33 @@ def test_the_verifier_refuses_a_manifest_that_is_not_an_object(
 
     assert rc != 0
     assert "schema manifest asset must be a JSON object" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# A schema_version 2 provider lock re-syncs into v3 (#664)
+# ---------------------------------------------------------------------------
+
+
+def test_a_v2_provider_lock_resyncs_with_schema_and_comes_back_as_v3(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A v2 lock has no distribution.templates. --schema used to refuse it and
+    --new-provider to point back at --schema; now --schema migrates it."""
+    _stub_network(monkeypatch, ENVELOPE)
+    assert _run(monkeypatch, [*NEW_ACME, "--repo-root", str(tmp_path)]) == 0
+
+    path = provider_locks.lock_path(tmp_path, "acme")
+    lock = json.loads(path.read_text(encoding="utf-8"))
+    lock["schema_version"] = 2
+    del lock["kind"], lock["provider_version"], lock["distribution"]["templates"]
+    path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+
+    rc = _run(monkeypatch, ["--schema", "provider-config-acme", "--tag", "v1.0.0", "--repo-root", str(tmp_path)])
+
+    assert rc == 0, capsys.readouterr().err
+    migrated = provider_locks.load_lock(path)
+    assert migrated["schema_version"] == provider_locks.LOCK_SCHEMA_VERSION
+    assert migrated["kind"] == "acme"
+    assert migrated["provider_version"] == "1.0.0"
+    assert migrated["distribution"]["templates"] == provider_locks.asset_templates("acme")
+    assert provider_locks.check_registry(tmp_path) == []
