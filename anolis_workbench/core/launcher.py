@@ -183,7 +183,8 @@ def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
                     pass
             continue
 
-        pid = data.get("pid")
+        # Valid JSON that is not an object is as stale as unparseable JSON (#674).
+        pid = data.get("pid") if isinstance(data, dict) else None
         if not isinstance(pid, int):
             if clean_stale:
                 try:
@@ -535,8 +536,16 @@ def _build_binary_hint(exe: pathlib.Path | None, repo: str | None, docs: str | N
     return "  ".join(parts)
 
 
-def _check_port(port: int) -> dict:
+def _check_port(port: object) -> dict:
     """Check whether a TCP port is already occupied."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port <= 65535:
+        # connect_ex raises OverflowError or TypeError on these (#674).
+        return {
+            "name": f"Runtime port {port} available",
+            "ok": False,
+            "error": f"Runtime port {port!r} is not a TCP port (1-65535).",
+            "hint": "Set http.port in the runtime config to a number from 1 to 65535.",
+        }
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         in_use = s.connect_ex(("127.0.0.1", port)) == 0
