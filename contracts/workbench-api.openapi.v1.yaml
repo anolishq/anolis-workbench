@@ -1065,6 +1065,12 @@ components:
               description: >-
                 An id fixed for the life of the server process. A page that sees it change was loaded
                 from an earlier process, possibly an earlier version or project (#777).
+            launch_id:
+              type: string
+              nullable: true
+              description: >-
+                The ANOLIS_WORKBENCH_LAUNCH_ID the server was started with; null when unset. The
+                desktop shell sets it for its sidecar and accepts only a server that echoes it.
           additionalProperties: true
       additionalProperties: true
 

@@ -92,6 +92,7 @@ def composer_server(request: pytest.FixtureRequest, tmp_path: pathlib.Path) -> G
     # The server reads this per request; an ambient value would change what
     # these tests see. A test sets it through indirect parametrization.
     env.pop("ANOLIS_WORKBENCH_RUNTIME_URL", None)
+    env.pop("ANOLIS_WORKBENCH_LAUNCH_ID", None)
     env.update(getattr(request, "param", {}))
     env["PYTHONPATH"] = f"{_REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
@@ -129,6 +130,14 @@ def test_status_contract_exposes_composer_metadata(composer_server: dict[str, An
     assert isinstance(composer, dict)
     assert composer.get("host") == "127.0.0.1"
     assert composer.get("port") == composer_server["port"]
+    assert payload["workbench"].get("launch_id") is None
+
+
+@pytest.mark.parametrize("composer_server", [{"ANOLIS_WORKBENCH_LAUNCH_ID": "launch-abc123"}], indirect=True)
+def test_status_echoes_the_launch_id_it_was_started_with(composer_server: dict[str, Any]) -> None:
+    status, payload = _http_json(composer_server["base_url"], "/api/status")
+    assert status == 200
+    assert payload["workbench"]["launch_id"] == "launch-abc123"
 
 
 def test_config_contract_exposes_ui_defaults(composer_server: dict[str, Any]) -> None:

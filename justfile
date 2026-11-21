@@ -42,6 +42,7 @@ test:
     uv run python contracts/validate-workbench-api-openapi.py
     cd frontend && npm run test:unit:coverage
     cd frontend && npm run test:components:coverage
+    cd desktop/src-tauri && cargo test
 
 # Build the frontend bundle
 build:
