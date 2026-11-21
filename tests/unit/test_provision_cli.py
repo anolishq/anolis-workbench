@@ -439,6 +439,18 @@ class TestNameDefaults:
         assert _resolve_names(argparse.Namespace(project=None, template="my-tpl")) == ("my-tpl", "my-tpl")
         assert _resolve_names(argparse.Namespace(project="rig-a", template=None)) == ("rig-a", "sim-quickstart")
 
+    def test_a_system_without_a_project_is_named_after_its_directory(self) -> None:
+        # #565: --system imports a project and uses no template, so its name
+        # comes from the system directory, not the default template's.
+        from anolis_workbench.cli.provision_cli import _resolve_names
+
+        system = pathlib.Path("/srv/projects/bioreactor-v1")
+        assert _resolve_names(argparse.Namespace(project=None, template=None, system=system))[0] == "bioreactor-v1"
+        trailing = argparse.Namespace(project=None, template=None, system=pathlib.Path("/srv/projects/bioreactor-v1/"))
+        assert _resolve_names(trailing)[0] == "bioreactor-v1"
+        named = argparse.Namespace(project="rig-a", template=None, system=system)
+        assert _resolve_names(named)[0] == "rig-a"
+
 
 def test_missing_template_error_points_at_import(tmp_path, monkeypatch) -> None:
     """A fleet file or runbook naming a removed template must fail with a

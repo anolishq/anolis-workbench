@@ -381,10 +381,13 @@ def _resolve_names(args: argparse.Namespace) -> tuple[str, str]:
 
     The project defaults to the TEMPLATE name rather than a fixed string: a
     default project called `bioreactor-v1` seeded from a simulator template
-    describes something that does not exist.
+    describes something that does not exist. A --system import uses no
+    template, so its project defaults to the system directory's name (#565).
     """
     template = getattr(args, "template", None) or DEFAULT_TEMPLATE
-    project = getattr(args, "project", None) or template
+    system = getattr(args, "system", None)
+    default_project = Path(system).resolve().name if system is not None else template
+    project = getattr(args, "project", None) or default_project
     return project, template
 
 
