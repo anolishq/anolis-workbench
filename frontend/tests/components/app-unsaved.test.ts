@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import App from '../../src/App.svelte';
@@ -36,6 +36,18 @@ async function openDirtyCompose(): Promise<void> {
 }
 
 describe('App: the unsaved-changes prompt (#562)', () => {
+  it('tells Commission about the draft, and its notice leads back to Compose (#599)', async () => {
+    await openDirtyCompose();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Commission' }));
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/a/commission'));
+    const notice = await screen.findByTestId('unsaved-notice-launch');
+
+    await fireEvent.click(within(notice).getByRole('button', { name: 'Save them in Compose' }));
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/a/compose'));
+    expect(await screen.findByDisplayValue('9090')).toBeInTheDocument();
+  });
+
   it('does not prompt on a tab switch, which keeps the draft', async () => {
     await openDirtyCompose();
 
