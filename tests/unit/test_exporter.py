@@ -160,6 +160,47 @@ def test_export_carries_a_behavior_tree_the_exported_variant_references(
         assert profile["behaviors"] == ["runtime/behaviors/local.xml"]
 
 
+def _reference_behavior(project_dir: pathlib.Path, name: str, content: bytes) -> None:
+    (project_dir / "behaviors" / name).write_bytes(content)
+    _patch_variant(
+        project_dir,
+        canonical.MANUAL_VARIANT,
+        automation={"enabled": True, "behavior_tree": f"behaviors/{name}"},
+    )
+
+
+def test_a_behavior_file_the_secret_scan_does_not_parse_is_carried_as_is(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """The secret scan reads only YAML and JSON. A behavior file with another
+    extension is not decoded, so bytes that are not UTF-8 do not fail the
+    export (#674)."""
+    _reference_behavior(project_dir, "tree.bt", b"\xff\xfe<root/>")
+    out = tmp_path / "out.anpkg"
+    exporter.build_package(project_dir=project_dir, out_path=out)
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("runtime/behaviors/tree.bt") == b"\xff\xfe<root/>"
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("tree.yaml", b"key: [unclosed"),
+        ("tree.yml", b"\xff\xfe: x"),
+        ("tree.json", b"{not json"),
+    ],
+)
+def test_a_behavior_file_the_secret_scan_cannot_read_is_an_export_error(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, name: str, content: bytes
+) -> None:
+    """A YAML or JSON package file that is not UTF-8 or does not parse was a
+    raw UnicodeDecodeError or YAMLError: a traceback from the CLI and a 500
+    over HTTP, where both expect ExportError (#674)."""
+    _reference_behavior(project_dir, name, content)
+    with pytest.raises(exporter.ExportError, match=f"runtime/behaviors/{name}"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+
+
 def test_missing_machine_profile_raises_export_error(tmp_path: pathlib.Path) -> None:
     project_dir = tmp_path / "no-profile"
     project_dir.mkdir()
