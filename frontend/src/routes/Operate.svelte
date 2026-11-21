@@ -1646,8 +1646,10 @@
                   if (!onNavigate) return;
                   e.preventDefault();
                   onNavigate(`/projects/${encodeURIComponent(runningProject)}/operate`);
-                }}>{runningProject}'s Operate view</a
-              >.
+                }}
+              >
+                {runningProject}'s Operate view
+              </a>.
             </span>
           </div>
         {/if}
@@ -1678,9 +1680,9 @@
               <code>ssh -L 3010:127.0.0.1:3010 &lt;user&gt;@&lt;device&gt;</code>; or
             </li>
             <li>
-              tunnel the runtime's port (<code
-                >ssh -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;device&gt;</code
-              >) and start this workbench with
+              tunnel the runtime's port (<code>
+                ssh -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;device&gt;
+              </code>) and start this workbench with
               <code>ANOLIS_WORKBENCH_RUNTIME_URL=http://127.0.0.1:8080</code>. A runtime with
               <code>auth_enabled: true</code> also needs
               <code>ANOLIS_WORKBENCH_RUNTIME_TOKEN</code>, the <code>ANOLIS_API_TOKEN</code> in
@@ -1927,18 +1929,18 @@
           The workbench was {describeWorkbenchChange(staleWorkbench)} after this page loaded, so the page
           may be running older code or an older project. Reload it before starting a run or pressing an
           action; Stop run, the mode and the software stop still work.
-          <button type="button" class="btn-secondary" onclick={() => location.reload()}
-            >Reload</button
-          >
+          <button type="button" class="btn-secondary" onclick={() => location.reload()}>
+            Reload
+          </button>
         </div>
       {/if}
       <div class="machine-line machine-line-{machine.state}" data-testid="machine-line">
         <span>{machine.text}</span>
         {#if machine.target}
           {@const target = machine.target}
-          <button type="button" class="btn-secondary btn-sm" onclick={() => goToSection(target)}
-            >{machine.linkLabel}</button
-          >
+          <button type="button" class="btn-secondary btn-sm" onclick={() => goToSection(target)}>
+            {machine.linkLabel}
+          </button>
         {/if}
       </div>
     </div>
@@ -1959,9 +1961,9 @@
               <li>
                 <span>{key}</span>
                 {#if tripStaleNotes[key]}
-                  <span class="field-note" data-testid={`trip-stale-${key}`}
-                    >({tripStaleNotes[key]})</span
-                  >
+                  <span class="field-note" data-testid={`trip-stale-${key}`}>
+                    ({tripStaleNotes[key]})
+                  </span>
                 {/if}
                 <button
                   type="button"
@@ -2014,9 +2016,9 @@
               <li data-testid="trip-step-2">
                 Put the runtime in MANUAL.
                 {#if modeFixedReason}
-                  <span class="field-note"
-                    >Skipped: the runtime has no mode to set ({modeFixedReason}).</span
-                  >
+                  <span class="field-note">
+                    Skipped: the runtime has no mode to set ({modeFixedReason}).
+                  </span>
                 {:else if mode === "MANUAL"}
                   <span class="field-note">Done: the runtime is in MANUAL.</span>
                 {:else}
@@ -2038,9 +2040,9 @@
                 {#if !tripCaps}
                   <span class="field-note">Loading the device's functions…</span>
                 {:else if !tripClearFn}
-                  <span class="field-error"
-                    >This device offers no clear_watchdog_trip function.</span
-                  >
+                  <span class="field-error">
+                    This device offers no clear_watchdog_trip function.
+                  </span>
                 {:else if tripCleared}
                   <span class="field-note">Done: the trip is cleared.</span>
                 {:else}
@@ -2064,8 +2066,9 @@
                   {#if !tripCaps}
                     <span class="field-note">Loading the device's functions…</span>
                   {:else if !tfunc}
-                    <span class="field-error">This device offers no {tstep.function} function.</span
-                    >
+                    <span class="field-error">
+                      This device offers no {tstep.function} function.
+                    </span>
                   {:else if tripSteps[i] === "done"}
                     <span class="field-note">Done.</span>
                   {:else if tripSteps[i] === "skipped"}
@@ -2104,8 +2107,9 @@
                       Skip
                     </button>
                   {/if}
-                  {#if tripError?.step === 4 + i}<span class="field-error">{tripError.text}</span
-                    >{/if}
+                  {#if tripError?.step === 4 + i}<span class="field-error">
+                      {tripError.text}
+                    </span>{/if}
                 </li>
               {/each}
             </ol>
@@ -2115,9 +2119,9 @@
                 ignored, so command it again.
               </p>
             {/if}
-            <button type="button" class="btn-secondary btn-sm" onclick={closeTripClear}
-              >Close</button
-            >
+            <button type="button" class="btn-secondary btn-sm" onclick={closeTripClear}>
+              Close
+            </button>
           </div>
         {/if}
       </div>
@@ -2143,10 +2147,9 @@
                   viewBox="0 0 120 24"
                   preserveAspectRatio="none"
                   aria-hidden="true"
-                  ><path
-                    d={sparklinePath(history, 120, 24, sparklineMinSpan(declared?.decimals))}
-                  /></svg
                 >
+                  <path d={sparklinePath(history, 120, 24, sparklineMinSpan(declared?.decimals))} />
+                </svg>
                 {#if range}
                   <!-- The window's high over its low (wb#747). -->
                   <span class="operator-sparkline-range" data-testid="sparkline-range">
@@ -2158,8 +2161,10 @@
               {#if r.note}<span
                   class="{r.note === 'loading'
                     ? 'field-note'
-                    : 'field-error'} operator-reading-note">{r.note}</span
-                >{/if}
+                    : 'field-error'} operator-reading-note"
+                >
+                  {r.note}
+                </span>{/if}
             </li>
           {/each}
         </ul>
@@ -2204,16 +2209,20 @@
                 type="button"
                 class="btn-primary"
                 disabled={runBusy}
-                onclick={() => runStartStop("start")}>Start run</button
+                onclick={() => runStartStop("start")}
               >
+                Start run
+              </button>
             {/if}
             {#if run.stop}
               <button
                 type="button"
                 class="btn-secondary"
                 disabled={runBusy}
-                onclick={() => runStartStop("stop")}>Stop run</button
+                onclick={() => runStartStop("stop")}
               >
+                Stop run
+              </button>
             {/if}
             {#if runFeedback}
               <span class={runFeedback.cls} data-testid="run-feedback">{runFeedback.text}</span>
@@ -2230,13 +2239,15 @@
                 type="button"
                 class="btn-secondary"
                 disabled={actionBusy}
-                onclick={() => pressAction(action)}>{action.label}</button
+                onclick={() => pressAction(action)}
               >
+                {action.label}
+              </button>
             {/each}
             {#if actionFeedback}
-              <span class={actionFeedback.cls} data-testid="action-feedback"
-                >{actionFeedback.text}</span
-              >
+              <span class={actionFeedback.cls} data-testid="action-feedback">
+                {actionFeedback.text}
+              </span>
             {/if}
           </div>
         {/if}
@@ -2249,8 +2260,10 @@
                 <button
                   type="button"
                   class="btn-secondary btn-sm"
-                  onclick={() => (restartNote = false)}>OK</button
+                  onclick={() => (restartNote = false)}
                 >
+                  OK
+                </button>
               </div>
             {/if}
             {#each operator.settings as group (group.group)}
@@ -2269,9 +2282,9 @@
                   <div class="setting-row" data-testid="setting">
                     <label for={id}>{item.label}</label>
                     {#if !param}
-                      <span class="field-note"
-                        >{statusSettled ? "not reported by the runtime" : "loading…"}</span
-                      >
+                      <span class="field-note">
+                        {statusSettled ? "not reported by the runtime" : "loading…"}
+                      </span>
                     {:else if param.type === "bool"}
                       <input
                         {id}
@@ -2312,8 +2325,9 @@
                   <span
                     class={settingsFeedback[group.group].cls}
                     title={settingsFeedback[group.group].title}
-                    >{settingsFeedback[group.group].text}</span
                   >
+                    {settingsFeedback[group.group].text}
+                  </span>
                 {/if}
               </form>
             {/each}
@@ -2416,22 +2430,22 @@
                   </button>
                   {#if stopChain?.mismatches.some((m) => m.device === key)}
                     <!-- In scope, but not behaving as the stop should make it (wb#631). -->
-                    <span class="badge fault" data-testid="device-stop-mismatch"
-                      >STOP NOT REACHING</span
-                    >
+                    <span class="badge fault" data-testid="device-stop-mismatch">
+                      STOP NOT REACHING
+                    </span>
                   {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
                     <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
                     <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
                   {/if}
                   {#if trippedKeys.includes(key)}
                     <!-- Refuses every command until cleared (wb#572). -->
-                    <span class="badge fault" data-testid="device-watchdog-tripped"
-                      >WATCHDOG TRIPPED</span
-                    >
+                    <span class="badge fault" data-testid="device-watchdog-tripped">
+                      WATCHDOG TRIPPED
+                    </span>
                     {#if tripStaleNotes[key]}
-                      <span class="field-note" data-testid="device-watchdog-stale"
-                        >({tripStaleNotes[key]})</span
-                      >
+                      <span class="field-note" data-testid="device-watchdog-stale">
+                        ({tripStaleNotes[key]})
+                      </span>
                     {/if}
                   {/if}
                   {#if stopChain?.expectations[key]}
@@ -2474,20 +2488,20 @@
               <p class="placeholder">No signals available.</p>
             {:else}
               <table class="signal-table">
-                <thead
-                  ><tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr></thead
-                >
+                <thead>
+                  <tr><th>Signal</th><th>Value</th><th>Quality</th><th>Timestamp</th></tr>
+                </thead>
                 <tbody>
                   {#each signals as sig (sig.signal_id)}
                     <tr>
                       <td>{sig.signal_id || "-"}</td>
                       <td>{formatValue(sig.value)}</td>
                       <td>{sig.quality ?? "--"}</td>
-                      <td
-                        >{(sig.timestamp_ms ?? 0) > 0
+                      <td>
+                        {(sig.timestamp_ms ?? 0) > 0
                           ? new Date(sig.timestamp_ms ?? 0).toLocaleTimeString()
-                          : "--"}</td
-                      >
+                          : "--"}
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
@@ -2518,9 +2532,9 @@
                         <label for="fn-{fbKey}-{ai}">
                           {arg.name}{arg.required !== false ? " *" : ""}
                           {#if arg.min !== undefined && arg.max !== undefined}
-                            <span class="constraint-hint"
-                              >[{arg.min} to {arg.max}{arg.unit ? ` ${arg.unit}` : ""}]</span
-                            >
+                            <span class="constraint-hint">
+                              [{arg.min} to {arg.max}{arg.unit ? ` ${arg.unit}` : ""}]
+                            </span>
                           {:else if arg.unit}
                             <span class="constraint-hint">[{arg.unit}]</span>
                           {/if}
@@ -2572,9 +2586,9 @@
                     <div class="function-actions">
                       <button type="submit" class="btn-secondary btn-sm">Execute</button>
                       {#if functionFeedback[fbKey]?.text}
-                        <span class="function-feedback {functionFeedback[fbKey].cls}"
-                          >{functionFeedback[fbKey].text}</span
-                        >
+                        <span class="function-feedback {functionFeedback[fbKey].cls}">
+                          {functionFeedback[fbKey].text}
+                        </span>
                       {/if}
                     </div>
                   </form>
@@ -2644,12 +2658,14 @@
                   <button
                     type="button"
                     class="btn-secondary btn-sm"
-                    onclick={() => updateParameter(param, getParamInput(param.name))}>Set</button
+                    onclick={() => updateParameter(param, getParamInput(param.name))}
                   >
+                    Set
+                  </button>
                   {#if paramFeedback[param.name]?.text}
-                    <span class="feedback {paramFeedback[param.name].cls}"
-                      >{paramFeedback[param.name].text}</span
-                    >
+                    <span class="feedback {paramFeedback[param.name].cls}">
+                      {paramFeedback[param.name].text}
+                    </span>
                   {/if}
                 </div>
               {:else}
@@ -2669,16 +2685,17 @@
       {:else}
         {@const execStatus = automationStatus.execution_status}
         <div class="automation-status-grid">
-          <span
-            >Status: <span class="badge exec-{execStatus}">{execStatus.toUpperCase()}</span></span
-          >
+          <span>
+            Status: <span class="badge exec-{execStatus}">{execStatus.toUpperCase()}</span>
+          </span>
           {#if automationStatus.execution_reason}
             <span>Reason: {automationStatus.execution_reason}</span>
           {/if}
           <span>Run: {automationStatus.run_id ?? "--"}</span>
           <span>Definition: {formatAutomationVersion(automationStatus.automation_version)}</span>
-          <span>Last evaluation: {formatEpochMs(automationStatus.last_evaluation_at_epoch_ms)}</span
-          >
+          <span>
+            Last evaluation: {formatEpochMs(automationStatus.last_evaluation_at_epoch_ms)}
+          </span>
           {#if automationStatus.last_error}
             <span
               class="error-text {execStatus === 'failed'
@@ -2729,9 +2746,9 @@
       <h3>Telemetry</h3>
       {#if telemetryUrl()}
         <div class="telemetry-bar">
-          <a href={telemetryUrl()} target="_blank" rel="noopener noreferrer"
-            >Open Grafana in new tab →</a
-          >
+          <a href={telemetryUrl()} target="_blank" rel="noopener noreferrer">
+            Open Grafana in new tab →
+          </a>
         </div>
       {:else}
         <p class="placeholder">Telemetry URL is not configured.</p>

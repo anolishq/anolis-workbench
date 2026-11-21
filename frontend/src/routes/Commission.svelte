@@ -964,15 +964,15 @@
                project loads, and a select-level value set before then is lost. -->
           {#each launchVariants as name (name)}
             {@const onDisk = savedVariants.includes(name)}
-            <option value={name} disabled={!onDisk} selected={name === launchVariant}
-              >{name}{onDisk ? "" : " (save in Compose to launch this variant)"}</option
-            >
+            <option value={name} disabled={!onDisk} selected={name === launchVariant}>
+              {name}{onDisk ? "" : " (save in Compose to launch this variant)"}
+            </option>
           {/each}
         </select>
-        <span class="field-note"
-          >The variant Launch runs, from the saved project. Compose's variant selector only picks
-          what you edit.</span
-        >
+        <span class="field-note">
+          The variant Launch runs, from the saved project. Compose's variant selector only picks
+          what you edit.
+        </span>
         {#if launchVariantError}<span class="field-error">{launchVariantError}</span>{/if}
       </div>
     {/if}
@@ -1106,8 +1106,10 @@
           class="btn-secondary btn-sm"
           onclick={() => {
             logLines = [];
-          }}>Clear</button
+          }}
         >
+          Clear
+        </button>
       </div>
       <div class="log-content" bind:this={logEl} onscroll={handleLogScroll}>
         {#each logLines as line, i (i)}
@@ -1126,21 +1128,21 @@
       <div id="commission-runtime-card" class="commission-health-card">
         <div class="runtime-status-row">
           <span>Mode: <strong>{commissionRuntimeStatus.mode ?? "UNKNOWN"}</strong></span>
-          <span
-            >Uptime: {Number.isFinite(Number(commissionRuntimeStatus.uptime_seconds))
+          <span>
+            Uptime: {Number.isFinite(Number(commissionRuntimeStatus.uptime_seconds))
               ? formatDuration(Number(commissionRuntimeStatus.uptime_seconds))
-              : "--"}</span
-          >
-          <span
-            >Poll: {Number.isFinite(Number(commissionRuntimeStatus.polling_interval_ms))
+              : "--"}
+          </span>
+          <span>
+            Poll: {Number.isFinite(Number(commissionRuntimeStatus.polling_interval_ms))
               ? `${commissionRuntimeStatus.polling_interval_ms} ms`
-              : "--"}</span
-          >
-          <span
-            >Devices: {Number.isFinite(Number(commissionRuntimeStatus.device_count))
+              : "--"}
+          </span>
+          <span>
+            Devices: {Number.isFinite(Number(commissionRuntimeStatus.device_count))
               ? String(commissionRuntimeStatus.device_count)
-              : "--"}</span
-          >
+              : "--"}
+          </span>
         </div>
       </div>
     {:else}
@@ -1381,9 +1383,9 @@
       <button type="button" class="btn-primary" disabled={deployRunning} onclick={doDeploy}>
         Confirm: replace the runtime config on {serviceMachine}
       </button>
-      <button type="button" class="btn-secondary" onclick={() => (replaceArmed = false)}
-        >Cancel</button
-      >
+      <button type="button" class="btn-secondary" onclick={() => (replaceArmed = false)}>
+        Cancel
+      </button>
     {:else}
       <button
         type="button"

@@ -171,9 +171,9 @@
   </div>
 {:else if control.control === "select"}
   <div class="form-group">
-    <label
-      >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
-    >
+    <label>
+      {label}{#if required}<span class="required-mark" title="Required">*</span>{/if}
+    </label>
     <select
       aria-required={required}
       aria-invalid={shownError ? "true" : undefined}
@@ -207,9 +207,9 @@
   </div>
 {:else if control.control === "number"}
   <div class="form-group">
-    <label
-      >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
-    >
+    <label>
+      {label}{#if required}<span class="required-mark" title="Required">*</span>{/if}
+    </label>
     <input
       aria-required={required}
       aria-invalid={shownError ? "true" : undefined}
@@ -229,9 +229,9 @@
   </div>
 {:else if control.control === "i2c"}
   <div class="form-group">
-    <label
-      >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
-    >
+    <label>
+      {label}{#if required}<span class="required-mark" title="Required">*</span>{/if}
+    </label>
     <input
       aria-required={required}
       aria-invalid={shownError ? "true" : undefined}
@@ -251,9 +251,9 @@
   </div>
 {:else}
   <div class="form-group">
-    <label
-      >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
-    >
+    <label>
+      {label}{#if required}<span class="required-mark" title="Required">*</span>{/if}
+    </label>
     <input
       aria-required={required}
       aria-invalid={shownError ? "true" : undefined}

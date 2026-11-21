@@ -321,9 +321,9 @@
             {/each}
           </select>
 
-          <button type="button" class="btn-remove-provider" onclick={() => removeProvider(id)}
-            >✕ Remove</button
-          >
+          <button type="button" class="btn-remove-provider" onclick={() => removeProvider(id)}>
+            ✕ Remove
+          </button>
         </div>
 
         {#if !isKnownKind && providerSchemas !== null}
@@ -485,10 +485,10 @@
             value={hostExe}
             oninput={(e: Event) => setHostExecutable(id, inputTarget(e).value)}
           />
-          <span class="field-note"
-            >Host path, used for dev-launch only. Deploys use <code>{prov.command ?? ""}</code>,
-            which install.sh rewrites to the installed binary.</span
-          >
+          <span class="field-note">
+            Host path, used for dev-launch only. Deploys use <code>{prov.command ?? ""}</code>,
+            which install.sh rewrites to the installed binary.
+          </span>
         </div>
 
         <!-- Schema-driven provider configuration -->
@@ -521,7 +521,9 @@
       type="button"
       class="btn-add-provider"
       onclick={addProvider}
-      disabled={!kinds.includes(newKind)}>+ Add Provider</button
+      disabled={!kinds.includes(newKind)}
     >
+      + Add Provider
+    </button>
   </div>
 </section>

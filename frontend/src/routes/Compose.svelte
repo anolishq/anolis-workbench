@@ -292,9 +292,9 @@
           {/each}
         </select>
         {#if editable.variants[AUTOMATION_VARIANT]}
-          <button type="button" class="btn-remove-provider" onclick={removeAutomationVariant}
-            >✕ Remove automation variant</button
-          >
+          <button type="button" class="btn-remove-provider" onclick={removeAutomationVariant}>
+            ✕ Remove automation variant
+          </button>
         {:else if showAutomationForm}
           <label class="inline-label">
             behavior tree
@@ -308,9 +308,13 @@
           </label>
           <button type="button" class="btn-add-provider" onclick={addAutomationVariant}>Add</button>
         {:else}
-          <button type="button" class="btn-add-provider" onclick={() => (showAutomationForm = true)}
-            >+ Automation variant</button
+          <button
+            type="button"
+            class="btn-add-provider"
+            onclick={() => (showAutomationForm = true)}
           >
+            + Automation variant
+          </button>
         {/if}
       </div>
       {#if showAutomationForm && !editable.variants[AUTOMATION_VARIANT]}
@@ -330,9 +334,15 @@
 
   {#if editable}
     <div class="compose-actions">
-      <button id="btn-save" type="button" class="btn-primary" disabled={saving} onclick={handleSave}
-        >{saving ? "Saving…" : "Save"}</button
+      <button
+        id="btn-save"
+        type="button"
+        class="btn-primary"
+        disabled={saving}
+        onclick={handleSave}
       >
+        {saving ? "Saving…" : "Save"}
+      </button>
     </div>
   {/if}
 </section>

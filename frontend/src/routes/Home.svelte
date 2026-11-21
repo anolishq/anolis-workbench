@@ -279,8 +279,9 @@
         type="button"
         class="btn-primary btn-sm"
         onclick={() => onNavigate(`/projects/${encodeURIComponent(machine.name)}/operate`)}
-        >Go to Operate</button
       >
+        Go to Operate
+      </button>
     {:else}
       <h1>Projects</h1>
       <p>Choose a project to start or create a new one from a template.</p>
@@ -302,20 +303,22 @@
         <ul class="home-project-list">
           {#each listed as project (project.name)}
             <li class="home-project-item">
-              <span
-                >{project.name}{#if project === installed}
-                  <span class="badge" title="The project installed on this machine"
-                    >this machine</span
-                  >{:else if project.authored === false}
-                  <span class="badge" title="Imported machine profile, carried verbatim"
-                    >imported</span
-                  >{/if}</span
-              >
+              <span>
+                {project.name}{#if project === installed}
+                  <span class="badge" title="The project installed on this machine">
+                    this machine
+                  </span>{:else if project.authored === false}
+                  <span class="badge" title="Imported machine profile, carried verbatim">
+                    imported
+                  </span>{/if}
+              </span>
               <button
                 type="button"
                 class="btn-secondary btn-sm"
-                onclick={() => onNavigate(openPath(project))}>Open</button
+                onclick={() => onNavigate(openPath(project))}
               >
+                Open
+              </button>
             </li>
           {/each}
         </ul>
@@ -352,9 +355,9 @@
             {:else}
               {#each templates as t (t.id)}
                 {#if t.error}
-                  <option value={t.id} disabled title={t.error}
-                    >{t.meta?.name ?? t.id} (unavailable: {t.error})</option
-                  >
+                  <option value={t.id} disabled title={t.error}>
+                    {t.meta?.name ?? t.id} (unavailable: {t.error})
+                  </option>
                 {:else}
                   <option value={t.id}>{t.meta?.name ?? t.id}</option>
                 {/if}
@@ -367,8 +370,10 @@
           type="button"
           class="btn-primary"
           disabled={creating}
-          onclick={handleCreate}>{creating ? "Creating…" : "Create Project"}</button
+          onclick={handleCreate}
         >
+          {creating ? "Creating…" : "Create Project"}
+        </button>
         {#if createError}
           <p class="field-error">{createError}</p>
         {/if}
@@ -408,8 +413,10 @@
           type="button"
           class="btn-primary"
           disabled={importing}
-          onclick={handleImport}>{importing ? "Importing…" : "Import Project"}</button
+          onclick={handleImport}
         >
+          {importing ? "Importing…" : "Import Project"}
+        </button>
         <p class="field-note">
           The directory is on the machine running the workbench. From another computer, upload the
           folder instead.
@@ -427,8 +434,10 @@
           type="button"
           class="btn-secondary"
           disabled={importing}
-          onclick={() => folderInput?.click()}>Choose folder…</button
+          onclick={() => folderInput?.click()}
         >
+          Choose folder…
+        </button>
         {#if importError}
           <p class="field-error">{importError}</p>
           {#if importErrors.length > 0}
