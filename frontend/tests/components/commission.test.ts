@@ -356,12 +356,14 @@ describe("Commission.svelte", () => {
   });
 
   it("shows a refused stop instead of passing over it (#670)", async () => {
-    const refusal = "Cannot stop 'demo' while 'other' is running. Stop 'other' from its own project.";
+    const refusal =
+      "Cannot stop 'demo' while 'other' is running. Stop 'other' from its own project.";
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const path = pathFromInput(input);
       if (path === "/api/status")
         return Promise.resolve(jsonResponse(200, { running: true, active_project: "demo" }));
-      if (path === "/api/projects/demo/stop") return Promise.resolve(jsonResponse(409, { error: refusal }));
+      if (path === "/api/projects/demo/stop")
+        return Promise.resolve(jsonResponse(409, { error: refusal }));
       return Promise.resolve(jsonResponse(200, {}));
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -427,7 +429,8 @@ describe("Commission.svelte — launch and restart refusals (#672)", () => {
   });
 
   it("does not take a 422 for a busy runtime, whatever its message says", async () => {
-    const message = "No host executable configured for provider 'already running' (set it in the project's paths).";
+    const message =
+      "No host executable configured for provider 'already running' (set it in the project's paths).";
     stubLaunch(jsonResponse(422, { error: message, code: "provider_executable_missing" }));
     await launch();
     expect(await screen.findByText(`Launch failed: ${message}`)).toBeInTheDocument();
@@ -452,7 +455,9 @@ describe("Commission.svelte — launch and restart refusals (#672)", () => {
         if (path === "/api/status")
           return Promise.resolve(jsonResponse(200, { running: true, active_project: "demo" }));
         if (path === "/api/projects/demo/restart")
-          return Promise.resolve(jsonResponse(422, { error: missingRuntime, code: "runtime_executable_missing" }));
+          return Promise.resolve(
+            jsonResponse(422, { error: missingRuntime, code: "runtime_executable_missing" }),
+          );
         return Promise.resolve(jsonResponse(200, {}));
       }),
     );
@@ -881,7 +886,7 @@ describe("Commission.svelte — Deploy to device (#275)", () => {
     expect(within(deployVariant).getByRole("option", { name: "manual" })).toBeInTheDocument();
     expect(
       within(deployVariant).getByRole("option", {
-        name: "automation (fresh install refuses this)",
+        name: "automation (does not boot inert: a fresh install refuses it)",
       }),
     ).toBeInTheDocument();
   });

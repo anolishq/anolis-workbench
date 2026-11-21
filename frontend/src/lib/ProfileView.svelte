@@ -59,8 +59,16 @@
       <dt>Display name</dt>
       <dd>{profile.display_name ?? "not set"}</dd>
       {#if safety.estop_topology}
-        <dt>E-stop topology</dt>
-        <dd><code>{safety.estop_topology}</code></dd>
+        <dt>E-stop wiring</dt>
+        <dd>
+          {#if safety.estop_topology === "power_cut"}
+            Cuts power to the actuator boards: on a stop the boards go dark and their I/O fails
+            until the stop is released.
+          {:else if safety.estop_topology === "signal"}
+            Drives the boards' e-stop inputs: on a stop the boards report it and stay reachable.
+          {/if}
+          <code>{safety.estop_topology}</code>
+        </dd>
       {/if}
     </dl>
   </section>

@@ -223,9 +223,9 @@
         updateFeedback = `Check failed: ${updateInfo.error}`;
         updateIsError = true;
       } else if (updateInfo.update_available) {
-        updateFeedback = `Update available: v${updateInfo.latest_version}`;
+        updateFeedback = `Workbench update available: v${updateInfo.latest_version}`;
       } else {
-        updateFeedback = `Up to date (v${updateInfo.current_version})`;
+        updateFeedback = `Workbench is up to date (v${updateInfo.current_version})`;
       }
     } catch (err) {
       updateFeedback = `Check failed: ${err instanceof Error ? err.message : String(err)}`;

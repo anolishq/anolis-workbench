@@ -24,6 +24,7 @@
     type SavedLaunch,
   } from "../lib/canonical";
   import { isLoopbackHost } from "../lib/guards";
+  import { formatDuration } from "../lib/operate-contracts";
 
   let {
     projectName,
@@ -1127,7 +1128,7 @@
           <span>Mode: <strong>{commissionRuntimeStatus.mode ?? "UNKNOWN"}</strong></span>
           <span
             >Uptime: {Number.isFinite(Number(commissionRuntimeStatus.uptime_seconds))
-              ? `${commissionRuntimeStatus.uptime_seconds}s`
+              ? formatDuration(Number(commissionRuntimeStatus.uptime_seconds))
               : "--"}</span
           >
           <span
@@ -1244,7 +1245,9 @@
     >
       {#each variants as v (v)}
         <option value={v}>
-          {inertnessViolation(system?.variants?.[v]) ? `${v} (fresh install refuses this)` : v}
+          {inertnessViolation(system?.variants?.[v])
+            ? `${v} (does not boot inert: a fresh install refuses it)`
+            : v}
         </option>
       {/each}
     </select>
