@@ -128,10 +128,10 @@
       value={rt.http?.bind ?? ""}
       oninput={(e: Event) => setIn("http", "bind", inputTarget(e).value)}
     />
-    <span class="field-note"
-      >Keep <code>127.0.0.1</code> unless the machine must be reachable over the LAN. install.sh turns
-      on authentication when it rewrites this for LAN exposure.</span
-    >
+    <span class="field-note">
+      Keep <code>127.0.0.1</code> unless the machine must be reachable over the LAN. install.sh turns
+      on authentication when it rewrites this for LAN exposure.
+    </span>
   </div>
 
   <div class="form-group">
@@ -278,10 +278,10 @@
       value={hostPaths.runtime_executable ?? ""}
       oninput={(e: Event) => setRuntimeExecutable(inputTarget(e).value)}
     />
-    <span class="field-note"
-      >Host path, used for dev-launch only. It is never deployed: install.sh installs the pinned
-      runtime under its own prefix.</span
-    >
+    <span class="field-note">
+      Host path, used for dev-launch only. It is never deployed: install.sh installs the pinned
+      runtime under its own prefix.
+    </span>
   </div>
 </section>
 

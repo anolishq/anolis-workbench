@@ -22,8 +22,10 @@
     onclick={() => (open = !open)}
     onkeydown={(e: KeyboardEvent) => {
       if (e.key === "Escape") open = false;
-    }}>ⓘ</button
+    }}
   >
+    ⓘ
+  </button>
   {#if open}
     <span class="info-panel" id={panelId} role="note">{@render children()}</span>
   {/if}

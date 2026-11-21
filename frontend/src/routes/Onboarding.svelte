@@ -352,8 +352,10 @@
             <button
               type="button"
               class={result.project ? "btn-secondary" : "btn-primary"}
-              onclick={skip}>Go to projects</button
+              onclick={skip}
             >
+              Go to projects
+            </button>
           {:else}
             {#if canInstallAnyway(result)}
               {#if confirmingUnmet}

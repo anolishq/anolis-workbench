@@ -41,9 +41,9 @@
 
   <div class="fleet-actions">
     <button type="button" class="btn-secondary btn-sm" onclick={loadFleet}>Refresh</button>
-    <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/")}
-      >← Home</button
-    >
+    <button type="button" class="btn-secondary btn-sm" onclick={() => onNavigate("/")}>
+      ← Home
+    </button>
   </div>
 
   {#if loading}
