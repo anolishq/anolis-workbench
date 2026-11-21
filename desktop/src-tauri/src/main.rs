@@ -68,6 +68,11 @@ fn start_sidecar(app: &AppHandle) -> bool {
         .env("ANOLIS_WORKBENCH_HOST", WORKBENCH_HOST)
         .env("ANOLIS_WORKBENCH_PORT", WORKBENCH_PORT.to_string())
         .args(["--no-browser"])
+        // The sidecar is a PyInstaller onefile bootloader that runs the server
+        // as its own child. In its own process group (job object on Windows),
+        // kill() in stop_sidecar takes both down; without it only the
+        // bootloader dies and the server keeps :3010 (wb#667).
+        .set_process_group(true)
         .spawn()
     {
         Ok(result) => result,
