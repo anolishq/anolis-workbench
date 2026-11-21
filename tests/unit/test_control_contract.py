@@ -231,6 +231,27 @@ def test_control_contract_status_detects_detached_runtime_and_stop_cleans_up(
     )
     assert created_status == 201, created
 
+    # Status falls back to detecting a runtime on the project's http port. Point
+    # every variant at a port held by a bound, non-listening socket for the
+    # whole test, so a runtime on the template's 8080 cannot count as this
+    # project's (#509; as #506 did for #487).
+    closed_port_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    closed_port_sock.bind(("127.0.0.1", 0))
+    runtime_port = int(closed_port_sock.getsockname()[1])
+    _, project_payload = _http_json(base_url, f"/api/projects/{urllib.parse.quote(project)}")
+    for variant_doc in project_payload["variants"].values():
+        variant_doc["http"]["bind"] = "127.0.0.1"
+        variant_doc["http"]["port"] = runtime_port
+    save_status, save_payload = _http_json(
+        base_url,
+        f"/api/projects/{urllib.parse.quote(project)}",
+        method="PUT",
+        body=project_payload,
+    )
+    assert save_status == 200, save_payload
+    _, saved_payload = _http_json(base_url, f"/api/projects/{urllib.parse.quote(project)}")
+    assert {v["http"]["port"] for v in saved_payload["variants"].values()} == {runtime_port}, saved_payload
+
     running_path = composer_server["systems_root"] / project / "running.json"
     running_path.write_text(
         json.dumps(
@@ -268,6 +289,7 @@ def test_control_contract_status_detects_detached_runtime_and_stop_cleans_up(
         assert after_payload.get("active_project") is None
         assert not running_path.exists()
     finally:
+        closed_port_sock.close()
         if runner.poll() is None:
             runner.terminate()
             try:
