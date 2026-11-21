@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import shutil
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -43,6 +44,9 @@ class ProvisionJob:
 
 _jobs: dict[str, ProvisionJob] = {}
 _jobs_lock = threading.Lock()
+# A long-running server (the desktop sidecar, appliance mode) keeps this many
+# finished jobs and drops older ones, so the registry stays bounded (#674).
+_KEEP_FINISHED_JOBS = 100
 
 
 def _get_job(job_id: str) -> ProvisionJob | None:
@@ -53,7 +57,15 @@ def _get_job(job_id: str) -> ProvisionJob | None:
 def _create_job() -> ProvisionJob:
     job = ProvisionJob(job_id=uuid.uuid4().hex[:12])
     with _jobs_lock:
+        finished = [jid for jid, j in _jobs.items() if j.status in ("done", "failed")]
+        # Room for the job being created, so once it finishes there are at
+        # most _KEEP_FINISHED_JOBS finished jobs.
+        dropped = finished[: max(0, len(finished) - _KEEP_FINISHED_JOBS + 1)]
+        for jid in dropped:
+            del _jobs[jid]
         _jobs[job.job_id] = job
+    for jid in dropped:
+        _drop_bundle(jid)
     return job
 
 
@@ -480,7 +492,29 @@ def get_status(handler: Any, job_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 _bundle_artifacts: dict[str, Path] = {}
+# The temp directory each export staged into, which is what gets removed: the
+# tarball's own path is not trusted to sit inside it.
+_bundle_dirs: dict[str, Path] = {}
 _bundle_artifacts_lock = threading.Lock()
+# Completed bundles kept for download. Keeping the latest two, not deleting a
+# bundle once served, lets a download that failed part-way be retried; older
+# bundles are removed as new ones finish (#674).
+_KEEP_BUNDLES = 2
+
+
+def _drop_bundle(job_id: str) -> None:
+    with _bundle_artifacts_lock:
+        _bundle_artifacts.pop(job_id, None)
+        staged = _bundle_dirs.pop(job_id, None)
+    if staged is not None:
+        shutil.rmtree(staged, ignore_errors=True)
+
+
+def _keep_latest_bundles() -> None:
+    with _bundle_artifacts_lock:
+        done = list(_bundle_artifacts)
+    for job_id in done[: max(0, len(done) - _KEEP_BUNDLES)]:
+        _drop_bundle(job_id)
 
 
 def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
@@ -495,6 +529,7 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             warnings.append(detail)
         job.events.append({"stage": step, "detail": detail})
 
+    tmp_dir: Path | None = None
     try:
         arch = params.get("arch") or ("arm64" if platform.machine() in ("aarch64", "arm64") else "x86_64")
         if arch == "aarch64":
@@ -517,6 +552,8 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 
         with _bundle_artifacts_lock:
             _bundle_artifacts[job.job_id] = tarball_path
+            _bundle_dirs[job.job_id] = tmp_dir
+        _keep_latest_bundles()
 
         job.events.append(
             {
@@ -527,6 +564,8 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         )
         job.status = "done"
     except Exception as exc:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
         job.error = str(exc)
         job.status = "failed"
         job.events.append({"stage": "error", "detail": str(exc)})

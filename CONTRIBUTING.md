@@ -9,17 +9,22 @@ This repo is intentionally small and strict: keep changes focused, keep checks g
 - Node.js 20+
 - npm
 
-## Local Setup
+## Local Setup and Run
+
+The same steps as "Build from source" in README.md:
 
 ```sh
 uv sync --locked --extra dev
-cd frontend
-npm ci
+cd frontend && npm ci && npm run build && cd ..
+./start.sh
 ```
 
-## Run Locally
+`./start.sh` runs `uv run anolis-workbench` (Windows: `start.cmd`). The
+frontend build writes `anolis_workbench/frontend/dist`, which the server
+serves; rebuild it after changing the frontend, or use the frontend dev
+server below.
 
-Backend server:
+Backend server alone, once the frontend is built:
 
 ```sh
 uv run anolis-workbench
