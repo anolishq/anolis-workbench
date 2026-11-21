@@ -41,27 +41,23 @@ struct SidecarState {
     child: Mutex<Option<CommandChild>>,
 }
 
-fn start_sidecar(app: &AppHandle) -> bool {
+/// Starts the bundled server. On failure, says which step failed and why, for
+/// the startup dialog (wb#663).
+fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<SidecarState>();
-    let mut guard = match state.child.lock() {
-        Ok(guard) => guard,
-        Err(err) => {
-            eprintln!("[desktop] failed to acquire sidecar lock: {err}");
-            return false;
-        }
-    };
+    let mut guard = state
+        .child
+        .lock()
+        .map_err(|err| format!("Could not take the sidecar lock: {err}"))?;
 
     if guard.is_some() {
-        return true;
+        return Ok(());
     }
 
-    let command = match app.shell().sidecar(SIDECAR_NAME) {
-        Ok(command) => command,
-        Err(err) => {
-            eprintln!("[desktop] failed to resolve sidecar '{SIDECAR_NAME}': {err}");
-            return false;
-        }
-    };
+    let command = app
+        .shell()
+        .sidecar(SIDECAR_NAME)
+        .map_err(|err| format!("Could not find the bundled server ({SIDECAR_NAME}): {err}"))?;
 
     let (mut events, child) = match command
         .env("ANOLIS_WORKBENCH_OPEN_BROWSER", "0")
@@ -77,8 +73,9 @@ fn start_sidecar(app: &AppHandle) -> bool {
     {
         Ok(result) => result,
         Err(err) => {
-            eprintln!("[desktop] failed to spawn sidecar: {err}");
-            return false;
+            return Err(format!(
+                "Could not start the bundled server ({SIDECAR_NAME}): {err}"
+            ))
         }
     };
 
@@ -90,7 +87,7 @@ fn start_sidecar(app: &AppHandle) -> bool {
     });
 
     *guard = Some(child);
-    true
+    Ok(())
 }
 
 fn stop_sidecar(app: &AppHandle) {
@@ -157,13 +154,8 @@ fn wait_for_workbench_ready(timeout: Duration) -> bool {
     false
 }
 
-fn show_startup_error(app: &AppHandle) {
-    let message = format!(
-        "Unable to start Anolis Workbench on port {WORKBENCH_PORT}.\n\n\
-The desktop wrapper reserves port {WORKBENCH_PORT}.\n\
-Stop any process already bound to that port and relaunch the app."
-    );
-
+fn show_startup_error(app: &AppHandle, message: String) {
+    eprintln!("[desktop] {message}");
     app.dialog()
         .message(message)
         .title("Anolis Workbench startup failed")
@@ -182,14 +174,29 @@ fn main() {
         .setup(|app| {
             app.manage(SidecarState::default());
 
-            if !start_sidecar(app.handle()) {
-                show_startup_error(app.handle());
+            if let Err(reason) = start_sidecar(app.handle()) {
+                show_startup_error(
+                    app.handle(),
+                    format!(
+                        "Anolis Workbench could not start.\n\n{reason}\n\n\
+The installation may be incomplete. Reinstalling the app may fix it."
+                    ),
+                );
                 std::process::exit(1);
             }
 
             if !wait_for_workbench_ready(STARTUP_TIMEOUT) {
                 stop_sidecar(app.handle());
-                show_startup_error(app.handle());
+                show_startup_error(
+                    app.handle(),
+                    format!(
+                        "Anolis Workbench started, but it did not answer on port \
+{WORKBENCH_PORT} within {} seconds.\n\n\
+Another program may already be using port {WORKBENCH_PORT}, which the app \
+needs. If so, stop it and relaunch the app.",
+                        STARTUP_TIMEOUT.as_secs()
+                    ),
+                );
                 std::process::exit(1);
             }
 
