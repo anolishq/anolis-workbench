@@ -35,8 +35,9 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 3. Project save and import validation failures include structured `errors[]` entries (`source`, `code`, `path`, `message`); launch and restart validation failures return `422` with an `errors[]` list of strings.
 4. Expected status semantics:
    - `400` invalid project names
+   - `403` refused by the Host/Origin guard, which runs before every route: the Host is not this machine, or the Origin is another site
    - `404` unknown project
-   - `409` launch conflict, or a stop or restart naming a project other than the running one
+   - `409` launch conflict, a stop or restart naming a project other than the running one, or (`code` `imported_project`) preflight, launch, stop, restart or export of an imported project
    - `422` launch or restart of a project that fails validation (`errors[]` of strings) or names an executable that is not set or cannot be run (`code` `runtime_executable_missing` or `provider_executable_missing`)
    - `500` backend failure
 
@@ -68,4 +69,4 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 1. Additive response fields are allowed.
 2. Existing fields must keep semantics.
-3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline. No check enforces this: the OpenAPI validator checks document structure and that the seven operations exist, not their status codes against the implementation. `contracts/composer-control.openapi.v1.yaml` lists the `422` launch and restart validation failure, with string `errors`, and the `409` on stop, but not the `409` imported-project refusal on preflight.
+3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline. `tests/unit/test_contract_status_codes.py` enforces part of this: it drives the `403`, `409` (`imported_project`) and `422` paths through the real handlers and fails if a returned status is not declared for its operation in both OpenAPI files, or the body does not match the declared schema. The OpenAPI validator checks document structure and that the seven operations exist.

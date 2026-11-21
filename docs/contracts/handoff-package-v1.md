@@ -14,7 +14,7 @@ provenance record of the commissioned machine; it is not a deploy artifact.
 3. Canonical internal layout:
    - `machine-profile.yaml`
    - `runtime/anolis-runtime.yaml`
-   - `runtime/behaviors/*` (if referenced)
+   - `runtime/behaviors/*` (each behavior the profile declares, and the one the exported variant references)
    - `providers/<provider-id>.yaml`
    - `meta/provenance.json`
    - `meta/checksums.sha256`
@@ -30,7 +30,10 @@ Path rewrite contract at export:
    `manual` variant is exported; other variants are omitted and listed in
    `meta/provenance.json.omitted_variants`.
 2. `providers.<id>.config` -> `providers/<id>.yaml`.
-3. `behaviors[]` -> `runtime/behaviors/<file>.xml`.
+3. `behaviors[]` -> `runtime/behaviors/<file>.xml`. Every declared entry is
+   carried, together with the exported variant's `behavior_tree`, and the
+   packaged `behaviors[]` lists them all. Two declared files with the same
+   file name fail the export rather than overwrite each other.
 4. Runtime provider `--config` args -> `providers/<id>.yaml`.
 
 Provider commands are not rewritten. Each provider's `command` is carried as

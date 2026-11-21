@@ -6,6 +6,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import stat
 import zipfile
 from typing import Callable
@@ -92,6 +93,9 @@ def test_build_package_is_deterministic_and_rewrites_runtime_paths(
                 "meta/provenance.json",
                 "providers/sim0.yaml",
                 "runtime/anolis-runtime.yaml",
+                # Declared by the profile, though the manual variant does not
+                # reference it: every declared behavior is carried (#675).
+                "runtime/behaviors/local.xml",
             ]
         )
 
@@ -103,6 +107,7 @@ def test_build_package_is_deterministic_and_rewrites_runtime_paths(
         profile = yaml.safe_load(archive.read("machine-profile.yaml"))
         assert profile["runtime_profiles"] == {"manual": "runtime/anolis-runtime.yaml"}
         assert profile["providers"]["sim0"]["config"] == "providers/sim0.yaml"
+        assert profile["behaviors"] == ["runtime/behaviors/local.xml"]
 
         provenance = json.loads(archive.read("meta/provenance.json").decode("utf-8"))
         assert provenance["exported_at"] == "2026-04-16T19:01:02Z"
@@ -158,6 +163,58 @@ def test_export_carries_a_behavior_tree_the_exported_variant_references(
         assert runtime_payload["automation"]["behavior_tree"] == "runtime/behaviors/local.xml"
         profile = yaml.safe_load(archive.read("machine-profile.yaml"))
         assert profile["behaviors"] == ["runtime/behaviors/local.xml"]
+
+
+def _declare_behaviors(project_dir: pathlib.Path, files: dict[str, bytes]) -> None:
+    profile_path = project_dir / "machine-profile.yaml"
+    profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+    for rel, content in files.items():
+        (project_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (project_dir / rel).write_bytes(content)
+    profile["behaviors"] = list(files)
+    profile_path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+
+
+def test_every_declared_behavior_is_carried_not_only_the_referenced_one(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """The contract rewrites each behaviors[] entry; the export kept only the
+    one the manual variant referenced and dropped the rest unannounced (#675)."""
+    _declare_behaviors(project_dir, {"behaviors/local.xml": b"<root main='a'/>", "behaviors/second.xml": b"<root/>"})
+    _patch_variant(
+        project_dir, canonical.MANUAL_VARIANT, automation={"enabled": True, "behavior_tree": "behaviors/local.xml"}
+    )
+    out = tmp_path / "out.anpkg"
+    exporter.build_package(project_dir=project_dir, out_path=out)
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("runtime/behaviors/second.xml") == b"<root/>"
+        assert archive.read("runtime/behaviors/local.xml") == b"<root main='a'/>"
+        profile = yaml.safe_load(archive.read("machine-profile.yaml"))
+        runtime_payload = yaml.safe_load(archive.read("runtime/anolis-runtime.yaml"))
+    assert profile["behaviors"] == ["runtime/behaviors/local.xml", "runtime/behaviors/second.xml"]
+    assert runtime_payload["automation"]["behavior_tree"] == "runtime/behaviors/local.xml"
+
+
+def test_the_imported_profile_fixture_exports_its_declared_behavior(tmp_path: pathlib.Path) -> None:
+    """The repo's imported-profile fixture declares one behavior its manual
+    variant does not use; the package came out with none (#675)."""
+    project_dir = tmp_path / "imported"
+    shutil.copytree(pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "imported-profile", project_dir)
+    out = tmp_path / "out.anpkg"
+    exporter.build_package(project_dir=project_dir, out_path=out)
+    with zipfile.ZipFile(out) as archive:
+        assert "runtime/behaviors/bioreactor_stir_dual_dosing.xml" in archive.namelist()
+        profile = yaml.safe_load(archive.read("machine-profile.yaml"))
+    assert profile["behaviors"] == ["runtime/behaviors/bioreactor_stir_dual_dosing.xml"]
+
+
+def test_two_declared_behaviors_with_one_file_name_fail_the_export(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Both would land at runtime/behaviors/tree.xml, one over the other."""
+    _declare_behaviors(project_dir, {"behaviors/a/tree.xml": b"<a/>", "behaviors/b/tree.xml": b"<b/>"})
+    with pytest.raises(exporter.ExportError, match="share the file name tree.xml"):
+        exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
 
 
 def _reference_behavior(project_dir: pathlib.Path, name: str, content: bytes) -> None:

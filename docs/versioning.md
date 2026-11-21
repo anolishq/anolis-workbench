@@ -62,7 +62,10 @@ Desktop release rule:
 ## Pre-release
 
 The release workflow supports a prerelease toggle for GitHub Release metadata.
-Pre-release handling still requires valid semver input and the same quality gates.
+A prerelease is a plain `X.Y.Z` version with that toggle set: the workflow
+refuses a suffix such as `-rc.1`, because every entry in
+`version-locations.txt` captures `X.Y.Z`. It goes through the same quality
+gates as any release.
 
 ## Practical Bump Guidance
 

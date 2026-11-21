@@ -113,7 +113,15 @@ def _plan_for_existing_provider(repo_root: Path, kind: str) -> dict[str, Any]:
     path = provider_locks.lock_path(repo_root, kind)
     lock = provider_locks.load_lock(path)
     where = path.name
-    templates = provider_locks.read_templates(lock, where)
+    distribution = lock.get("distribution")
+    if isinstance(distribution, dict) and "templates" not in distribution:
+        # A schema_version 2 lock predates the templates. Re-sync it with the
+        # naming convention, as --new-provider would, and write it back as
+        # v3, rather than refusing the one command that migrates it (#664).
+        print(f"{where}: no distribution.templates (a v2 lock); using the conventional asset names")
+        templates = provider_locks.asset_templates(kind)
+    else:
+        templates = provider_locks.read_templates(lock, where)
     release = lock.get("distribution", {}).get("release")
     repo = release.get("repo") if isinstance(release, dict) else None
     if not isinstance(repo, str) or not repo.strip():
