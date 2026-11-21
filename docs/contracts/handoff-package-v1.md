@@ -33,6 +33,13 @@ Path rewrite contract at export:
 3. `behaviors[]` -> `runtime/behaviors/<file>.xml`.
 4. Runtime provider `--config` args -> `providers/<id>.yaml`.
 
+Provider commands are not rewritten. Each provider's `command` is carried as
+the canonical deploy token,
+`../anolis-provider-<kind>/build/<preset>/anolis-provider-<kind>`, which
+`install.sh` rewrites to the installed binary at deploy time. The package
+carries no binaries and is not meant to run: it is a provenance record, and
+the deployable is the staged bundle from `install.sh --stage`.
+
 ## Determinism Lock
 
 For identical project input state, exported bytes are identical across wrappers
@@ -66,7 +73,7 @@ directory:
 anolis-validate <package-path>
 ```
 
-Optional runtime replay hardening:
+Optional runtime config check:
 
 ```bash
 anolis-validate <package-path> --runtime-bin <runtime-binary>
@@ -77,8 +84,11 @@ Validation includes:
 1. structure + checksums
 2. machine-profile schema and package-context references
 3. runtime schema compatibility
-4. static replay assumptions from clean package root
-5. optional runtime `--check-config` replay check
+4. references resolve inside the package root, and each provider `command` is
+   a canonical deploy token
+5. optional runtime `--check-config` on the package's runtime config. This
+   checks the config only; it starts no provider, and cannot, since the
+   commands are deploy tokens.
 
 ## Related Artifacts
 

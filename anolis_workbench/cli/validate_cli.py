@@ -20,7 +20,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--runtime-bin",
         default=None,
-        help="Optional runtime binary path for --check-config replay validation.",
+        help=(
+            "Optional runtime binary: runs its --check-config on the package's runtime config. "
+            "A config check only; no provider is started."
+        ),
     )
     return parser.parse_args()
 
