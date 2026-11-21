@@ -692,8 +692,16 @@ def _run_bundle(args: argparse.Namespace) -> int:
     print()
     print(f"  📁 {tarball}")
     print()
-    print("Transfer to the device and run:")
-    print(f"  sudo ./install.sh --local {tarball.name}")
+    # The tarball unpacks to a directory of its own name, holding the
+    # install.sh that matches it; nothing puts an install.sh beside the
+    # tarball. Same steps as install.sh --stage prints (#674).
+    bundle = tarball.name.removesuffix(".tar.gz")
+    checksum = tarball.with_name(tarball.name + ".sha256")
+    print("Carry the bundle" + (" and its .sha256" if checksum.is_file() else "") + " to the device, then run there:")
+    if checksum.is_file():
+        print(f"  sha256sum -c {checksum.name}")
+    print(f"  tar xzf {tarball.name}")
+    print(f"  sudo {bundle}/install.sh --local {tarball.name}")
     print("─" * 60)
     return 0
 
