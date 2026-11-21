@@ -335,51 +335,58 @@ def main() -> int:
     asset_url = f"https://github.com/{upstream_repo}/releases/download/{args.tag}/{asset}"
     manifest_url = f"https://github.com/{upstream_repo}/releases/download/{args.tag}/{manifest_asset}"
 
-    print(f"Fetching {asset_url} ...")
-    asset_bytes = fetch_url_bytes(asset_url)
-    asset_sha = sha256_bytes(asset_bytes)
-
-    if cfg.get("raw_asset"):
-        # The asset IS the schema document (provider config-schema envelopes).
-        schema_bytes = asset_bytes
-    else:
-        schema_bytes = extract_tar_member(asset_bytes, cfg["schema_member"])
-    envelope_version = ""
-    if cfg.get("envelope"):
-        validate_envelope_shape(schema_bytes)
-        envelope_version = json.loads(schema_bytes.decode("utf-8"))["provider_version"]
-        if envelope_version != version:
-            # The asset name is built from the tag, and install.sh derives
-            # provider asset names the same way — so the tag version is what a
-            # machine PINS. If the envelope declares something else, #283 would
-            # warn about skew on every machine using this provider, forever.
-            # Checked before anything is written: bailing out after the
-            # envelope lands would leave an envelope with no lock, which is a
-            # CI failure in its own right.
-            print(
-                f"ERROR: release tag {args.tag} implies version {version!r} but the envelope declares "
-                f"provider_version {envelope_version!r}. Refusing to write a lock that disagrees with itself.",
-                file=sys.stderr,
-            )
-            return 1
-    schema_sha = sha256_bytes(schema_bytes)
-
-    print(f"Fetching {manifest_url} ...")
-    manifest_bytes = fetch_url_bytes(manifest_url)
+    # Fetching and checking the release writes nothing, so a failure here is
+    # reported as one ERROR line, as the planning steps above are, not as a
+    # traceback (#674).
     try:
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"failed to parse schema manifest asset as JSON: {exc}") from exc
+        print(f"Fetching {asset_url} ...")
+        asset_bytes = fetch_url_bytes(asset_url)
+        asset_sha = sha256_bytes(asset_bytes)
 
-    if not isinstance(manifest, dict):
-        raise RuntimeError("schema manifest asset must be a JSON object")
+        if cfg.get("raw_asset"):
+            # The asset IS the schema document (provider config-schema envelopes).
+            schema_bytes = asset_bytes
+        else:
+            schema_bytes = extract_tar_member(asset_bytes, cfg["schema_member"])
+        envelope_version = ""
+        if cfg.get("envelope"):
+            validate_envelope_shape(schema_bytes)
+            envelope_version = json.loads(schema_bytes.decode("utf-8"))["provider_version"]
+            if envelope_version != version:
+                # The asset name is built from the tag, and install.sh derives
+                # provider asset names the same way — so the tag version is what a
+                # machine PINS. If the envelope declares something else, #283 would
+                # warn about skew on every machine using this provider, forever.
+                # Checked before anything is written: bailing out after the
+                # envelope lands would leave an envelope with no lock, which is a
+                # CI failure in its own right.
+                print(
+                    f"ERROR: release tag {args.tag} implies version {version!r} but the envelope declares "
+                    f"provider_version {envelope_version!r}. Refusing to write a lock that disagrees with itself.",
+                    file=sys.stderr,
+                )
+                return 1
+        schema_sha = sha256_bytes(schema_bytes)
 
-    manifest_asset_name = manifest.get("asset")
-    manifest_sha = manifest.get("sha256")
-    if manifest_asset_name != asset:
-        raise RuntimeError(f"schema manifest asset mismatch: expected '{asset}', found '{manifest_asset_name}'")
-    if manifest_sha != asset_sha:
-        raise RuntimeError(f"schema manifest sha256 mismatch: expected '{asset_sha}', found '{manifest_sha}'")
+        print(f"Fetching {manifest_url} ...")
+        manifest_bytes = fetch_url_bytes(manifest_url)
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"failed to parse schema manifest asset as JSON: {exc}") from exc
+
+        if not isinstance(manifest, dict):
+            raise RuntimeError("schema manifest asset must be a JSON object")
+
+        manifest_asset_name = manifest.get("asset")
+        manifest_sha = manifest.get("sha256")
+        if manifest_asset_name != asset:
+            raise RuntimeError(f"schema manifest asset mismatch: expected '{asset}', found '{manifest_asset_name}'")
+        if manifest_sha != asset_sha:
+            raise RuntimeError(f"schema manifest sha256 mismatch: expected '{asset_sha}', found '{manifest_sha}'")
+    except (RuntimeError, tarfile.TarError, OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     schema_out.parent.mkdir(parents=True, exist_ok=True)
     lock_out.parent.mkdir(parents=True, exist_ok=True)
