@@ -161,9 +161,9 @@
   <div class="schema-array-header">
     <span class="field-group-label">{label}</span>
     {#if showImport}
-      <button type="button" class="btn-small" onclick={importFromDevices}
-        >Import from devices</button
-      >
+      <button type="button" class="btn-small" onclick={importFromDevices}>
+        Import from devices
+      </button>
     {/if}
     <button type="button" class="btn-small" onclick={objectMode ? addObjectItem : addScalarItem}>
       + Add
@@ -197,9 +197,9 @@
           {#each extraKeys(record) as extra (extra)}
             <div class="form-group schema-array-extra">
               <label>{extra}</label>
-              <code title="Not described by this provider schema revision; preserved as-is."
-                >{JSON.stringify(record[extra])}</code
-              >
+              <code title="Not described by this provider schema revision; preserved as-is.">
+                {JSON.stringify(record[extra])}
+              </code>
             </div>
           {/each}
         {:else}

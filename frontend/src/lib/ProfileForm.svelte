@@ -142,10 +142,10 @@
       style="font-family:monospace"
       value={profile?.machine_id ?? ""}
     />
-    <span class="field-note"
-      >The deploy identity. install.sh keys the installed directory and every config path on it, so
-      renaming the project deliberately leaves it alone; duplicating a project re-keys it.</span
-    >
+    <span class="field-note">
+      The deploy identity. install.sh keys the installed directory and every config path on it, so
+      renaming the project deliberately leaves it alone; duplicating a project re-keys it.
+    </span>
   </div>
 
   <h3>Component pins</h3>
@@ -182,13 +182,13 @@
         style="font-family:monospace"
         value={profile?.components?.providers?.[kind]?.version ?? ""}
       />
-      <button type="button" class="btn-remove-provider" onclick={() => removeProviderPin(kind)}
-        >✕ Remove pin</button
-      >
-      <span class="field-note"
-        >No runtime variant runs <code>{kind}</code> any more. install.sh still downloads a binary for
-        every pin and fails the bundle if that release is missing.</span
-      >
+      <button type="button" class="btn-remove-provider" onclick={() => removeProviderPin(kind)}>
+        ✕ Remove pin
+      </button>
+      <span class="field-note">
+        No runtime variant runs <code>{kind}</code> any more. install.sh still downloads a binary for
+        every pin and fails the bundle if that release is missing.
+      </span>
       {@render skewNote(kind)}
     </div>
   {/each}
@@ -205,9 +205,9 @@
         value={profile?.components?.providers?.[kind]?.version ?? ""}
         oninput={(e: Event) => setProviderPin(kind, inputTarget(e).value)}
       />
-      <span class="field-note"
-        >{profile?.components?.providers?.[kind]?.repo ?? `anolishq/anolis-provider-${kind}`}</span
-      >
+      <span class="field-note">
+        {profile?.components?.providers?.[kind]?.repo ?? `anolishq/anolis-provider-${kind}`}
+      </span>
       {@render skewNote(kind)}
     </div>
   {/each}
