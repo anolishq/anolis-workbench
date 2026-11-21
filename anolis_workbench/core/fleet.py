@@ -37,6 +37,7 @@ class FleetTarget:
     install_prefix: Path = field(default_factory=lambda: DEFAULT_INSTALL_PREFIX)
     systemd: bool = False
     key: str | None = None
+    port: int = 22
 
 
 @dataclass
@@ -122,6 +123,11 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
                 raise ValueError(
                     f"Target {i} '{key}' must be 1-64 characters: letters, digits, hyphens, underscores only"
                 )
+        # The SSH port, per target then under defaults (#654). bool is an int
+        # subclass, so refuse it by name.
+        port = entry.get("port", defaults.get("port", 22))
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError(f"Target {i} 'port' must be an integer in 1-65535, got {port!r}")
 
         targets.append(
             FleetTarget(
@@ -134,6 +140,7 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
                 ),
                 systemd=entry.get("systemd", defaults.get("systemd", False)),
                 key=entry.get("key", defaults.get("key")),
+                port=port,
             )
         )
 

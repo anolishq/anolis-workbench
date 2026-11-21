@@ -101,6 +101,7 @@ targets:
     project: my-machine  # workspace project to install; seeded from
     template: sim-quickstart  # this template if it does not exist yet
     key: ~/.ssh/id_ed25519
+    port: 22             # SSH port, 1-65535; defaults to 22
     install_prefix: /opt/anolis
 ```
 

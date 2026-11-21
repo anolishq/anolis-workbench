@@ -231,3 +231,55 @@ def test_auto_register_keeps_the_rest_of_an_existing_row(monkeypatch, tmp_path) 
         {"name": "rig-a", "host": "10.0.0.5", "project": "new", "template": "bioreactor-manual", "key": "~/.ssh/rig"},
         {"name": "rig-b", "host": "10.0.0.6", "project": "other"},
     ]
+
+
+# #654: an SSH port per target, falling back to defaults.port, then 22.
+def _load_targets(tmp_path: Path, doc: dict) -> list[FleetTarget]:
+    path = tmp_path / "fleet.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return load_fleet_file(path).targets
+
+
+def test_a_target_port_wins_over_defaults_and_22_is_the_fallback(tmp_path: Path) -> None:
+    targets = _load_targets(
+        tmp_path,
+        {
+            "defaults": {"port": 2222},
+            "targets": [
+                {"name": "edge1", "host": "pi@10.0.0.5", "project": "demo", "port": 2200},
+                {"name": "edge2", "host": "pi@10.0.0.6", "project": "demo"},
+            ],
+        },
+    )
+    assert [t.port for t in targets] == [2200, 2222]
+    assert _load_targets(tmp_path, {"targets": [{"name": "e", "host": "pi@h", "project": "demo"}]})[0].port == 22
+
+
+@pytest.mark.parametrize("port", [0, 65536, "22", 22.5, True])
+def test_a_port_outside_1_to_65535_is_refused_naming_the_target(tmp_path: Path, port: object) -> None:
+    with pytest.raises(ValueError, match=r"Target 0 'port' must be an integer in 1-65535"):
+        _load_targets(tmp_path, {"targets": [{"name": "e", "host": "pi@h", "project": "demo", "port": port}]})
+
+
+def test_the_target_port_reaches_the_ssh_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from anolis_workbench.cli import provision_cli
+    from anolis_workbench.core import deploy, paths
+
+    seen: list[list[str]] = []
+
+    class _Result:
+        runtime_version = "0.16.0"
+
+    def fake_deploy_remote(*, executor, **_kwargs):
+        seen.append(executor._ssh_base())
+        return _Result()
+
+    monkeypatch.setattr(deploy, "deploy_remote", fake_deploy_remote)
+    monkeypatch.setattr(paths, "SYSTEMS_ROOT", tmp_path)
+    (tmp_path / "demo").mkdir()
+    target = FleetTarget(name="edge1", host="pi@10.0.0.5", project="demo", port=2222)
+
+    result = provision_cli._provision_single_target(target)
+
+    assert result.success, result.error
+    assert seen and seen[0][seen[0].index("-p") + 1] == "2222", seen
