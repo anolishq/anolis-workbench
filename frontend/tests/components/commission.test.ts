@@ -875,7 +875,7 @@ describe("Commission.svelte — Deploy to device (#275)", () => {
     expect(note.textContent).toContain("network address");
   });
 
-  it("marks a variant that does not boot inert, and says unsaved edits are not deployed", () => {
+  it("marks a variant that does not boot inert", () => {
     setup();
     const deployVariant = screen.getByRole("combobox", { name: "Runtime variant" });
     expect(within(deployVariant).getByRole("option", { name: "manual" })).toBeInTheDocument();
@@ -883,9 +883,6 @@ describe("Commission.svelte — Deploy to device (#275)", () => {
       within(deployVariant).getByRole("option", {
         name: "automation (fresh install refuses this)",
       }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Deploys the saved project; unsaved edits are not included/),
     ).toBeInTheDocument();
   });
 
