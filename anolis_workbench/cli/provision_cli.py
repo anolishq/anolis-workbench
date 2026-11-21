@@ -834,6 +834,7 @@ def _provision_single_target(
         host=host,
         user=user,
         key_file=target.key,
+        port=target.port,
     )
 
     try:
