@@ -39,13 +39,13 @@ validation remain explicit and test-backed.
    - structure + checksums
    - package-root reference integrity
    - runtime schema compatibility
-   - replay assumptions from clean extracted package root
-   - optional runtime `--check-config` replay check when runtime binary is provided
+   - references resolve inside the extracted package root, and each provider `command` is a canonical deploy token
+   - optional runtime `--check-config` config check when a runtime binary is provided (no provider is started)
 
 ## Validation Gates
 
 1. `anolis-validate <package.anpkg>`
-2. `anolis-validate <package.anpkg> --runtime-bin <runtime-binary>` (optional replay hardening)
+2. `anolis-validate <package.anpkg> --runtime-bin <runtime-binary>` (optional runtime config check)
 3. `python3 -m pytest tests -q`
 
 ## Drift Notes and Change Rule
