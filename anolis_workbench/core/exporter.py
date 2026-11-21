@@ -1,7 +1,8 @@
 """Deterministic commissioning handoff package exporter.
 
-Core export logic with no HTTP/UI dependency. Thin wrappers in server.py and
-tools/package.py should call build_package().
+Core export logic with no HTTP/UI dependency. Its callers are thin wrappers
+around build_package(): the export route in server/routes/commission.py and
+the `anolis-package` CLI in cli/package_cli.py.
 """
 
 from __future__ import annotations
