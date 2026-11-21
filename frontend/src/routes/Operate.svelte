@@ -164,6 +164,10 @@
   // request left before then describes the runtime before that POST, so it
   // never overwrites what the reply reported (wb#614).
   let estopEpoch = 0;
+  // Bumped by each mode_change event. A /v0/mode reply whose request left
+  // before then reports the mode before that change, so it never overwrites
+  // what the event said (wb#818).
+  let modeEpoch = 0;
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
   let statusSettled = $state<boolean>(false);
@@ -470,6 +474,7 @@
     ensureEventStream();
 
     const epoch = estopEpoch;
+    const modeAt = modeEpoch;
     const paramsSeq = ++paramsReadSeq;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
       fetchJson<UnknownRecord>("/v0/mode"),
@@ -481,7 +486,9 @@
       fetchJson<UnknownRecord>("/v0/automation/tree"),
     ]);
 
-    if (modeRes.status === "fulfilled") applyMode(modeRes.value);
+    if (modeAt !== modeEpoch) {
+      // A mode_change landed while this poll was in flight; it is newer.
+    } else if (modeRes.status === "fulfilled") applyMode(modeRes.value);
     else
       applyModeFailure(
         modeRes.reason,
@@ -550,10 +557,12 @@
   }
 
   async function refreshModeOnly(): Promise<void> {
+    const modeAt = modeEpoch;
     try {
-      applyMode(await fetchJson<UnknownRecord>("/v0/mode"));
+      const payload = await fetchJson<UnknownRecord>("/v0/mode");
+      if (modeAt === modeEpoch) applyMode(payload);
     } catch (err) {
-      applyModeFailure(err, runtimeStatusData?.mode ?? null);
+      if (modeAt === modeEpoch) applyModeFailure(err, runtimeStatusData?.mode ?? null);
     }
   }
 
@@ -1480,6 +1489,7 @@
 
   function consumeModeChangeEvent(payload: UnknownRecord): void {
     const m = typeof payload.new_mode === "string" ? payload.new_mode : "UNKNOWN";
+    modeEpoch += 1;
     mode = m;
     modeBadgeClass = "ok";
     if (!modeSelectorDirty) modeSelectorValue = m;
