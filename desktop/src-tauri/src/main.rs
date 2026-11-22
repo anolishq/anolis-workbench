@@ -109,6 +109,9 @@ fn start_sidecar(
         // server launched, by SIGKILL and before its safe-state shutdown; that
         // runtime keeps running when the app quits.
         .env("ANOLIS_WORKBENCH_EXIT_WITH_PARENT", "1")
+        // The server also stops when this app is gone but the bootloader is
+        // not (a crash), and when the bootloader died before its watch began.
+        .env("ANOLIS_WORKBENCH_APP_PID", std::process::id().to_string())
         .args(["--no-browser"])
         .spawn()
     {
