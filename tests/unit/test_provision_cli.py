@@ -676,3 +676,11 @@ class TestBundleHint:
         out = self._run(tmp_path, monkeypatch, capsys, sha=False)
         assert "sha256sum" not in out
         assert "sudo anolis-demo-0.16.0-x86_64/install.sh --local" in out
+
+
+@pytest.mark.parametrize("target", ["-bad@mypi", "pi@-bad", "pi@my pi"])
+def test_a_target_ssh_could_read_as_an_option_is_refused(target: str) -> None:
+    from anolis_workbench.cli.provision_cli import _parse_target
+
+    with pytest.raises(ValueError, match="Invalid target"):
+        _parse_target(target)

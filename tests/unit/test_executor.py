@@ -195,7 +195,19 @@ class TestSubprocessSSHExecutor:
     def test_ssh_base_default(self) -> None:
         executor = SubprocessSSHExecutor(host="192.168.1.10", user="pi")
         base = executor._ssh_base()
-        assert base == ["ssh", "-o", "BatchMode=yes", "-p", "22", "pi@192.168.1.10"]
+        assert base == ["ssh", "-o", "BatchMode=yes", "-p", "22", "--", "pi@192.168.1.10"]
+
+    def test_the_destination_follows_the_end_of_options(self) -> None:
+        base = SubprocessSSHExecutor(host="mypi", user="lab", key_file="/k", port=2222)._ssh_base(allocate_pty=True)
+        assert base[-2:] == ["--", "lab@mypi"]
+
+    @pytest.mark.parametrize(
+        ("user", "host"),
+        [("pi", "-bad"), ("-bad", "mypi"), ("", "mypi"), ("pi", ""), ("pi", "my pi"), ("pi", "a@b")],
+    )
+    def test_refuses_a_destination_ssh_could_read_as_an_option(self, user: str, host: str) -> None:
+        with pytest.raises(ValueError, match="cannot connect to"):
+            SubprocessSSHExecutor(host=host, user=user)
 
     def test_ssh_base_with_key_and_port(self) -> None:
         executor = SubprocessSSHExecutor(host="mypi", user="lab", key_file="/home/dev/.ssh/id_rpi", port=2222)

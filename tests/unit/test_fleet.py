@@ -66,6 +66,21 @@ class TestLoadFleetFile:
         with pytest.raises(ValueError, match="no targets"):
             load_fleet_file(fleet_file)
 
+    @pytest.mark.parametrize("host", ["-bad", "pi@-bad", "-bad@mypi", "my pi", "pi@", ""])
+    def test_a_host_ssh_could_read_as_an_option_raises(self, tmp_path: Path, host: str) -> None:
+        fleet_file = tmp_path / "fleet.yaml"
+        fleet_file.write_text(yaml.dump({"targets": [{"name": "a", "host": host}]}), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="cannot be passed to ssh"):
+            load_fleet_file(fleet_file)
+
+    @pytest.mark.parametrize("host", ["mypi", "pi@mypi", "192.168.1.10", "lab@rig-2.local"])
+    def test_a_plain_host_loads(self, tmp_path: Path, host: str) -> None:
+        fleet_file = tmp_path / "fleet.yaml"
+        fleet_file.write_text(yaml.dump({"targets": [{"name": "a", "host": host}]}), encoding="utf-8")
+
+        assert load_fleet_file(fleet_file).targets[0].host == host
+
     def test_missing_name_raises(self, tmp_path: Path) -> None:
         fleet_file = tmp_path / "fleet.yaml"
         fleet_file.write_text(yaml.dump({"targets": [{"host": "pi@x"}]}), encoding="utf-8")
