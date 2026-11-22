@@ -66,7 +66,7 @@ def _launched_here(monkeypatch: pytest.MonkeyPatch, project: str) -> _FakeRuntim
 
 
 def _found_in_running_json(monkeypatch: pytest.MonkeyPatch, project: str) -> None:
-    detached = {"running": True, "project": project, "pid": 5151, "managed": False}
+    detached = {"running": True, "project": project, "pid": 5151, "managed": False, "confirmed": True}
     monkeypatch.setattr(launcher, "_discover_running_runtime", lambda clean_stale=False: dict(detached))
 
 

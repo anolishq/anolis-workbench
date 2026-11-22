@@ -187,7 +187,8 @@ def test_a_server_that_finds_a_running_runtime_follows_its_log(
     with open(log, "wb") as out:
         runtime = subprocess.Popen([sys.executable, "-c", script], stdout=out, stderr=subprocess.STDOUT)
     try:
-        (project_dir / "running.json").write_text(json.dumps({"pid": runtime.pid, "project": "demo"}), "utf-8")
+        running = {"pid": runtime.pid, "project": "demo", "start_marker": launcher._start_marker(runtime.pid)}
+        (project_dir / "running.json").write_text(json.dumps(running), "utf-8")
         monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems)
         monkeypatch.setattr(launcher, "_discover_external_runtime", lambda: None)
         monkeypatch.setattr(

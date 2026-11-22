@@ -162,6 +162,37 @@ def _terminate_pid(pid: int, timeout_s: float = 5.0) -> None:
             pass
 
 
+def _start_marker(pid: int) -> str | None:
+    """What identifies the process `pid` beside its pid: when it started.
+
+    On Linux, the start time in clock ticks since boot from /proc/<pid>/stat,
+    which a wall-clock step does not move (psutil's create_time() adds the
+    boot time read now, which it does; review of #933). Elsewhere psutil's
+    create time, which the OS records once. None when the process is gone.
+    """
+    proc_stat = pathlib.Path(f"/proc/{pid}/stat")
+    if os.name == "posix" and pathlib.Path("/proc/self/stat").is_file():
+        try:
+            stat = proc_stat.read_text(encoding="utf-8", errors="replace")
+            return stat.rsplit(")", 1)[1].split()[19]
+        except (OSError, IndexError):
+            return None
+    try:
+        import psutil
+
+        return repr(psutil.Process(pid).create_time())
+    except Exception:  # noqa: BLE001 - psutil missing or the process gone
+        return None
+
+
+def _is_the_process(pid: int, marker: str | None) -> bool:
+    """Whether `pid` is still the process that `marker` was read from. With no
+    marker (a running.json from before #938) only the pid can be checked."""
+    if marker is None:
+        return _pid_exists(pid)
+    return _start_marker(pid) == marker
+
+
 def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
     systems_dir = paths_module.SYSTEMS_ROOT
     if not systems_dir.exists():
@@ -194,12 +225,19 @@ def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
                     pass
             continue
 
-        if _pid_exists(pid):
+        # The pid alone could be a reused one: a stored start that differs
+        # means the runtime that wrote this has exited (#938).
+        marker = data.get("start_marker")
+        marker = marker if isinstance(marker, str) else None
+        if _is_the_process(pid, marker):
             return {
                 "running": True,
                 "project": project_dir.name,
                 "pid": pid,
                 "managed": False,
+                "start_marker": marker,
+                # Written before start markers: reported, but never signalled.
+                "confirmed": marker is not None,
             }
 
         if clean_stale:
@@ -379,7 +417,8 @@ def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
 
     discovered = _discover_running_runtime(clean_stale=clean_stale)
     if discovered is not None:
-        _follow_detached(discovered["project"], discovered["pid"])
+        if discovered.get("confirmed"):
+            _follow_detached(discovered["project"], discovered["pid"], discovered.get("start_marker"))
         return discovered
 
     external = _discover_external_runtime()
@@ -851,6 +890,9 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
             "project": name,
             "started": datetime.now(timezone.utc).isoformat(),
         }
+        marker = _start_marker(proc.pid)
+        if marker is not None:
+            running_data["start_marker"] = marker
         (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
         threading.Thread(target=_read_logs, args=(proc, log_path, name), daemon=True).start()
     except BaseException:
@@ -902,6 +944,14 @@ def _stop_locked() -> None:
     detached = _discover_running_runtime(clean_stale=False)
     if detached is None:
         return
+    if not detached.get("confirmed"):
+        # A running.json from before start markers: its pid may be reused,
+        # and Stop must never signal a process it cannot confirm (#938).
+        raise RuntimeError(
+            f"Cannot confirm that pid {detached['pid']} is the runtime '{detached['project']}' started; "
+            f"it was launched by an older workbench. Stop it yourself if it is, then remove "
+            f"{running_json_path(detached['project'])}."
+        )
 
     _terminate_pid(detached["pid"])
     if not _pid_exists(detached["pid"]):
@@ -1030,7 +1080,7 @@ _detached_followers: set[tuple[str, int]] = set()
 _detached_followers_lock = threading.Lock()
 
 
-def _follow_detached(project: str, pid: int) -> None:
+def _follow_detached(project: str, pid: int, marker: str | None = None) -> None:
     key = (project, pid)
     with _detached_followers_lock:
         if key in _detached_followers:
@@ -1042,7 +1092,7 @@ def _follow_detached(project: str, pid: int) -> None:
             _follow_log(
                 running_json_path(project).parent / "logs" / "latest.log",
                 project,
-                lambda: not _pid_exists(pid),
+                lambda: not _is_the_process(pid, marker),
                 tail_bytes=64 * 1024,
             )
             _notify_sse_subscribers(project, None)
