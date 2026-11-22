@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from anolis_workbench.core import deploy, installer, projects, releases
+from anolis_workbench.core.executor import ssh_destination_problem
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
@@ -724,6 +725,8 @@ def _parse_target(target: str) -> tuple[str, str]:
     user, host = target.split("@", 1)
     if not user or not host:
         raise ValueError(f"Invalid target '{target}' — expected user@host format")
+    if problem := ssh_destination_problem(user, host):
+        raise ValueError(f"Invalid target '{target}': {problem}")
     return user, host
 
 

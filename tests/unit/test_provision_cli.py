@@ -699,3 +699,11 @@ def test_project_overrides_an_unusable_system_directory_name() -> None:
 
     args = argparse.Namespace(system="/srv/rig.v2 bench", project="rig-v2", template=None)
     assert _project_choice_error(args) is None
+
+
+@pytest.mark.parametrize("target", ["-bad@mypi", "pi@-bad", "pi@my pi"])
+def test_a_target_ssh_could_read_as_an_option_is_refused(target: str) -> None:
+    from anolis_workbench.cli.provision_cli import _parse_target
+
+    with pytest.raises(ValueError, match="Invalid target"):
+        _parse_target(target)

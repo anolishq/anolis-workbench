@@ -237,10 +237,34 @@ class LocalExecutor(Executor):
         return Path(path).exists()
 
 
+def ssh_destination_problem(user: str, host: str) -> str | None:
+    """Why ``user@host`` cannot be handed to ssh, or None when it can.
+
+    ssh reads an argument that begins with '-' as an option, so a host or
+    user taken from a fleet file or a --target could set one. Both must be
+    non-empty, must not begin with '-', and must hold no whitespace or '@'
+    beyond the one separating them.
+    """
+    return ssh_part_problem("user", user) or ssh_part_problem("host", host)
+
+
+def ssh_part_problem(what: str, value: object) -> str | None:
+    """Why one part of an ssh destination (a user or a host) is unusable."""
+    if not isinstance(value, str) or not value:
+        return f"the {what} is empty"
+    if value.startswith("-"):
+        return f"the {what} {value!r} begins with '-'"
+    if "@" in value or any(ch.isspace() for ch in value):
+        return f"the {what} {value!r} holds '@' or whitespace"
+    return None
+
+
 class SubprocessSSHExecutor(Executor):
     """Executes operations on a remote machine via system ssh/scp."""
 
     def __init__(self, host: str, user: str, *, key_file: str | None = None, port: int = 22):
+        if problem := ssh_destination_problem(user, host):
+            raise ValueError(f"cannot connect to {user}@{host}: {problem}")
         self.host = host
         self.user = user
         self.key_file = key_file
@@ -252,7 +276,8 @@ class SubprocessSSHExecutor(Executor):
             args += ["-i", self.key_file]
         if allocate_pty:
             args += ["-t", "-t"]
-        args.append(f"{self.user}@{self.host}")
+        # "--" ends ssh's options: the destination is never read as one.
+        args += ["--", f"{self.user}@{self.host}"]
         return args
 
     def run(
