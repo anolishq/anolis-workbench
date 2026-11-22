@@ -13,6 +13,12 @@ Historical note:
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- Deploy refuses a machine profile whose `components.runtime.version` is not
+  a release number `X.Y.Z`, before it downloads anything. A pin such as
+  `latest` or `0.16.0-rc.1` used to be accepted here and failed later.
+
 ### Fixed
 
 - **A trip-recovery step sends the bool the machine profile gives**. The

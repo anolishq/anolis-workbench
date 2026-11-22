@@ -384,11 +384,12 @@ def test_deploy_proceeds_quietly_when_the_pin_is_not_older(
 def test_deploy_refuses_a_pin_that_is_not_xyz_over_an_installed_runtime(
     project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The machine-profile schema takes any non-empty version string.
+    # The machine-profile schema takes any non-empty version string; deploy
+    # refuses one that is not a release number before it fetches anything.
     _pin_runtime(project_dir, "latest")
     _refuse_fetch(monkeypatch)
     executor = InstalledRuntimeExecutor("anolis-runtime 0.1.50\n")
-    with pytest.raises(deploy.DeployError, match=r"pin 'latest' is not X\.Y\.Z\. Nothing was deployed\."):
+    with pytest.raises(deploy.DeployError, match=r"must be a release number X\.Y\.Z, got 'latest'"):
         _deploy(False, project_dir, executor, [])
     assert executor.files == {}
 
@@ -1657,3 +1658,45 @@ def test_observability_lines_carry_the_failed_reset_warning() -> None:
         "⚠ observability: could not reset Grafana's admin password; GRAFANA_ADMIN_PASSWORD in "
         "/etc/anolis/observability.env may not log in"
     )
+
+
+# ---------------------------------------------------------------------------
+# The runtime version must be a plain release number before any download
+# ---------------------------------------------------------------------------
+
+_NOT_A_RELEASE = ["0.1.27-rc.1", "v0.1.27", "0.1", "0.1.27/", "0.1.27?x", " 0.1.27", "0.1.27\n", ""]
+
+
+@pytest.mark.parametrize("version", _NOT_A_RELEASE)
+def test_require_release_version_refuses_anything_but_x_y_z(version: str) -> None:
+    from anolis_workbench.core.release_verify import ReleaseVerificationError, require_release_version
+
+    with pytest.raises(ReleaseVerificationError, match="must be a release number X.Y.Z"):
+        require_release_version(version, "the runtime version")
+
+
+def test_require_release_version_accepts_x_y_z() -> None:
+    from anolis_workbench.core.release_verify import require_release_version
+
+    assert require_release_version("0.16.0", "v") == "0.16.0"
+    assert require_release_version("10.0.123", "v") == "10.0.123"
+
+
+@pytest.mark.parametrize("version", [v for v in _NOT_A_RELEASE if v])
+def test_fetch_install_sh_downloads_nothing_for_a_version_that_is_not_a_release(
+    version: str, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    urls: list[str] = []
+    monkeypatch.setattr(deploy.requests, "get", lambda url, **kwargs: urls.append(url))
+    with pytest.raises(deploy.DeployError, match="must be a release number X.Y.Z"):
+        deploy.fetch_install_sh(version, tmp_path)
+    assert urls == []
+
+
+@pytest.mark.parametrize("version", ["0.1.27-rc.1", "0.1.27/"])
+def test_materialize_refuses_a_pinned_runtime_version_that_is_not_a_release(
+    version: str, project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    _pin_runtime(project_dir, version)
+    with pytest.raises(deploy.DeployError, match="components.runtime.version must be a release number X.Y.Z"):
+        deploy.materialize_project_dir(project_dir, tmp_path / "out")
