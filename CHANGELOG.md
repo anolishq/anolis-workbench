@@ -50,10 +50,10 @@ Upgrade notes:
   check refused whitespace, `@` and a leading `-`, but let through a terminal
   escape sequence, and a NUL stopped the command with an unhandled error.
 
-- **Export rewrites every `--config` in a provider's args.** Only the first
-  was rewritten, so `--config=a.yaml --config b.yaml` left the host path
-  `b.yaml` in the package. The packaged args now hold one `--config` pair,
-  where the first one stood.
+- **Export rewrites every `--config` in a provider's args, in either form.**
+  Only the first two-token `--config <path>` was rewritten, so a
+  `--config=<path>`, or a second `--config`, kept a host path in the package.
+  The packaged args now hold one `--config` pair, where the first one stood.
 
 - **A runtime the workbench launched keeps its providers after the server
   stops.** The runtime's output was a pipe the server read. Once the server
@@ -107,10 +107,6 @@ Upgrade notes:
   file, and a package with an encrypted entry or an unsupported compression
   method fails validation as unreadable. Both used to end in a traceback
   from the CLI.
-
-- **Export rewrites a provider's `--config=<path>` too.** Only the two-token
-  `--config <path>` form was rewritten to the packaged config, so the
-  one-token form stayed beside an appended second `--config` pair.
 
 - **Downloading a bundle that newer exports removed says so.** Only the
   latest two exported bundles are kept. An older job still reported its
