@@ -135,7 +135,10 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     }
     files.update(provider_files)
     for rel_path, source_path in behavior_rel_paths.items():
-        files[rel_path] = source_path.read_bytes()
+        try:
+            files[rel_path] = source_path.read_bytes()
+        except OSError as exc:
+            raise ExportError(f"Behavior file {source_path} could not be read: {exc.strerror or exc}") from exc
 
     _assert_no_secret_leak(files)
     files["meta/checksums.sha256"] = _checksums_file_bytes(files)

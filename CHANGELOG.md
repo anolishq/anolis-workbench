@@ -25,6 +25,12 @@ Upgrade notes:
   `anolis-validate` does since #666. A project whose provider `command` was
   edited to a host path exported a package its own validator then rejected.
 
+- **An export or validation that cannot read its input says so.** A
+  behavior file the exporter cannot read is an export error naming the
+  file, and a package with an encrypted entry or an unsupported compression
+  method fails validation as unreadable. Both used to end in a traceback
+  from the CLI.
+
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
   dot, or `/`. It used to create a project the workbench then rejected.
