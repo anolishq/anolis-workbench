@@ -29,6 +29,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **A project name with a trailing newline is refused.** The name check let
+  `$` match before a final newline, so `rig` followed by a newline passed and
+  reached the paths and commands built from the name.
+
 - **An ssh target with a control character is refused.** The user or host
   check refused whitespace, `@` and a leading `-`, but let through a terminal
   escape sequence, and a NUL stopped the command with an unhandled error.
