@@ -15,6 +15,7 @@ import socket
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -378,6 +379,7 @@ def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
 
     discovered = _discover_running_runtime(clean_stale=clean_stale)
     if discovered is not None:
+        _follow_detached(discovered["project"], discovered["pid"])
         return discovered
 
     external = _discover_external_runtime()
@@ -951,10 +953,25 @@ def _publish_log_line(project: str, line: str) -> None:
     _notify_sse_subscribers(project, line)
 
 
-def _read_logs(proc: subprocess.Popen, log_path: pathlib.Path, project: str, poll_s: float = 0.2) -> None:
-    """Follow the log file the runtime writes until the runtime exits."""
+def _follow_log(
+    log_path: pathlib.Path,
+    project: str,
+    exited: Callable[[], bool],
+    poll_s: float = 0.2,
+    tail_bytes: int | None = None,
+) -> None:
+    """Publish each line the runtime writes to its log until `exited()` is true.
+
+    With `tail_bytes`, start that far from the end, at the next full line, so
+    a log a runtime has written for weeks is not replayed whole.
+    """
     try:
         with open(log_path, "rb") as log:
+            if tail_bytes is not None:
+                size = log.seek(0, os.SEEK_END)
+                log.seek(max(0, size - tail_bytes))
+                if size > tail_bytes:
+                    log.readline()  # the rest of a cut line
             partial = b""
             while True:
                 chunk = log.readline()
@@ -964,16 +981,52 @@ def _read_logs(proc: subprocess.Popen, log_path: pathlib.Path, project: str, pol
                         _publish_log_line(project, partial.decode("utf-8", errors="replace"))
                         partial = b""
                     continue
-                if proc.poll() is not None:
+                if exited():
                     rest = partial + log.read()
                     for line in rest.decode("utf-8", errors="replace").splitlines(keepends=True):
                         _publish_log_line(project, line)
-                    break
+                    return
                 time.sleep(poll_s)
     except OSError:
-        proc.wait()
+        while not exited():
+            time.sleep(poll_s)
+
+
+def _read_logs(proc: subprocess.Popen, log_path: pathlib.Path, project: str, poll_s: float = 0.2) -> None:
+    """Follow the log file the runtime writes until the runtime exits."""
+    _follow_log(log_path, project, lambda: proc.poll() is not None, poll_s)
     _notify_sse_subscribers(project, None)  # sentinel: the runtime has exited
     _cleanup_after_exit(proc)
+
+
+# A runtime this server did not start, found through running.json: a server
+# reopened after the desktop app quit followed nothing, and its log pane
+# stayed empty (review of #932). One follower per (project, pid).
+_detached_followers: set[tuple[str, int]] = set()
+_detached_followers_lock = threading.Lock()
+
+
+def _follow_detached(project: str, pid: int) -> None:
+    key = (project, pid)
+    with _detached_followers_lock:
+        if key in _detached_followers:
+            return
+        _detached_followers.add(key)
+
+    def _run() -> None:
+        try:
+            _follow_log(
+                running_json_path(project).parent / "logs" / "latest.log",
+                project,
+                lambda: not _pid_exists(pid),
+                tail_bytes=64 * 1024,
+            )
+            _notify_sse_subscribers(project, None)
+        finally:
+            with _detached_followers_lock:
+                _detached_followers.discard(key)
+
+    threading.Thread(target=_run, name=f"log-follow-{project}", daemon=True).start()
 
 
 def _notify_sse_subscribers(project: str, line) -> None:

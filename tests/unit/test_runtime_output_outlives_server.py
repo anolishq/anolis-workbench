@@ -160,3 +160,55 @@ def test_the_runtime_log_is_opened_for_append(project: pathlib.Path) -> None:
     finally:
         (project.parent.parent / "go").write_text("", encoding="utf-8")
         proc.wait(timeout=10)
+
+
+def test_a_server_that_finds_a_running_runtime_follows_its_log(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #932: only the server that launched a runtime followed its
+    log. After a quit and reopen, the new server found the runtime through
+    running.json and showed an empty log pane."""
+    import json
+    import subprocess
+
+    systems = tmp_path / "systems"
+    project_dir = systems / "demo"
+    (project_dir / "logs").mkdir(parents=True)
+    log = project_dir / "logs" / "latest.log"
+    go = tmp_path / "go"
+    script = (
+        "import pathlib, sys, time\n"
+        "print('written before the reopen', flush=True)\n"
+        f"go = pathlib.Path({str(go)!r})\n"
+        "while not go.exists(): time.sleep(0.02)\n"
+        "print('written after the reopen', flush=True)\n"
+        "time.sleep(0.5)\n"
+    )
+    with open(log, "wb") as out:
+        runtime = subprocess.Popen([sys.executable, "-c", script], stdout=out, stderr=subprocess.STDOUT)
+    try:
+        (project_dir / "running.json").write_text(json.dumps({"pid": runtime.pid, "project": "demo"}), "utf-8")
+        monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems)
+        monkeypatch.setattr(launcher, "_discover_external_runtime", lambda: None)
+        monkeypatch.setattr(
+            launcher, "_state", dict(launcher._state, process=None, project=None, log_lines_by_project={})
+        )
+        deadline = time.monotonic() + 5
+        while "written before" not in log.read_text("utf-8") and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+        status = launcher.get_status()  # what the reopened app asks first
+        assert status["running"] and status["active_project"] == "demo"
+        go.write_text("", encoding="utf-8")
+
+        def lines() -> list[str]:
+            with launcher._state_lock:
+                return list(launcher._state["log_lines_by_project"].get("demo", []))
+
+        deadline = time.monotonic() + 5
+        while "written after the reopen\n" not in lines() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert "written before the reopen\n" in lines()
+        assert "written after the reopen\n" in lines()
+    finally:
+        runtime.wait(10)
