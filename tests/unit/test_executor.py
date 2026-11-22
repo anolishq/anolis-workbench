@@ -209,6 +209,16 @@ class TestSubprocessSSHExecutor:
         with pytest.raises(ValueError, match="cannot connect to"):
             SubprocessSSHExecutor(host=host, user=user)
 
+    # Review of #919: a control character is not whitespace to str.isspace, so
+    # an escape sequence passed, and a NUL raised an uncaught ValueError in Popen.
+    @pytest.mark.parametrize(
+        ("user", "host"),
+        [("pi", "my\x1b[2Jpi"), ("p\x00i", "mypi"), ("pi", "my\x7fpi"), ("pi", "my\x08pi")],
+    )
+    def test_refuses_a_destination_with_a_control_character(self, user: str, host: str) -> None:
+        with pytest.raises(ValueError, match="control character"):
+            SubprocessSSHExecutor(host=host, user=user)
+
     def test_ssh_base_with_key_and_port(self) -> None:
         executor = SubprocessSSHExecutor(host="mypi", user="lab", key_file="/home/dev/.ssh/id_rpi", port=2222)
         base = executor._ssh_base()
