@@ -40,6 +40,9 @@ class ProvisionJob:
     status: str = "running"  # running | done | failed
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    # A finished bundle's file name, kept after newer exports prune the
+    # bundle itself, so its download can say so (review of #906).
+    pruned_bundle: str | None = None
 
 
 _jobs: dict[str, ProvisionJob] = {}
@@ -513,7 +516,11 @@ def _drop_bundle(job_id: str) -> None:
 def _keep_latest_bundles() -> None:
     with _bundle_artifacts_lock:
         done = list(_bundle_artifacts)
-    for job_id in done[: max(0, len(done) - _KEEP_BUNDLES)]:
+        pruned = {job_id: _bundle_artifacts[job_id].name for job_id in done[: max(0, len(done) - _KEEP_BUNDLES)]}
+    for job_id, filename in pruned.items():
+        job = _get_job(job_id)
+        if job is not None:
+            job.pruned_bundle = filename
         _drop_bundle(job_id)
 
 
@@ -553,7 +560,6 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         with _bundle_artifacts_lock:
             _bundle_artifacts[job.job_id] = tarball_path
             _bundle_dirs[job.job_id] = tmp_dir
-        _keep_latest_bundles()
 
         job.events.append(
             {
@@ -563,6 +569,9 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             }
         )
         job.status = "done"
+        # Pruned only once this job has said its bundle is ready, so no
+        # export loses its bundle before announcing it.
+        _keep_latest_bundles()
     except Exception as exc:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -608,6 +617,15 @@ def download_bundle(handler: Any, job_id: str) -> None:
     with _bundle_artifacts_lock:
         tarball_path = _bundle_artifacts.get(job_id)
 
+    if tarball_path is None and job.pruned_bundle is not None:
+        handler._json(
+            410,
+            {
+                "error": f"Bundle {job.pruned_bundle} was removed: only the latest {_KEEP_BUNDLES} "
+                "bundles are kept. Export it again."
+            },
+        )
+        return
     if tarball_path is None or not tarball_path.exists():
         handler._json(404, {"error": "Bundle artifact not found"})
         return

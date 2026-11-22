@@ -97,3 +97,31 @@ def test_a_running_job_is_never_evicted(tmp_root: pathlib.Path, monkeypatch: pyt
     for _ in range(3):
         _export(monkeypatch)
     assert running.job_id in provision._jobs
+
+
+class _Handler:
+    def __init__(self) -> None:
+        self.sent: list[tuple[int, dict[str, Any]]] = []
+
+    def _json(self, code: int, body: dict[str, Any]) -> None:
+        self.sent.append((code, body))
+
+
+def test_a_pruned_bundle_download_says_it_was_removed(tmp_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review of #906: a job that says its bundle is ready answered a bare 404
+    once two later exports had pruned it. It now says why, with 410."""
+    monkeypatch.setattr(provision, "_jobs", {})
+    jobs = [_export(monkeypatch) for _ in range(3)]
+    for job in jobs:
+        with provision._jobs_lock:
+            provision._jobs[job.job_id] = job
+    provision._keep_latest_bundles()
+
+    first = jobs[0]
+    assert first.status == "done"
+    assert first.job_id not in provision._bundle_artifacts
+    handler = _Handler()
+    provision.download_bundle(handler, first.job_id)
+    assert handler.sent and handler.sent[0][0] == 410
+    assert "anolis-demo-x86_64.tar.gz was removed" in handler.sent[0][1]["error"]
+    assert "Export it again" in handler.sent[0][1]["error"]

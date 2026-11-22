@@ -29,21 +29,36 @@ Upgrade notes:
 
 ### Fixed
 
+- **A function's call result stays with that function across a restart.**
+  Operate keyed the result beside each form by device and function id only,
+  so when a rebuilt provider gave an id to a different function, the new one
+  showed the old one's `Accepted at` or error. Results now use the same
+  device, id and name key as the form values (#839).
+
+- **Setting the dev-launch variant no longer leaves a false unsaved mark.**
+  Commission saves the variant to disk, but the shell still compared the
+  draft with the project as it was before. Undoing a Compose edit afterwards
+  kept the unsaved mark and its prompts.
+
 - **Fleet provisioning honours a target's SSH port.** `fleet.yaml` takes
   `port` on a target or under `defaults`. It used to drop the key without a
   warning and connect on 22, overriding `~/.ssh/config`. A port outside
   1-65535 is refused (#654).
+
 - **Export keeps every behaviour the machine profile declares.** It kept
   only the manual variant's tree and dropped the rest from
   `runtime/behaviors/` and the packaged profile. Two declared trees with the
   same file name are refused, since one would overwrite the other (#675).
+
 - **A long-running server no longer keeps every bundle export.** A failed
   export removes its staging directory, the latest two bundles are kept and
   older ones removed, and at most 100 finished jobs are kept (#674).
+
 - **Deploy checks a project's path tokens only against install.sh 0.10.2
   and earlier.** From anolis 0.11.0 install.sh rewrites every project path
   to the directory it installs, so the check refused projects that install
   correctly (#821).
+
 - **The release workflow accepts only an `X.Y.Z` version.** A suffixed
   version could never match `version-locations.txt`, so it failed later in
   the lockstep check. Mark a prerelease with the prerelease input (#675).
@@ -61,6 +76,16 @@ Upgrade notes:
 - **Export rewrites a provider's `--config=<path>` too.** Only the two-token
   `--config <path>` form was rewritten to the packaged config, so the
   one-token form stayed beside an appended second `--config` pair.
+
+- **Downloading a bundle that newer exports removed says so.** Only the
+  latest two exported bundles are kept. An older job still reported its
+  bundle ready, then its download answered a bare 404; it now answers 410,
+  naming the file and saying to export it again. A bundle is also kept until
+  its own job has said it is ready.
+
+- **Operate keeps a mode you set over an older poll's reply.** With the
+  event stream down, a status poll that left before you set the mode could
+  write the old mode back when it settled.
 
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
