@@ -38,6 +38,9 @@ class ProvisionJob:
 
     job_id: str
     status: str = "running"  # running | done | failed
+    # install | remote | bundle, so the desktop app can name what a quit
+    # would cut off (review of #933).
+    kind: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     # A finished bundle's file name, kept after newer exports prune the
@@ -57,8 +60,8 @@ def _get_job(job_id: str) -> ProvisionJob | None:
         return _jobs.get(job_id)
 
 
-def _create_job() -> ProvisionJob:
-    job = ProvisionJob(job_id=uuid.uuid4().hex[:12])
+def _create_job(kind: str = "") -> ProvisionJob:
+    job = ProvisionJob(job_id=uuid.uuid4().hex[:12], kind=kind)
     with _jobs_lock:
         finished = [jid for jid, j in _jobs.items() if j.status in ("done", "failed")]
         # Room for the job being created, so once it finishes there are at
@@ -298,7 +301,7 @@ def start_install(handler: Any) -> None:
     password = bytearray(secret.encode()) if secret else None
     del secret
 
-    job = _create_job()
+    job = _create_job("install")
     thread = threading.Thread(target=_run_install_job, args=(job, params, password), daemon=True)
     try:
         thread.start()
@@ -323,7 +326,7 @@ def start_remote(handler: Any) -> None:
     if _reject_invalid_names(handler, params):
         return
 
-    job = _create_job()
+    job = _create_job("remote")
     thread = threading.Thread(target=_run_remote_job, args=(job, params), daemon=True)
     thread.start()
 
@@ -596,11 +599,22 @@ def start_bundle(handler: Any) -> None:
     if _reject_invalid_names(handler, params):
         return
 
-    job = _create_job()
+    job = _create_job("bundle")
     thread = threading.Thread(target=_run_bundle_job, args=(job, params), daemon=True)
     thread.start()
 
     handler._json(202, {"job_id": job.job_id})
+
+
+def get_active(handler: Any) -> None:
+    """GET /api/provision/active — the jobs still running, with their kind.
+
+    The desktop app asks before it quits: quitting ends this server, and a
+    deploy or export it runs ends with it (review of #933).
+    """
+    with _jobs_lock:
+        running = [{"job_id": j.job_id, "kind": j.kind} for j in _jobs.values() if j.status == "running"]
+    handler._json(200, {"running": running})
 
 
 def download_bundle(handler: Any, job_id: str) -> None:

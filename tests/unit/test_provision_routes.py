@@ -348,3 +348,20 @@ class TestCheckTarget:
         assert handler._responses[0][0] == status
         ssh.assert_not_called()
         check.assert_not_called()
+
+
+def test_active_lists_only_running_jobs_with_their_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The desktop app asks this before quitting, since a quit ends the server
+    and any deploy it runs (review of #933)."""
+    monkeypatch.setattr(provision, "_jobs", {})
+    remote = provision._create_job("remote")
+    bundle = provision._create_job("bundle")
+    done = provision._create_job("install")
+    done.status = "done"
+    handler = FakeHandler()
+    provision.get_active(handler)
+    status, body = handler._responses[0]
+    assert status == 200
+    assert sorted((j["job_id"], j["kind"]) for j in body["running"]) == sorted(
+        [(remote.job_id, "remote"), (bundle.job_id, "bundle")]
+    )
