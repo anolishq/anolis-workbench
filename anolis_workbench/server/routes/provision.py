@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import shutil
 import threading
 import uuid
@@ -614,7 +615,9 @@ def get_active(handler: Any) -> None:
     """
     with _jobs_lock:
         running = [{"job_id": j.job_id, "kind": j.kind} for j in _jobs.values() if j.status == "running"]
-    handler._json(200, {"running": running})
+    # The launch id lets the desktop app tell its own server's jobs from
+    # another workbench's on the port (review of #947).
+    handler._json(200, {"running": running, "launch_id": os.environ.get("ANOLIS_WORKBENCH_LAUNCH_ID") or None})
 
 
 def download_bundle(handler: Any, job_id: str) -> None:

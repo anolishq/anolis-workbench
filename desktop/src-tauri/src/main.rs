@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -206,9 +207,19 @@ fn is_own_workbench(response: &str, launch_id: &str) -> bool {
 /// dialog then requests is let through.
 static QUIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
 
+/// Set while the quit confirmation is showing, so a second close does not
+/// open a second one (review of #947).
+static QUIT_DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// This launch's id, which the sidecar echoes. The quit check asks only that
+/// server: another workbench answering on the port runs no job of ours
+/// (review of #947).
+static LAUNCH_ID: OnceLock<String> = OnceLock::new();
+
 /// The kinds of the server's running jobs, from a response to
-/// GET /api/provision/active; empty for anything else.
-fn running_job_kinds(response: &str) -> Vec<String> {
+/// GET /api/provision/active from the sidecar this launch started; empty for
+/// anything else, including another workbench's answer.
+fn running_job_kinds(response: &str, launch_id: &str) -> Vec<String> {
     let status_ok = response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200");
     let Some((_, body)) = response.split_once("\r\n\r\n").filter(|_| status_ok) else {
         return Vec::new();
@@ -216,6 +227,9 @@ fn running_job_kinds(response: &str) -> Vec<String> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
+    if json.get("launch_id").and_then(serde_json::Value::as_str) != Some(launch_id) {
+        return Vec::new();
+    }
     json.get("running")
         .and_then(serde_json::Value::as_array)
         .map(|jobs| {
@@ -234,6 +248,9 @@ fn running_job_kinds(response: &str) -> Vec<String> {
 /// Asks the server which jobs are still running. A server that does not
 /// answer has nothing a quit could cut off that the app could name.
 fn running_jobs_once() -> Vec<String> {
+    let Some(launch_id) = LAUNCH_ID.get() else {
+        return Vec::new();
+    };
     let addr = SocketAddr::from(([127, 0, 0, 1], WORKBENCH_PORT));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
         return Vec::new();
@@ -250,7 +267,7 @@ fn running_jobs_once() -> Vec<String> {
     if stream.read_to_string(&mut response).is_err() {
         return Vec::new();
     }
-    running_job_kinds(&response)
+    running_job_kinds(&response, launch_id)
 }
 
 /// What the quit confirmation says about the jobs a quit would end.
@@ -268,34 +285,125 @@ a deploy stops partway on the target. Quit anyway?"
     )
 }
 
-/// Before the app quits, asks for confirmation when the server still runs a
-/// deploy or export. Quitting ends the server, and since wb#933 its jobs with
-/// it (review of #933). Returns true when the quit should be held.
-fn hold_quit_for_jobs(app: &AppHandle) -> bool {
+/// Quits the app, first asking for confirmation when this launch's server
+/// still runs a deploy or export: quitting ends the server, and since wb#933
+/// its jobs with it. The server is asked off the main thread, so a slow one
+/// does not freeze the window, and only one confirmation shows at a time
+/// (review of #947).
+fn request_quit(app: &AppHandle) {
     if QUIT_CONFIRMED.load(Ordering::SeqCst) {
-        return false;
+        app.exit(0);
+        return;
     }
-    let kinds = running_jobs_once();
-    if kinds.is_empty() {
-        return false;
+    if QUIT_DIALOG_OPEN.load(Ordering::SeqCst) {
+        return;
     }
     let handle = app.clone();
-    app.dialog()
-        .message(quit_warning(&kinds))
-        .title("Quit Anolis Workbench?")
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Quit anyway".to_string(),
-            "Keep running".to_string(),
-        ))
-        .kind(MessageDialogKind::Warning)
-        .show(move |quit| {
-            if quit {
-                QUIT_CONFIRMED.store(true, Ordering::SeqCst);
-                handle.exit(0);
+    thread::spawn(move || {
+        let kinds = running_jobs_once();
+        if kinds.is_empty() {
+            QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+            handle.exit(0);
+            return;
+        }
+        if QUIT_DIALOG_OPEN.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let main = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            let mut dialog = main
+                .dialog()
+                .message(quit_warning(&kinds))
+                .title("Quit Anolis Workbench?")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Quit anyway".to_string(),
+                    "Keep running".to_string(),
+                ))
+                .kind(MessageDialogKind::Warning);
+            if let Some(window) = main.get_webview_window("main") {
+                dialog = dialog.parent(&window);
             }
+            let exit = main.clone();
+            dialog.show(move |quit| {
+                QUIT_DIALOG_OPEN.store(false, Ordering::SeqCst);
+                if quit {
+                    QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+                    exit.exit(0);
+                }
+            });
         });
-    true
+    });
 }
+
+/// The app menu on macOS: the default one, with a Quit item that goes
+/// through `request_quit`. The default Quit sends `terminate:`, which tao
+/// turns straight into an exit, so Cmd-Q and Dock > Quit skipped the
+/// confirmation (review of #947). Built from the cross-platform menu API so
+/// it compiles everywhere; installed on macOS only.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn app_menu_with_confirmed_quit(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let name = app.package_info().name.clone();
+    let quit = MenuItem::with_id(
+        app,
+        QUIT_MENU_ID,
+        format!("Quit {name}"),
+        true,
+        Some("CmdOrCtrl+Q"),
+    )?;
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                name,
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::close_window(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
+
+const QUIT_MENU_ID: &str = "anolis-quit";
 
 fn check_health_once(launch_id: &str) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], WORKBENCH_PORT));
@@ -366,7 +474,12 @@ fn fail_startup(app: &AppHandle, message: String) {
         .title("Anolis Workbench startup failed")
         .buttons(MessageDialogButtons::Ok)
         .kind(MessageDialogKind::Error)
-        .show(move |_| handle.exit(1));
+        .show(move |_| {
+            // This launch's server never started: nothing of ours to ask about
+            // (review of #947).
+            QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+            handle.exit(1);
+        });
 }
 
 /// Builds the main window from tauri.conf.json, where it is not created at
@@ -413,6 +526,14 @@ fn main() {
             app.manage(SidecarState::default());
 
             let launch_id = new_launch_id();
+            let _ = LAUNCH_ID.set(launch_id.clone());
+            #[cfg(target_os = "macos")]
+            app.set_menu(app_menu_with_confirmed_quit(app.handle())?)?;
+            app.on_menu_event(|app, event| {
+                if event.id() == QUIT_MENU_ID {
+                    request_quit(app);
+                }
+            });
             let exit = Arc::new(Mutex::new(SidecarExit::default()));
             if let Err(reason) = start_sidecar(app.handle(), &launch_id, exit.clone()) {
                 fail_startup(
@@ -460,15 +581,17 @@ The installation may be incomplete. Reinstalling the app may fix it."
                 event: WindowEvent::CloseRequested { api, .. },
                 ..
             } => {
-                if hold_quit_for_jobs(app_handle) {
+                if !QUIT_CONFIRMED.load(Ordering::SeqCst) {
                     api.prevent_close();
+                    request_quit(app_handle);
                 }
             }
             RunEvent::ExitRequested { api, .. } => {
-                if hold_quit_for_jobs(app_handle) {
-                    api.prevent_exit();
-                } else {
+                if QUIT_CONFIRMED.load(Ordering::SeqCst) {
                     stop_sidecar(app_handle);
+                } else {
+                    api.prevent_exit();
+                    request_quit(app_handle);
                 }
             }
             RunEvent::Exit => stop_sidecar(app_handle),
@@ -482,13 +605,17 @@ mod tests {
 
     #[test]
     fn running_job_kinds_reads_the_active_route() {
-        let body = r#"{"running": [{"job_id": "a", "kind": "remote"}, {"job_id": "b", "kind": "bundle"}]}"#;
+        let body = r#"{"launch_id": "ours", "running": [{"job_id": "a", "kind": "remote"}, {"job_id": "b", "kind": "bundle"}]}"#;
         let ok = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{body}");
-        assert_eq!(running_job_kinds(&ok), vec!["remote", "bundle"]);
-        let none = "HTTP/1.1 200 OK\r\n\r\n{\"running\": []}";
-        assert!(running_job_kinds(none).is_empty());
-        assert!(running_job_kinds("HTTP/1.1 404 Not Found\r\n\r\n{}").is_empty());
-        assert!(running_job_kinds("").is_empty());
+        assert_eq!(running_job_kinds(&ok, "ours"), vec!["remote", "bundle"]);
+        // Another workbench on the port: its jobs are not ours (review of #947).
+        assert!(running_job_kinds(&ok, "another").is_empty());
+        let unnamed = "HTTP/1.1 200 OK\r\n\r\n{\"running\": [{\"kind\": \"remote\"}]}";
+        assert!(running_job_kinds(unnamed, "ours").is_empty());
+        let none = "HTTP/1.1 200 OK\r\n\r\n{\"launch_id\": \"ours\", \"running\": []}";
+        assert!(running_job_kinds(none, "ours").is_empty());
+        assert!(running_job_kinds("HTTP/1.1 404 Not Found\r\n\r\n{}", "ours").is_empty());
+        assert!(running_job_kinds("", "ours").is_empty());
     }
 
     #[test]
