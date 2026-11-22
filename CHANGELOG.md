@@ -21,6 +21,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **Export rewrites a provider's `--config=<path>` too.** Only the two-token
+  `--config <path>` form was rewritten to the packaged config, so the
+  one-token form stayed beside an appended second `--config` pair.
+
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
   dot, or `/`. It used to create a project the workbench then rejected.
