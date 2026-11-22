@@ -29,6 +29,13 @@ Upgrade notes:
 
 ### Fixed
 
+- **A runtime the workbench launched keeps its providers after the server
+  stops.** The runtime's output was a pipe the server read. Once the server
+  exited, as it now does when the desktop app quits, nothing read it, and a
+  provider sharing the runtime's stderr died on its next log line. The
+  runtime now writes `logs/latest.log` itself and the server follows the
+  file. The previous run's log is kept as `logs/previous.log`.
+
 - **A function's call result stays with that function across a restart.**
   Operate keyed the result beside each form by device and function id only,
   so when a rebuilt provider gave an id to a different function, the new one
