@@ -6,14 +6,23 @@ path is fixed in code rather than in the environment. Processes the
 workbench starts (a dev-launched runtime and, through it, providers whose
 executables come from a project's host paths; preflight checks; install.sh;
 ssh) have no use for it, so it, and systemd's CREDENTIALS_DIRECTORY should a
-unit ever set one, are withheld from their environment.
+unit ever set one, are withheld from their environment, as are the desktop
+app's parent-watch variables.
 """
 
 from __future__ import annotations
 
 import os
 
-WITHHELD = ("ANOLIS_WORKBENCH_RUNTIME_TOKEN", "CREDENTIALS_DIRECTORY")
+# The desktop app's watch variables are for its own server: a process
+# inheriting them, such as a server started from a runtime's environment,
+# would stop itself (review of #933).
+WITHHELD = (
+    "ANOLIS_WORKBENCH_RUNTIME_TOKEN",
+    "CREDENTIALS_DIRECTORY",
+    "ANOLIS_WORKBENCH_EXIT_WITH_PARENT",
+    "ANOLIS_WORKBENCH_APP_PID",
+)
 
 
 def child_env() -> dict[str, str]:
