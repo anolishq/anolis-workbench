@@ -21,7 +21,7 @@ from anolis_workbench.core import paths as paths_module
 SYSTEMS_ROOT = paths_module.SYSTEMS_ROOT
 TEMPLATES_ROOT = paths_module.TEMPLATES_ROOT
 
-NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+NAME_RE = re.compile(r"[a-zA-Z0-9_-]{1,64}")
 
 # The server is threaded, and every write path here is read-modify-write over a
 # whole project directory — the profile, its variant configs and its provider
@@ -76,7 +76,7 @@ class ReadOnlyProjectError(ValueError):
 
 
 def validate_name(name: str) -> "str | None":
-    if not NAME_RE.match(name or ""):
+    if not NAME_RE.fullmatch(name or ""):
         return "Project name must be 1-64 characters: letters, digits, hyphens, underscores only."
     return None
 
