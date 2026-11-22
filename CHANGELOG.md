@@ -29,6 +29,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **An ssh target with a control character is refused.** The user or host
+  check refused whitespace, `@` and a leading `-`, but let through a terminal
+  escape sequence, and a NUL stopped the command with an unhandled error.
+
 - **A runtime the workbench launched keeps its providers after the server
   stops.** The runtime's output was a pipe the server read. Once the server
   exited, as it now does when the desktop app quits, nothing read it, and a
