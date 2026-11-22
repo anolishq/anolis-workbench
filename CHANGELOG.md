@@ -155,8 +155,10 @@ Upgrade notes:
   too. The next workbench start finds it and shows its log from the last
   64 KiB on. While a deploy or a bundle export runs, closing the window or
   quitting from the app asks first: quitting anyway ends the job, and a
-  deploy stops partway on its target. macOS Cmd-Q and Dock > Quit, logging
-  out, shutting down and signals still end it without asking (#952).
+  deploy stops partway on its target; on macOS the app menu's Quit and
+  Cmd-Q ask too. Dock > Quit, logging out, shutting down and signals still
+  end it without asking (#952). Only the server this launch started is
+  asked, so another workbench's job never holds the quit.
 
 - **The desktop app's startup errors stay up and say what failed.** The
   dialog named port 3010 whatever failed, and the app exited before it

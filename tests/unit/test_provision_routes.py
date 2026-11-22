@@ -365,3 +365,16 @@ def test_active_lists_only_running_jobs_with_their_kind(monkeypatch: pytest.Monk
     assert sorted((j["job_id"], j["kind"]) for j in body["running"]) == sorted(
         [(remote.job_id, "remote"), (bundle.job_id, "bundle")]
     )
+
+
+def test_active_names_this_servers_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The desktop app asks only the sidecar it started (review of #947)."""
+    monkeypatch.setattr(provision, "_jobs", {})
+    monkeypatch.setenv("ANOLIS_WORKBENCH_LAUNCH_ID", "launch-1")
+    handler = FakeHandler()
+    provision.get_active(handler)
+    assert handler._responses[0][1]["launch_id"] == "launch-1"
+    monkeypatch.delenv("ANOLIS_WORKBENCH_LAUNCH_ID")
+    handler = FakeHandler()
+    provision.get_active(handler)
+    assert handler._responses[0][1]["launch_id"] is None
