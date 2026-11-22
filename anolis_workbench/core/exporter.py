@@ -174,26 +174,27 @@ def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
         expected_cfg = f"providers/{provider_id}.yaml"
         raw_args = entry.get("args")
         args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
-        replaced = False
-        for idx, token in enumerate(args):
-            if token == "--config":
-                # A bare --config in the last position takes the path too,
-                # rather than being left behind a second pair (#674).
-                if idx + 1 < len(args):
-                    args[idx + 1] = expected_cfg
-                else:
-                    args.append(expected_cfg)
-                replaced = True
-                break
-            if token.startswith("--config="):
-                # The one-token form is written as the two-token form the
-                # package validator reads, rather than left beside a second
-                # --config pair.
-                args[idx : idx + 1] = ["--config", expected_cfg]
-                replaced = True
-                break
-        if not replaced:
-            args.extend(["--config", expected_cfg])
+        # Every config token goes, in either form, and one --config pair takes
+        # the first one's place: a second token left behind would point the
+        # provider at a host path (review of #925). The one-token form is
+        # written as the two-token form the package validator reads, and a
+        # bare --config in the last position takes the path too (#674).
+        rewritten: list[str] = []
+        first_config: int | None = None
+        idx = 0
+        while idx < len(args):
+            token = args[idx]
+            if token == "--config" or token.startswith("--config="):
+                if first_config is None:
+                    first_config = len(rewritten)
+                idx += 2 if token == "--config" else 1
+                continue
+            rewritten.append(token)
+            idx += 1
+        if first_config is None:
+            first_config = len(rewritten)
+        rewritten[first_config:first_config] = ["--config", expected_cfg]
+        args = rewritten
         entry["args"] = args
 
     return provider_ids
