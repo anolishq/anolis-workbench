@@ -33,14 +33,19 @@ Upgrade notes:
   any target is provisioned.
 - Rollback fetches the latest anolis release's `install.sh`, and now refuses
   a latest tag that is not `X.Y.Z`.
+- A runtime the workbench launched keeps running when the workbench stops:
+  quitting the desktop app, or a Ctrl-C in the terminal running
+  `anolis-workbench`, no longer stops the machine. Stop it from Commission,
+  or from the next workbench start.
 
 ### Fixed
 
 - **A Ctrl-C in the workbench's terminal no longer reaches its runtime.**
   A runtime the workbench launched shared the server's process group, so
   stopping a workbench started from a terminal stopped the runtime too. It
-  now runs in its own session (its own process group on Windows); Stop
-  still ends it.
+  now runs in its own session; Stop still ends it. On Windows it gets its
+  own process group, which keeps out a Ctrl-C but not a Ctrl-Break or a
+  closed console (#953).
 
 - **A project name with a trailing newline is refused.** The name check let
   `$` match before a final newline, so `rig` followed by a newline passed and
@@ -147,9 +152,11 @@ Upgrade notes:
   the app or the app's bootloader is gone, so also after an app crash or a
   startup the app gave up on. A runtime the workbench launched keeps running
   and is not signalled; it writes its own log, so its providers keep running
-  too. The next workbench start finds it. While a deploy or a bundle export
-  runs, quitting asks first: quitting anyway ends the job, and a deploy
-  stops partway on its target.
+  too. The next workbench start finds it and shows its log from the last
+  64 KiB on. While a deploy or a bundle export runs, closing the window or
+  quitting from the app asks first: quitting anyway ends the job, and a
+  deploy stops partway on its target. macOS Cmd-Q and Dock > Quit, logging
+  out, shutting down and signals still end it without asking (#952).
 
 - **The desktop app's startup errors stay up and say what failed.** The
   dialog named port 3010 whatever failed, and the app exited before it
