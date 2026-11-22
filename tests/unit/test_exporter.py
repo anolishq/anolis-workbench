@@ -419,6 +419,8 @@ def test_the_archive_keeps_the_mode_an_export_has_always_had(tmp_path: pathlib.P
         (["--config"], ["--config", "providers/x.yaml"]),
         (["--foo", "--config"], ["--foo", "--config", "providers/x.yaml"]),
         (["--config", "old.yaml"], ["--config", "providers/x.yaml"]),
+        (["--config=old.yaml"], ["--config", "providers/x.yaml"]),
+        (["--verbose", "--config=old.yaml", "--x"], ["--verbose", "--config", "providers/x.yaml", "--x"]),
         ([], ["--config", "providers/x.yaml"]),
     ],
 )

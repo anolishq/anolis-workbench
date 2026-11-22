@@ -21,6 +21,12 @@ Upgrade notes:
 
 ### Fixed
 
+- **A function's call result stays with that function across a restart.**
+  Operate keyed the result beside each form by device and function id only,
+  so when a rebuilt provider gave an id to a different function, the new one
+  showed the old one's `Accepted at` or error. Results now use the same
+  device, id and name key as the form values (#839).
+
 - **Setting the dev-launch variant no longer leaves a false unsaved mark.**
   Commission saves the variant to disk, but the shell still compared the
   draft with the project as it was before. Undoing a Compose edit afterwards
@@ -35,6 +41,20 @@ Upgrade notes:
   file, and a package with an encrypted entry or an unsupported compression
   method fails validation as unreadable. Both used to end in a traceback
   from the CLI.
+
+- **Export rewrites a provider's `--config=<path>` too.** Only the two-token
+  `--config <path>` form was rewritten to the packaged config, so the
+  one-token form stayed beside an appended second `--config` pair.
+
+- **Downloading a bundle that newer exports removed says so.** Only the
+  latest two exported bundles are kept. An older job still reported its
+  bundle ready, then its download answered a bare 404; it now answers 410,
+  naming the file and saying to export it again. A bundle is also kept until
+  its own job has said it is ready.
+
+- **Operate keeps a mode you set over an older poll's reply.** With the
+  event stream down, a status poll that left before you set the mode could
+  write the old mode back when it settled.
 
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a

@@ -185,6 +185,13 @@ def _rewrite_provider_args(runtime_payload: dict[str, Any]) -> list[str]:
                     args.append(expected_cfg)
                 replaced = True
                 break
+            if token.startswith("--config="):
+                # The one-token form is written as the two-token form the
+                # package validator reads, rather than left beside a second
+                # --config pair.
+                args[idx : idx + 1] = ["--config", expected_cfg]
+                replaced = True
+                break
         if not replaced:
             args.extend(["--config", expected_cfg])
         entry["args"] = args
