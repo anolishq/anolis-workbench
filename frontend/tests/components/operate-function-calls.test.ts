@@ -484,6 +484,25 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     expect(calls.map((c) => c.args)).toEqual([{ flag: { type: "bool", bool: false } }]);
   });
 
+  // Review of #875: the reverse of #840. A bool ticked while the arg was a
+  // bool is unset once the arg comes back an optional string: the box shows
+  // nothing, as nothing is sent, instead of showing "true" and sending {}.
+  it("shows a value kept from a bool arg as empty when the arg comes back a string", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderPid(pidCaps({ flag: { type: "bool", required: false } }));
+    await screen.findByLabelText(/^flag/);
+    await fireEvent.click(argInput(argRows()[0]));
+    expect(argInput(argRows()[0]).checked).toBe(true);
+
+    await restartWith(rt, pidCaps({ flag: { type: "string", required: false } }));
+
+    expect(argInput(argRows()[0]).type).toBe("text");
+    expect(argInput(argRows()[0]).value).toBe("");
+    await fireEvent.click(executeButtons()[0]);
+    await screen.findByText(/^Accepted at /);
+    expect(calls.map((c) => c.args)).toEqual([{}]);
+  });
+
   // #838: an argument named __proto__ reaches the call body under its name.
   it("sends an argument named __proto__ under its own name", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

@@ -839,6 +839,19 @@
    * POSTs one call for the device being cleared, with the step's arguments
    * typed from the function's spec; false, with the error shown, if refused.
    */
+  /**
+   * A machine profile may give a bool argument as true, "true" or 1 (the
+   * schema allows a boolean, number or string). buildArgsPayload counts only a
+   * real true, so convert here; anything else is refused rather than sent as
+   * false.
+   */
+  function profileBool(funcName: string, argName: string, v: boolean | number | string): boolean {
+    const text = typeof v === "string" ? v.trim().toLowerCase() : v;
+    if (text === true || text === 1 || text === "true") return true;
+    if (text === false || text === 0 || text === "false") return false;
+    throw new Error(`${funcName}: ${argName} must be true or false, not ${JSON.stringify(v)}`);
+  }
+
   async function callForTrip(
     stepNumber: number,
     func: FunctionSpec,
@@ -859,7 +872,9 @@
         // Own keys only: an unsupplied name such as constructor must not read
         // Object.prototype's (#838).
         const v = Object.hasOwn(named, a.name) ? named[a.name] : undefined;
-        if (v !== undefined) form[funcFormField(specArgs, i)] = a.type === "bool" ? v : String(v);
+        if (v === undefined) return;
+        form[funcFormField(specArgs, i)] =
+          a.type === "bool" ? profileBool(func.name, a.name, v) : String(v);
       });
       await fetchJson<UnknownRecord>("/v0/call", {
         method: "POST",
@@ -942,6 +957,15 @@
         },
       };
     }
+  }
+
+  /**
+   * What a select or text field shows: a value kept from another type, such as
+   * a bool from when this argument was one, is unset, as buildArgsPayload
+   * treats it, so a field never shows a value the call will not send.
+   */
+  function textFieldValue(v: unknown): string {
+    return typeof v === "string" ? v : "";
   }
 
   function buildArgsPayload(
@@ -2550,7 +2574,7 @@
                         {:else if argAllowedValues(arg).length > 0}
                           <select
                             id="fn-{fbKey}-{ai}"
-                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
+                            value={textFieldValue(getFuncFormData(selectedKey, func)[field])}
                             onchange={(e: Event) =>
                               setFuncArg(selectedKey, func, field, selectTarget(e).value)}
                           >
@@ -2564,7 +2588,7 @@
                             id="fn-{fbKey}-{ai}"
                             type="number"
                             step="any"
-                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
+                            value={textFieldValue(getFuncFormData(selectedKey, func)[field])}
                             oninput={(e: Event) =>
                               setFuncArg(selectedKey, func, field, inputTarget(e).value)}
                           />
@@ -2576,7 +2600,7 @@
                               ? "numeric"
                               : "text"}
                             placeholder={arg.type === "bytes" ? "Base64 encoded" : ""}
-                            value={getFuncFormData(selectedKey, func)[field] ?? ""}
+                            value={textFieldValue(getFuncFormData(selectedKey, func)[field])}
                             oninput={(e: Event) =>
                               setFuncArg(selectedKey, func, field, inputTarget(e).value)}
                           />
