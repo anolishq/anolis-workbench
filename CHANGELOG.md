@@ -26,6 +26,13 @@ Upgrade notes:
   project after the system directory. It used the template name,
   `sim-quickstart` by default, so an imported bioreactor installed as
   `sim-quickstart`. `--project` still wins (#565).
+- `anolis-validate` refuses a package whose provider `command` is not a
+  deploy token, and export refuses a project whose declared behaviour file
+  is missing. Both used to pass and fail later on the target (#666, #675).
+- One target with a bad `port` or host refuses the whole `fleet.yaml`, before
+  any target is provisioned.
+- Rollback fetches the latest anolis release's `install.sh`, and now refuses
+  a latest tag that is not `X.Y.Z`.
 
 ### Fixed
 
@@ -134,6 +141,45 @@ Upgrade notes:
   startup the app gave up on. A runtime the workbench launched keeps running
   and is not signalled; it writes its own log, so its providers keep running
   too. The next workbench start finds it.
+
+- **The desktop app's startup errors stay up and say what failed.** The
+  dialog named port 3010 whatever failed, and the app exited before it
+  could be read. It now names the step (the sidecar lock, finding the
+  bundled server, starting it, its readiness) and stays until dismissed.
+
+- **The desktop app opens only on the server it started.** Any workbench
+  answering on port 3010 passed the readiness check, so with another one
+  already running the window opened on that. A sidecar that exits at once
+  is now noticed then, not when the 20 s wait ends, and the wait no longer
+  blocks the app's event loop.
+
+- **An unexpected server error answers JSON 500.** A route that raised
+  before answering closed the connection with no response.
+
+- **Commission says at Launch, Deploy and Restart when Compose has unsaved
+  edits**, which those actions leave out, with a button back to Compose.
+
+- **Plain words for raw facts:** a variant that does not boot inert, the
+  runtime's uptime (`1 h 2 min`, not `3725s`), and similar labels.
+
+- **The stop card says FAULT hooks still run under a `none` software
+  stop.** On a machine with automation the stop enters FAULT, and matching
+  `-> FAULT` hooks drive their outputs.
+
+- **A startup safe state that failed on the config points at the config.**
+  The note offered a restart, which fails the same way until
+  `safety.safe_state` is fixed.
+
+- **Preflight shows a config the runtime refused.** The runtime's
+  unknown-key warning read as "this binary has no `--check-config`", so the
+  refusal showed as "Not yet available".
+
+- **A legacy project whose restart policy lacks a key names it.** It raised
+  a bare `KeyError`, and the project opened empty.
+
+- **The composer-control and runtime OpenAPI files declare the 403 and 409
+  the handlers send**, and the contract check compares status codes with
+  the server.
 
 ## [0.33.4] - 2026-11-13
 
