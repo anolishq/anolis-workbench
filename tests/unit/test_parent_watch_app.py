@@ -137,3 +137,41 @@ def test_the_server_keeps_running_while_app_and_bootloader_do(chain, tmp_path: p
     assert _wait_for(lambda: (tmp_path / "server.watching").exists())
     time.sleep(0.5)
     assert not (tmp_path / "server.stopped").exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="models psutil's Linux boot-time clock")
+def test_a_wall_clock_step_does_not_stop_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review of #933: identity was create_time(), which psutil computes on
+    Linux as start ticks plus the boot time it reads now. A wall-clock step
+    (the first NTP sync after boot) moved it, and the watch stopped the
+    server with the app alive. Modelled by shifting psutil's boot time."""
+    import threading
+
+    import psutil._pslinux as pslinux
+
+    from anolis_workbench.server import parent_watch
+
+    monkeypatch.delenv(parent_watch.APP_PID_ENV_VAR, raising=False)
+    stopped = threading.Event()
+    parent_watch.watch(stopped.set, interval_s=0.02)
+    real_boot_time = pslinux.boot_time
+    monkeypatch.setattr(pslinux, "boot_time", lambda: real_boot_time() + 1.0)
+    assert not stopped.wait(0.5), "a clock step was taken for the parent exiting"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="models psutil's Linux boot-time clock")
+def test_a_wall_clock_step_does_not_stop_the_server_with_an_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    import psutil._pslinux as pslinux
+
+    from anolis_workbench.server import parent_watch
+
+    # This test process's parent's parent stands in for the app.
+    monkeypatch.setenv(parent_watch.APP_PID_ENV_VAR, str(psutil.Process(os.getppid()).ppid()))
+    stopped = threading.Event()
+    parent_watch.watch(stopped.set, interval_s=0.02)
+    assert not stopped.wait(0.2), "the watch stopped before any clock step"
+    real_boot_time = pslinux.boot_time
+    monkeypatch.setattr(pslinux, "boot_time", lambda: real_boot_time() + 1.0)
+    assert not stopped.wait(0.5), "a clock step was taken for the app exiting"
