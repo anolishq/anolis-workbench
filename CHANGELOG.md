@@ -29,6 +29,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **A project name with a trailing newline is refused.** The name check let
+  `$` match before a final newline, so `rig` followed by a newline passed and
+  reached the paths and commands built from the name.
+
 - **A runtime the workbench launched keeps its providers after the server
   stops.** The runtime's output was a pipe the server read. Once the server
   exited, as it now does when the desktop app quits, nothing read it, and a
