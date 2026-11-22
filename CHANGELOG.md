@@ -13,7 +13,21 @@ Historical note:
 
 ## [Unreleased]
 
+Upgrade notes:
+
+- Deploy refuses a machine profile whose `components.runtime.version` is not
+  a release number `X.Y.Z`, before it downloads anything. A pin such as
+  `latest` or `0.16.0-rc.1` used to be accepted here and failed later.
+
 ### Fixed
+
+- **A trip-recovery step sends the bool the machine profile gives**. The
+  machine-profile schema lets a bool argument be `true`, `"true"` or `1`,
+  and `false`, `"false"` or `0`. Since an unreleased change, Operate sent
+  anything but a real `true` as false and marked the step Done. Any other
+  value is now refused, with the step left to fix, and nothing is sent.
+  Operate's text and choice fields also show a value kept from an argument's
+  old type as empty, as the call treats it.
 
 - **An ssh target can't set an ssh option.** `anolis-provision remote`,
   `rollback` and fleet runs passed `user@host` to ssh with no end-of-options
