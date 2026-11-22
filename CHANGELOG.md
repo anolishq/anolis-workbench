@@ -100,8 +100,9 @@ Upgrade notes:
 - **Downloading a bundle that newer exports removed says so.** Only the
   latest two exported bundles are kept. An older job still reported its
   bundle ready, then its download answered a bare 404; it now answers 410,
-  naming the file and saying to export it again. A bundle is also kept until
-  its own job has said it is ready.
+  naming the file and saying to export it again, also when the bundle is
+  removed as its download starts. A bundle is kept until its own job has
+  said it is ready.
 
 - **Operate keeps a mode you set over an older poll's reply.** With the
   event stream down, a status poll that left before you set the mode could

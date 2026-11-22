@@ -125,3 +125,61 @@ def test_a_pruned_bundle_download_says_it_was_removed(tmp_root: pathlib.Path, mo
     assert handler.sent and handler.sent[0][0] == 410
     assert "anolis-demo-x86_64.tar.gz was removed" in handler.sent[0][1]["error"]
     assert "Export it again" in handler.sent[0][1]["error"]
+
+
+class _PrunedAfterLookup(dict):
+    """The artifact table as a download sees it when a prune runs right after its lookup."""
+
+    def __init__(self, items: dict, job: provision.ProvisionJob) -> None:
+        super().__init__(items)
+        self._job = job
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        found = super().get(key, default)
+        if key == self._job.job_id and found is not None:
+            self._job.pruned_bundle = found.name
+            found.unlink()
+        return found
+
+
+def test_a_bundle_pruned_while_its_download_starts_says_it_was_removed(
+    tmp_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #926: a prune between the download's lookup and its read
+    raised FileNotFoundError out of the handler."""
+    job = _export(monkeypatch)
+    with provision._jobs_lock:
+        provision._jobs[job.job_id] = job
+    monkeypatch.setattr(provision, "_bundle_artifacts", _PrunedAfterLookup(provision._bundle_artifacts, job))
+
+    handler = _Handler()
+    provision.download_bundle(handler, job.job_id)
+
+    assert handler.sent and handler.sent[0][0] == 410
+
+
+def test_no_prune_runs_between_registering_a_bundle_and_saying_it_is_ready(
+    tmp_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #926: a job registered its bundle, then appended its ready
+    event. Exports finishing in that gap could prune it before it was ever
+    announced. Another export's prune needs the artifact lock, so it must be
+    held when the ready event is appended."""
+    seen: list[bool] = []
+
+    class _Events(list):
+        def append(self, event: Any) -> None:
+            if isinstance(event, dict) and event.get("stage") == "done":
+                acquired = provision._bundle_artifacts_lock.acquire(blocking=False)
+                if acquired:
+                    provision._bundle_artifacts_lock.release()
+                seen.append(acquired)
+            super().append(event)
+
+    monkeypatch.setattr(deploy, "stage_bundle", _stage_ok)
+    job = provision._create_job()
+    job.events = _Events(job.events)
+    provision._run_bundle_job(job, {"project": "demo", "arch": "x86_64"})
+
+    assert job.status == "done"
+    assert seen == [False], "a prune could run between registration and the ready event"
