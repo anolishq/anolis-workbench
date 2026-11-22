@@ -422,6 +422,11 @@ def test_the_archive_keeps_the_mode_an_export_has_always_had(tmp_path: pathlib.P
         (["--config=old.yaml"], ["--config", "providers/x.yaml"]),
         (["--verbose", "--config=old.yaml", "--x"], ["--verbose", "--config", "providers/x.yaml", "--x"]),
         ([], ["--config", "providers/x.yaml"]),
+        # Review of #925: every config token goes, not just the first, so no
+        # host path is left behind for the provider to read.
+        (["--config=a.yaml", "--config", "b.yaml"], ["--config", "providers/x.yaml"]),
+        (["--config", "a.yaml", "--v", "--config=b.yaml"], ["--config", "providers/x.yaml", "--v"]),
+        (["--x", "--config", "a.yaml", "--config"], ["--x", "--config", "providers/x.yaml"]),
     ],
 )
 def test_a_trailing_bare_config_gets_the_packaged_path_and_validates(

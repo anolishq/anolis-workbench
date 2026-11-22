@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import time
+import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath
@@ -256,6 +257,10 @@ def ssh_part_problem(what: str, value: object) -> str | None:
         return f"the {what} {value!r} begins with '-'"
     if "@" in value or any(ch.isspace() for ch in value):
         return f"the {what} {value!r} holds '@' or whitespace"
+    # Unicode category C: control, format, private use and unassigned, NUL
+    # and terminal escape sequences among them (review of #919).
+    if any(unicodedata.category(ch).startswith("C") for ch in value):
+        return f"the {what} {value!r} holds a control character"
     return None
 
 
