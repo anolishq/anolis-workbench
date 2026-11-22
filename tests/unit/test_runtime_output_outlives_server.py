@@ -212,3 +212,16 @@ def test_a_server_that_finds_a_running_runtime_follows_its_log(
         assert "written after the reopen\n" in lines()
     finally:
         runtime.wait(10)
+
+
+def test_the_runtime_is_in_its_own_session(project: pathlib.Path) -> None:
+    """Review of #932: the runtime shared the server's process group, so a
+    Ctrl-C in the terminal that started the app or server reached it too."""
+    launcher.launch("demo", {}, project)
+    proc = launcher._state["process"]
+    try:
+        assert os.getsid(proc.pid) == proc.pid
+        assert os.getpgid(proc.pid) != os.getpgid(0)
+    finally:
+        (project.parent.parent / "go").write_text("", encoding="utf-8")
+        proc.wait(timeout=10)
