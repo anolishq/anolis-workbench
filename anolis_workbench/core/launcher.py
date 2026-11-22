@@ -9,7 +9,6 @@ import json
 import os
 import pathlib
 import queue
-import shutil
 import signal
 import socket
 import subprocess
@@ -772,19 +771,31 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
     # of SIGPIPE on their next write. The server follows the file instead.
     #
     # The file is opened for append, so a truncation under a live writer
-    # cannot leave a run of NULs (review of #932). The last run's log is
-    # copied aside, not moved: no file another process holds open is renamed,
-    # which Windows refuses. The copy becomes previous.log only once the
-    # runtime has started; a failed launch puts latest.log back and leaves
-    # previous.log as it was (#672, review of #932).
+    # cannot leave a run of NULs (review of #932). Every caller has stopped
+    # the previous runtime by now, so the last run's log is set aside by
+    # rename: no copy, so no free space is needed and a large log does not
+    # lengthen a restart (review of #944). It becomes previous.log once the
+    # runtime has started, and goes back to latest.log if it does not start
+    # (#672). Keeping the old log never stops a launch: if it cannot be moved
+    # (Windows, while a follower still holds it), it is emptied in place.
     log_dir = project_dir / "logs"
     log_path = log_dir / "latest.log"
     previous_path = log_dir / "previous.log"
     kept_path = log_dir / "latest.log.kept"
     log_dir.mkdir(parents=True, exist_ok=True)
-    had_log = log_path.is_file()
-    if had_log:
-        shutil.copyfile(log_path, kept_path)
+    if kept_path.is_file() and not log_path.exists():
+        # Set aside by a launch that did not finish: it is the last run's log.
+        try:
+            os.replace(kept_path, log_path)
+        except OSError:
+            pass
+    kept = False
+    if log_path.is_file():
+        try:
+            os.replace(log_path, kept_path)
+            kept = True
+        except OSError:
+            pass
     try:
         fd = os.open(
             log_path,
@@ -808,19 +819,18 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
             os.close(fd)
     except BaseException:
         try:
-            if had_log:
-                shutil.copyfile(kept_path, log_path)
-                kept_path.unlink()
+            if kept:
+                os.replace(kept_path, log_path)
             else:
                 log_path.unlink(missing_ok=True)
         except OSError:
             pass
         raise
-    if had_log:
+    if kept:
         try:
             os.replace(kept_path, previous_path)
         except OSError:
-            pass  # previous.log stays one run older; the launch goes on
+            pass  # left as latest.log.kept; the next launch recovers it
 
     try:
         # Write running.json

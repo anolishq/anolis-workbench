@@ -60,9 +60,12 @@ Upgrade notes:
   exited, as it now does when the desktop app quits, nothing read it, and a
   provider sharing the runtime's stderr died on its next log line. The
   runtime now writes `logs/latest.log` itself and the server follows the
-  file. Each launch empties `latest.log` in place, so `tail -F` keeps
-  following it, and the previous run's log is kept as `logs/previous.log`.
-  A launch that fails to start keeps both.
+  file. Each launch moves the last run's log to `logs/previous.log` and
+  starts `latest.log` afresh, which `tail -F` follows. A runtime that fails
+  to start leaves the last run's log as `latest.log`; one that starts and
+  then fails leaves its own output there and the last run's in
+  `previous.log`. If the old log cannot be moved, it is emptied rather than
+  the launch stopped.
 
 - **A function's call result stays with that function across a restart.**
   Operate keyed the result beside each form by device and function id only,

@@ -225,3 +225,60 @@ def test_the_runtime_is_in_its_own_session(project: pathlib.Path) -> None:
     finally:
         (project.parent.parent / "go").write_text("", encoding="utf-8")
         proc.wait(timeout=10)
+
+
+def test_keeping_the_old_log_needs_no_copy(project: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review of #944: a restart copied the whole old log after stopping the
+    runtime, so a full disk left the machine stopped, and a large log made
+    the restart slow. Setting the old log aside must not copy it."""
+    (project / "logs").mkdir(parents=True)
+    (project / "logs" / "latest.log").write_text("run A\n", encoding="utf-8")
+
+    def _no_space(*args: object, **kwargs: object) -> None:
+        raise OSError(27, "File too large")
+
+    import shutil
+
+    monkeypatch.setattr(shutil, "copyfile", _no_space)
+    launcher.launch("demo", {}, project)
+    proc = launcher._state["process"]
+    (project.parent.parent / "go").write_text("", encoding="utf-8")
+    proc.wait(timeout=10)
+    logs = _logs(project)
+    assert logs["previous.log"] == "run A\n"
+    assert logs["latest.log"].startswith("runtime started\n")
+
+
+def test_a_log_that_cannot_be_set_aside_does_not_stop_the_launch(
+    project: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the old log cannot be moved (Windows, while a follower still holds
+    it), the launch goes on and the old log is lost, not the machine."""
+    (project / "logs").mkdir(parents=True)
+    (project / "logs" / "latest.log").write_text("run A\n", encoding="utf-8")
+    real_replace = launcher.os.replace
+
+    def _held(src: object, dst: object) -> None:
+        if str(src).endswith("latest.log"):
+            raise PermissionError(13, "The process cannot access the file")
+        real_replace(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(launcher.os, "replace", _held)
+    launcher.launch("demo", {}, project)
+    proc = launcher._state["process"]
+    (project.parent.parent / "go").write_text("", encoding="utf-8")
+    assert proc.wait(timeout=10) == 0
+    assert _logs(project)["latest.log"].startswith("runtime started\n")
+
+
+def test_a_log_left_aside_by_a_crash_is_recovered(project: pathlib.Path) -> None:
+    """Review of #944: a .kept file with no latest.log was never cleaned up."""
+    (project / "logs").mkdir(parents=True)
+    (project / "logs" / "latest.log.kept").write_text("run A\n", encoding="utf-8")
+    launcher.launch("demo", {}, project)
+    proc = launcher._state["process"]
+    (project.parent.parent / "go").write_text("", encoding="utf-8")
+    proc.wait(timeout=10)
+    logs = _logs(project)
+    assert "latest.log.kept" not in logs
+    assert logs["previous.log"] == "run A\n"
