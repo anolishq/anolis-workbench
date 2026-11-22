@@ -40,6 +40,14 @@ Upgrade notes:
 
 ### Fixed
 
+- **A reused pid is no longer taken for a runtime the workbench launched.**
+  `running.json` named the runtime by its pid alone, so once that pid was
+  reused, the workbench showed the project running, followed a dead run's
+  log as live, and Stop could end an unrelated process. It now records when
+  the runtime started and checks it. A `running.json` from an older
+  workbench, which has no start time, is still shown, but Stop refuses to
+  signal a process it cannot confirm and says how to stop it (#938).
+
 - **A Ctrl-C in the workbench's terminal no longer reaches its runtime.**
   A runtime the workbench launched shared the server's process group, so
   stopping a workbench started from a terminal stopped the runtime too. It
