@@ -436,3 +436,19 @@ def test_a_trailing_bare_config_gets_the_packaged_path_and_validates(
     (tmp_path / "providers").mkdir()
     (tmp_path / "providers" / "x.yaml").write_text("{}\n", encoding="utf-8")
     package_validator._validate_runtime_provider_args(package_root=tmp_path, runtime_payload=runtime)
+
+
+def test_a_provider_command_that_is_not_a_deploy_token_fails_the_export(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """The validator refuses a package whose provider command is not the
+    deploy token (#666); the export made such a package anyway."""
+    path = project_dir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    providers = doc["providers"]
+    providers[0]["command"] = "/usr/local/bin/anolis-provider-sim"
+    _patch_variant(project_dir, canonical.MANUAL_VARIANT, providers=providers)
+    out = tmp_path / "out.anpkg"
+    with pytest.raises(exporter.ExportError, match="is not a deploy token"):
+        exporter.build_package(project_dir=project_dir, out_path=out)
+    assert not out.exists()

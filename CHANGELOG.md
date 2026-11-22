@@ -21,6 +21,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **Export refuses a provider command that is not a deploy token**, as
+  `anolis-validate` does since #666. A project whose provider `command` was
+  edited to a host path exported a package its own validator then rejected.
+
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
   dot, or `/`. It used to create a project the workbench then rejected.
