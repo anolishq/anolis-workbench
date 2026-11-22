@@ -60,6 +60,18 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
         raise ExportError("Project has no runtime variant to export")
 
     provider_ids = _rewrite_provider_args(runtime_payload)
+    # The package carries each provider `command` as the deploy token
+    # install.sh rewrites; anolis-validate refuses anything else (#666). Refuse
+    # it here, so an export never makes a package its own validator rejects.
+    for idx, entry in enumerate(runtime_payload.get("providers", []) or []):
+        command = entry.get("command") if isinstance(entry, dict) else None
+        if canonical.command_kind(command) is None:
+            pid = entry.get("id", idx) if isinstance(entry, dict) else idx
+            raise ExportError(
+                f"provider {pid}: command {command!r} is not a deploy token "
+                "(../anolis-provider-<kind>/build/<preset>/anolis-provider-<kind>); "
+                "a package records the token, not a host path"
+            )
     provider_files: dict[str, bytes] = {}
     for pid in provider_ids:
         entry = document["providers"].get(pid)
@@ -123,7 +135,10 @@ def build_package(project_dir: pathlib.Path, out_path: pathlib.Path) -> None:
     }
     files.update(provider_files)
     for rel_path, source_path in behavior_rel_paths.items():
-        files[rel_path] = source_path.read_bytes()
+        try:
+            files[rel_path] = source_path.read_bytes()
+        except OSError as exc:
+            raise ExportError(f"Behavior file {source_path} could not be read: {exc.strerror or exc}") from exc
 
     _assert_no_secret_leak(files)
     files["meta/checksums.sha256"] = _checksums_file_bytes(files)
