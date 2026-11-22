@@ -225,3 +225,26 @@ def test_the_runtime_is_in_its_own_session(project: pathlib.Path) -> None:
     finally:
         (project.parent.parent / "go").write_text("", encoding="utf-8")
         proc.wait(timeout=10)
+
+
+def test_the_runtime_is_tracked_before_running_json_names_it(
+    project: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #942: running.json was written before the launcher tracked
+    the process, so a status poll in between took the runtime for one found
+    on disk and started a second follower: every line was then published
+    twice."""
+    seen: list[object] = []
+    real_write_text = pathlib.Path.write_text
+
+    def _record(self: pathlib.Path, *args: object, **kwargs: object) -> int:
+        if self.name == "running.json":
+            seen.append(launcher._state["process"])
+        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pathlib.Path, "write_text", _record)
+    launcher.launch("demo", {}, project)
+    proc = launcher._state["process"]
+    (project.parent.parent / "go").write_text("", encoding="utf-8")
+    proc.wait(timeout=10)
+    assert seen == [proc], "running.json was written before the launcher tracked the runtime"
