@@ -15,6 +15,12 @@ Historical note:
 
 ### Fixed
 
+- **An ssh target can't set an ssh option.** `anolis-provision remote`,
+  `rollback` and fleet runs passed `user@host` to ssh with no end-of-options
+  marker, and a host or user beginning with `-` was read as an option. The
+  destination now follows `--`, and a host or user that is empty, begins
+  with `-`, or holds whitespace or a second `@` is refused before ssh runs.
+
 - **Quitting the desktop app stops its server and leaves your runtime
   running** (#667). The app killed only the sidecar's bootloader, so the
   server kept running and held port 3010. The server now stops itself once

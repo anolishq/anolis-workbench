@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from anolis_workbench.core import projects
+from anolis_workbench.core.executor import ssh_part_problem
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 # The template a fleet entry seeds a MISSING project from. Only used when the
@@ -116,6 +117,14 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
             raise ValueError(f"Target {i} must be a mapping")
         if "name" not in entry or "host" not in entry:
             raise ValueError(f"Target {i} missing required 'name' or 'host' field")
+        # A host may carry its user, user@host; neither part may be read by
+        # ssh as an option.
+        user_part, sep, host_part = str(entry["host"]).rpartition("@")
+        problem = ssh_part_problem("host", host_part) if isinstance(entry["host"], str) else "the host is not a string"
+        if problem is None and sep:
+            problem = ssh_part_problem("user", user_part)
+        if problem:
+            raise ValueError(f"Target {i} 'host' cannot be passed to ssh: {problem}")
         project = entry.get("project", defaults.get("project", DEFAULT_TEMPLATE))
         template = entry.get("template", defaults.get("template", DEFAULT_TEMPLATE))
         for key, value in (("project", project), ("template", template)):
