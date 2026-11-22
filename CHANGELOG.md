@@ -21,6 +21,11 @@ Upgrade notes:
 
 ### Fixed
 
+- **Setting the dev-launch variant no longer leaves a false unsaved mark.**
+  Commission saves the variant to disk, but the shell still compared the
+  draft with the project as it was before. Undoing a Compose edit afterwards
+  kept the unsaved mark and its prompts.
+
 - **Export refuses a provider command that is not a deploy token**, as
   `anolis-validate` does since #666. A project whose provider `command` was
   edited to a host path exported a package its own validator then rejected.

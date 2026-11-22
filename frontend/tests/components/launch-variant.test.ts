@@ -337,6 +337,24 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
     expect(launchSelect().value).toBe("manual");
   });
 
+  it("a dev-launch variant set in Commission counts as saved, so an undone edit leaves nothing unsaved", async () => {
+    const api = stubDisk(twoVariantDoc("manual"));
+    history.replaceState({}, "", "/projects/demo/commission");
+    render(App);
+    await waitFor(() => expect(launchSelect()).toBeEnabled());
+    await fireEvent.change(launchSelect(), { target: { value: AUTOMATION_VARIANT } });
+    await waitFor(() => expect(api.disk().launch?.variant).toBe(AUTOMATION_VARIANT));
+
+    await tab("Compose");
+    await waitFor(() => expect(document.querySelector("#profile-display-name")).not.toBeNull());
+    const name = document.querySelector("#profile-display-name") as HTMLInputElement;
+    const original = name.value;
+    await fireEvent.input(name, { target: { value: `${original} 2` } });
+    expect(document.querySelector("#unsaved-indicator")).not.toBeNull();
+    await fireEvent.input(name, { target: { value: original } });
+    expect(document.querySelector("#unsaved-indicator")).toBeNull();
+  });
+
   it("Operate's banner agrees with Commission's when the saved launch variant differs from memory", async () => {
     // automation is saved as the launch variant, then removed in Compose
     // without saving: Launch still runs automation.
