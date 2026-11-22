@@ -37,6 +37,11 @@ Upgrade notes:
   check refused whitespace, `@` and a leading `-`, but let through a terminal
   escape sequence, and a NUL stopped the command with an unhandled error.
 
+- **Export rewrites every `--config` in a provider's args.** Only the first
+  was rewritten, so `--config=a.yaml --config b.yaml` left the host path
+  `b.yaml` in the package. The packaged args now hold one `--config` pair,
+  where the first one stood.
+
 - **A runtime the workbench launched keeps its providers after the server
   stops.** The runtime's output was a pipe the server read. Once the server
   exited, as it now does when the desktop app quits, nothing read it, and a
