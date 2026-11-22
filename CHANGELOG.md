@@ -35,6 +35,12 @@ Upgrade notes:
   `--config <path>` form was rewritten to the packaged config, so the
   one-token form stayed beside an appended second `--config` pair.
 
+- **Downloading a bundle that newer exports removed says so.** Only the
+  latest two exported bundles are kept. An older job still reported its
+  bundle ready, then its download answered a bare 404; it now answers 410,
+  naming the file and saying to export it again. A bundle is also kept until
+  its own job has said it is ready.
+
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
   dot, or `/`. It used to create a project the workbench then rejected.
