@@ -102,12 +102,14 @@ fn start_sidecar(
         .env("ANOLIS_WORKBENCH_HOST", WORKBENCH_HOST)
         .env("ANOLIS_WORKBENCH_PORT", WORKBENCH_PORT.to_string())
         .env("ANOLIS_WORKBENCH_LAUNCH_ID", launch_id)
-        .args(["--no-browser"])
         // The sidecar is a PyInstaller onefile bootloader that runs the server
-        // as its own child. In its own process group (job object on Windows),
-        // kill() in stop_sidecar takes both down; without it only the
-        // bootloader dies and the server keeps :3010 (wb#667).
-        .set_process_group(true)
+        // as its own child, and kill() in stop_sidecar ends the bootloader
+        // only. The server stops itself when the bootloader is gone (wb#667).
+        // A process group would end the server too, but also any runtime the
+        // server launched, by SIGKILL and before its safe-state shutdown; that
+        // runtime keeps running when the app quits.
+        .env("ANOLIS_WORKBENCH_EXIT_WITH_PARENT", "1")
+        .args(["--no-browser"])
         .spawn()
     {
         Ok(result) => result,
@@ -120,6 +122,7 @@ fn start_sidecar(
 
     // Record how the sidecar ends, so startup can fail as soon as it does
     // rather than when the readiness wait times out (wb#674).
+    let watcher = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             let Ok(mut exit) = exit.lock() else { return };
@@ -134,6 +137,11 @@ fn start_sidecar(
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    // A sidecar that has exited is not killed at quit: its pid
+                    // may by then belong to another process.
+                    if let Ok(mut child) = watcher.state::<SidecarState>().child.lock() {
+                        child.take();
+                    }
                     exit.ended = Some(match (payload.code, payload.signal) {
                         (Some(code), _) => format!("It exited with status {code}"),
                         (None, Some(signal)) => format!("It was ended by signal {signal}"),
