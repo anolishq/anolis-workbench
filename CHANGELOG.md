@@ -15,6 +15,14 @@ Historical note:
 
 ### Fixed
 
+- **A trip-recovery step sends the bool the machine profile gives**. The
+  machine-profile schema lets a bool argument be `true`, `"true"` or `1`,
+  and `false`, `"false"` or `0`. Since an unreleased change, Operate sent
+  anything but a real `true` as false and marked the step Done. Any other
+  value is now refused, with the step left to fix, and nothing is sent.
+  Operate's text and choice fields also show a value kept from an argument's
+  old type as empty, as the call treats it.
+
 - **Quitting the desktop app stops its server and leaves your runtime
   running** (#667). The app killed only the sidecar's bootloader, so the
   server kept running and held port 3010. The server now stops itself once
