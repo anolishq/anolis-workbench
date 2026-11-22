@@ -833,14 +833,9 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
             pass  # left as latest.log.kept; the next launch recovers it
 
     try:
-        # Write running.json
-        running_data = {
-            "pid": proc.pid,
-            "project": name,
-            "started": datetime.now(timezone.utc).isoformat(),
-        }
-        (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
-
+        # Tracked before running.json names it: a status poll in between
+        # would take the runtime for one found on disk and start a second log
+        # follower (review of #942).
         with _state_lock:
             log_lines_by_project: dict = _state["log_lines_by_project"]
             log_lines_by_project[name] = []
@@ -850,6 +845,13 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
                     "process": proc,
                 }
             )
+
+        running_data = {
+            "pid": proc.pid,
+            "project": name,
+            "started": datetime.now(timezone.utc).isoformat(),
+        }
+        (project_dir / "running.json").write_text(json.dumps(running_data), encoding="utf-8")
         threading.Thread(target=_read_logs, args=(proc, log_path, name), daemon=True).start()
     except BaseException:
         with _state_lock:
