@@ -433,6 +433,84 @@ describe("Operate.svelte — a guided clear for watchdog-tripped boards (wb#572)
     ).toEqual([{ value: { type: "string", string: "x" } }]);
   });
 
+  // Review of #875: the machine-profile schema lets a bool argument be a
+  // boolean, a number or a string. "true" and 1 used to be sent as false and
+  // the step shown Done.
+  it.each([
+    [true, true],
+    ["true", true],
+    [1, true],
+    [false, false],
+    ["false", false],
+    [0, false],
+  ])("sends a profile's bool given as %j as %j", async (given, sent) => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [
+              {
+                label: "Set brakes",
+                function: "set_brake",
+                args: { motor1_brake: given, motor2_brake: given },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    await press(4, "Set brakes");
+    await waitFor(() => expect(step(4)).toHaveTextContent("Done"));
+    expect(
+      actionPosts(rt)
+        .slice(1)
+        .map((p) => p.body?.args),
+    ).toEqual([
+      { motor1_brake: { type: "bool", bool: sent }, motor2_brake: { type: "bool", bool: sent } },
+    ]);
+  });
+
+  it("refuses a profile's bool that is neither true nor false, and sends nothing", async () => {
+    const rt = fakeRuntime({
+      latched: false,
+      mode: "MANUAL",
+      operator: {
+        trip_recovery: [
+          {
+            device: "bread0/dcmt0",
+            after_clear: [
+              {
+                label: "Set brakes",
+                function: "set_brake",
+                args: { motor1_brake: "yes", motor2_brake: 2 },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Clear the watchdog trip on bread0/dcmt0…" }),
+    );
+    await press(3, "Clear the trip");
+    await waitFor(() => expect(step(3)).toHaveTextContent("Done"));
+    await press(4, "Set brakes");
+
+    expect(
+      await within(step(4)).findByText(/set_brake: motor1_brake must be true or false, not "yes"/),
+    ).toBeInTheDocument();
+    expect(step(4)).not.toHaveTextContent("Done");
+    expect(actionPosts(rt).map((p) => p.body?.function_id)).toEqual([6]);
+  });
+
   it("refuses a step whose argument the function doesn't take, and sends nothing", async () => {
     const rt = fakeRuntime({
       latched: false,
