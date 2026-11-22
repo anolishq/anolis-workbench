@@ -28,72 +28,68 @@ ENV_VAR = "ANOLIS_WORKBENCH_EXIT_WITH_PARENT"
 APP_PID_ENV_VAR = "ANOLIS_WORKBENCH_APP_PID"
 
 
-def _parent_identity() -> tuple[int, float | None]:
-    """The parent's pid and its start time, so a reused pid is not taken
-    for the parent."""
-    pid = os.getppid()
+# A process is held as a psutil.Process, and asked is_running(): psutil
+# compares its boot-relative start time, which a wall-clock step does not
+# move. create_time() adds the boot time read now, so the first NTP sync after
+# boot made a live app look gone (review of #933).
+
+
+def _process(pid: int) -> psutil.Process | None:
     try:
-        return pid, psutil.Process(pid).create_time()
+        return psutil.Process(pid)
     except psutil.Error:
-        return pid, None
+        return None
 
 
-def process_alive(pid: int, created: float) -> bool:
-    """Whether `pid` is still the process that started at `created`."""
+def _alive(proc: psutil.Process | None) -> bool:
+    if proc is None:
+        return False
     try:
-        proc = psutil.Process(pid)
-        return proc.create_time() == created and proc.status() != psutil.STATUS_ZOMBIE
+        return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
     except psutil.Error:
         return False
 
 
-def parent_alive(pid: int, created: float | None) -> bool:
-    if os.name != "nt" and os.getppid() != pid:
+def parent_alive(parent: psutil.Process | None) -> bool:
+    if parent is None:
+        return False
+    if os.name != "nt" and os.getppid() != parent.pid:
         # POSIX reparents an orphan, so a changed ppid means the parent died.
         return False
-    try:
-        proc = psutil.Process(pid)
-        if created is not None and proc.create_time() != created:
-            return False
-        return proc.status() != psutil.STATUS_ZOMBIE
-    except psutil.Error:
-        return False
+    return _alive(parent)
 
 
-def _app_identity(parent_pid: int) -> tuple[int, float | None] | None:
-    """The app's pid and start time, or None when the app did not name itself.
+def _app_process(parent: psutil.Process | None) -> tuple[bool, psutil.Process | None]:
+    """Whether the app named itself, and the app's process.
 
-    The start time is None when the app is already gone, or when this
-    process's parent is not the app's child: the bootloader died before the
-    watch began and the server was reparented. The watch stops at once then.
+    The process is None when the app is already gone, or when this process's
+    parent is not the app's child: the bootloader died before the watch began
+    and the server was reparented. The watch stops at once then.
     """
     raw = os.environ.get(APP_PID_ENV_VAR, "")
     if not raw.isdigit():
-        return None
+        return False, None
     app_pid = int(raw)
     try:
-        if psutil.Process(parent_pid).ppid() != app_pid:
-            return app_pid, None
-        return app_pid, psutil.Process(app_pid).create_time()
+        if parent is None or parent.ppid() != app_pid:
+            return True, None
     except psutil.Error:
-        return app_pid, None
+        return True, None
+    return True, _process(app_pid)
 
 
 def watch(stop: Callable[[], None], interval_s: float = 1.0) -> threading.Thread:
     """Call `stop` once the parent process, or the app that started it, has exited."""
-    pid, created = _parent_identity()
-    app = _app_identity(pid)
+    parent = _process(os.getppid())
+    app_named, app = _app_process(parent)
 
-    def _alive() -> bool:
-        if not parent_alive(pid, created):
+    def _both_alive() -> bool:
+        if not parent_alive(parent):
             return False
-        if app is None:
-            return True
-        app_pid, app_created = app
-        return app_created is not None and process_alive(app_pid, app_created)
+        return not app_named or _alive(app)
 
     def _run() -> None:
-        while _alive():
+        while _both_alive():
             time.sleep(interval_s)
         # Stop first: on a quit nothing reads this process's stdout any more,
         # and a print that raised used to end the thread before the stop.
