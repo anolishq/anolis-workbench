@@ -557,20 +557,20 @@ def _run_bundle_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             progress_callback=_progress,
         )
 
+        # Registered and announced under the lock another export's prune takes,
+        # so no prune runs between the two: a bundle is never removed before
+        # its job has said it is ready (review of #926).
         with _bundle_artifacts_lock:
             _bundle_artifacts[job.job_id] = tarball_path
             _bundle_dirs[job.job_id] = tmp_dir
-
-        job.events.append(
-            {
-                "stage": "done",
-                "detail": ". ".join([f"Bundle ready: {tarball_path.name}", *warnings]),
-                "filename": tarball_path.name,
-            }
-        )
-        job.status = "done"
-        # Pruned only once this job has said its bundle is ready, so no
-        # export loses its bundle before announcing it.
+            job.events.append(
+                {
+                    "stage": "done",
+                    "detail": ". ".join([f"Bundle ready: {tarball_path.name}", *warnings]),
+                    "filename": tarball_path.name,
+                }
+            )
+            job.status = "done"
         _keep_latest_bundles()
     except Exception as exc:
         if tmp_dir is not None:
@@ -617,20 +617,25 @@ def download_bundle(handler: Any, job_id: str) -> None:
     with _bundle_artifacts_lock:
         tarball_path = _bundle_artifacts.get(job_id)
 
-    if tarball_path is None and job.pruned_bundle is not None:
-        handler._json(
-            410,
-            {
-                "error": f"Bundle {job.pruned_bundle} was removed: only the latest {_KEEP_BUNDLES} "
-                "bundles are kept. Export it again."
-            },
-        )
-        return
-    if tarball_path is None or not tarball_path.exists():
-        handler._json(404, {"error": "Bundle artifact not found"})
+    data: bytes | None = None
+    if tarball_path is not None:
+        try:
+            data = tarball_path.read_bytes()
+        except OSError:
+            data = None  # pruned after the lookup (review of #926)
+    if tarball_path is None or data is None:
+        if job.pruned_bundle is not None:
+            handler._json(
+                410,
+                {
+                    "error": f"Bundle {job.pruned_bundle} was removed: only the latest {_KEEP_BUNDLES} "
+                    "bundles are kept. Export it again."
+                },
+            )
+        else:
+            handler._json(404, {"error": "Bundle artifact not found"})
         return
 
-    data = tarball_path.read_bytes()
     filename = tarball_path.name
 
     handler.send_response(200)
