@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -201,6 +202,101 @@ fn is_own_workbench(response: &str, launch_id: &str) -> bool {
         == Some(launch_id)
 }
 
+/// Set once the user has agreed to quit with jobs running, so the exit the
+/// dialog then requests is let through.
+static QUIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+/// The kinds of the server's running jobs, from a response to
+/// GET /api/provision/active; empty for anything else.
+fn running_job_kinds(response: &str) -> Vec<String> {
+    let status_ok = response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200");
+    let Some((_, body)) = response.split_once("\r\n\r\n").filter(|_| status_ok) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    json.get("running")
+        .and_then(serde_json::Value::as_array)
+        .map(|jobs| {
+            jobs.iter()
+                .map(|job| {
+                    job.get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Asks the server which jobs are still running. A server that does not
+/// answer has nothing a quit could cut off that the app could name.
+fn running_jobs_once() -> Vec<String> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], WORKBENCH_PORT));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+        return Vec::new();
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    let request = format!(
+        "GET /api/provision/active HTTP/1.1\r\nHost: {WORKBENCH_HOST}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return Vec::new();
+    }
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return Vec::new();
+    }
+    running_job_kinds(&response)
+}
+
+/// What the quit confirmation says about the jobs a quit would end.
+fn quit_warning(kinds: &[String]) -> String {
+    let deploys = kinds.iter().filter(|k| k.as_str() != "bundle").count();
+    let exports = kinds.len() - deploys;
+    let what = match (deploys, exports) {
+        (0, _) => "A bundle export is still running".to_string(),
+        (_, 0) => "A deploy is still running".to_string(),
+        _ => "A deploy and a bundle export are still running".to_string(),
+    };
+    format!(
+        "{what}. Quitting stops the workbench's server, and with it the job: \
+a deploy stops partway on the target. Quit anyway?"
+    )
+}
+
+/// Before the app quits, asks for confirmation when the server still runs a
+/// deploy or export. Quitting ends the server, and since wb#933 its jobs with
+/// it (review of #933). Returns true when the quit should be held.
+fn hold_quit_for_jobs(app: &AppHandle) -> bool {
+    if QUIT_CONFIRMED.load(Ordering::SeqCst) {
+        return false;
+    }
+    let kinds = running_jobs_once();
+    if kinds.is_empty() {
+        return false;
+    }
+    let handle = app.clone();
+    app.dialog()
+        .message(quit_warning(&kinds))
+        .title("Quit Anolis Workbench?")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit anyway".to_string(),
+            "Keep running".to_string(),
+        ))
+        .kind(MessageDialogKind::Warning)
+        .show(move |quit| {
+            if quit {
+                QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+                handle.exit(0);
+            }
+        });
+    true
+}
+
 fn check_health_once(launch_id: &str) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], WORKBENCH_PORT));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
@@ -359,16 +455,50 @@ The installation may be incomplete. Reinstalling the app may fix it."
         })
         .build(tauri::generate_context!())
         .expect("error while building Anolis Workbench desktop shell")
-        .run(|app_handle, event| {
-            if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
-                stop_sidecar(app_handle);
+        .run(|app_handle, event| match event {
+            RunEvent::WindowEvent {
+                event: WindowEvent::CloseRequested { api, .. },
+                ..
+            } => {
+                if hold_quit_for_jobs(app_handle) {
+                    api.prevent_close();
+                }
             }
+            RunEvent::ExitRequested { api, .. } => {
+                if hold_quit_for_jobs(app_handle) {
+                    api.prevent_exit();
+                } else {
+                    stop_sidecar(app_handle);
+                }
+            }
+            RunEvent::Exit => stop_sidecar(app_handle),
+            _ => {}
         });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_job_kinds_reads_the_active_route() {
+        let body = r#"{"running": [{"job_id": "a", "kind": "remote"}, {"job_id": "b", "kind": "bundle"}]}"#;
+        let ok = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{body}");
+        assert_eq!(running_job_kinds(&ok), vec!["remote", "bundle"]);
+        let none = "HTTP/1.1 200 OK\r\n\r\n{\"running\": []}";
+        assert!(running_job_kinds(none).is_empty());
+        assert!(running_job_kinds("HTTP/1.1 404 Not Found\r\n\r\n{}").is_empty());
+        assert!(running_job_kinds("").is_empty());
+    }
+
+    #[test]
+    fn quit_warning_names_what_would_stop() {
+        assert!(quit_warning(&["remote".into()]).starts_with("A deploy is still running"));
+        assert!(quit_warning(&["install".into()]).starts_with("A deploy is still running"));
+        assert!(quit_warning(&["bundle".into()]).starts_with("A bundle export is still running"));
+        assert!(quit_warning(&["remote".into(), "bundle".into()])
+            .starts_with("A deploy and a bundle export"));
+    }
     use std::cell::Cell;
 
     fn response(status: &str, body: &str) -> String {
