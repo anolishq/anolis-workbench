@@ -164,9 +164,9 @@
   // request left before then describes the runtime before that POST, so it
   // never overwrites what the reply reported (wb#614).
   let estopEpoch = 0;
-  // Bumped by each mode_change event. A /v0/mode reply whose request left
-  // before then reports the mode before that change, so it never overwrites
-  // what the event said (wb#818).
+  // Bumped by each mode_change event, and by a mode this page set. A /v0/mode
+  // reply whose request left before then reports the mode before that change,
+  // so it never overwrites what the event or the set said (wb#818).
   let modeEpoch = 0;
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
@@ -687,6 +687,9 @@
       });
       modeSelectorDirty = false;
       modeFeedback = "";
+      // A poll that left before this set reports the mode before it, and
+      // must not write it back while the event stream is down.
+      modeEpoch += 1;
       await refreshModeOnly();
     } catch (err) {
       modeFeedback = `Failed to set mode: ${err instanceof Error ? err.message : String(err)}`;
