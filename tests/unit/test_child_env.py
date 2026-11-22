@@ -143,3 +143,14 @@ def test_restart(secrets: None, launch_stubs: _Spawn, tmp_path: pathlib.Path, mo
     monkeypatch.setattr(projects_module, "get_project", lambda name: {})
     launcher.restart("p", tmp_path / "p")
     _assert_scrubbed(launch_stubs)
+
+
+def test_child_env_withholds_the_desktop_apps_watch_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review of #933: the desktop app sets these for its own server. A runtime,
+    its providers, install.sh or ssh inherited them, and a workbench server
+    started from that environment stopped itself at once."""
+    monkeypatch.setenv("ANOLIS_WORKBENCH_EXIT_WITH_PARENT", "1")
+    monkeypatch.setenv("ANOLIS_WORKBENCH_APP_PID", "4242")
+    env = child_env_module.child_env()
+    assert "ANOLIS_WORKBENCH_EXIT_WITH_PARENT" not in env
+    assert "ANOLIS_WORKBENCH_APP_PID" not in env
