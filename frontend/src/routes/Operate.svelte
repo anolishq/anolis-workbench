@@ -931,7 +931,7 @@
     func: FunctionSpec,
     formData: Record<string, unknown>,
   ): Promise<void> {
-    const fbKey = `${deviceKey}:${func.function_id}`;
+    const fbKey = getFuncFormKey(deviceKey, func);
     const [providerId, deviceId] = deviceKey.split("/");
     functionFeedback = { ...functionFeedback, [fbKey]: { text: "Executing...", cls: "" } };
     try {
@@ -2540,8 +2540,8 @@
             {:else if caps.functions?.length === 0}
               <p class="placeholder">No callable functions declared.</p>
             {:else}
-              {#each caps.functions as func (func.function_id)}
-                {@const fbKey = `${selectedKey}:${func.function_id}`}
+              {#each caps.functions as func (`${func.function_id}:${func.name}`)}
+                {@const fbKey = getFuncFormKey(selectedKey, func)}
                 <div class="function-card">
                   <h4>{func.display_name || func.name || `Function ${func.function_id}`}</h4>
                   {#if func.description}
