@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Quitting the desktop app stops its server and leaves your runtime
+  running** (#667). The app killed only the sidecar's bootloader, so the
+  server kept running and held port 3010. The server now stops itself once
+  the app's bootloader is gone. A runtime the workbench launched keeps
+  running, with no SIGKILL: quitting the app never puts a running machine in
+  an unplanned stop. The next workbench start finds it.
+
 ## [0.33.4] - 2026-11-13
 
 ### Fixed

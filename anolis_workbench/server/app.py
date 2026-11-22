@@ -20,7 +20,7 @@ from anolis_workbench.core import installed_project, provider_schemas
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core.appliance import DEFAULT_PORT, default_host, default_open_browser, tunnel_hint
-from anolis_workbench.server import request_origin
+from anolis_workbench.server import parent_watch, request_origin
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
 
@@ -468,6 +468,10 @@ def main(
         print(line, flush=True)
     if config.open_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
+    if parent_watch.enabled():
+        # Started by the desktop app: stop when it is gone (wb#667), leaving
+        # any runtime this server launched running.
+        parent_watch.watch(server.shutdown)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
