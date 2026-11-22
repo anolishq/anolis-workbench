@@ -18,6 +18,14 @@ Upgrade notes:
 - Deploy refuses a machine profile whose `components.runtime.version` is not
   a release number `X.Y.Z`, before it downloads anything. A pin such as
   `latest` or `0.16.0-rc.1` used to be accepted here and failed later.
+- Deploy refuses an anolis release whose `SHA256SUMS` does not list
+  `install.sh`, or that has no `SHA256SUMS`. It used to warn and run the
+  unverified script. v0.1.50 is the first release that lists it, so the
+  oldest runtime the workbench deploys is now v0.1.50 (#533).
+- `anolis-provision ... --system <dir>` without `--project` names the
+  project after the system directory. It used the template name,
+  `sim-quickstart` by default, so an imported bioreactor installed as
+  `sim-quickstart`. `--project` still wins (#565).
 
 ### Fixed
 
@@ -31,6 +39,29 @@ Upgrade notes:
   Commission saves the variant to disk, but the shell still compared the
   draft with the project as it was before. Undoing a Compose edit afterwards
   kept the unsaved mark and its prompts.
+
+- **Fleet provisioning honours a target's SSH port.** `fleet.yaml` takes
+  `port` on a target or under `defaults`. It used to drop the key without a
+  warning and connect on 22, overriding `~/.ssh/config`. A port outside
+  1-65535 is refused (#654).
+
+- **Export keeps every behaviour the machine profile declares.** It kept
+  only the manual variant's tree and dropped the rest from
+  `runtime/behaviors/` and the packaged profile. Two declared trees with the
+  same file name are refused, since one would overwrite the other (#675).
+
+- **A long-running server no longer keeps every bundle export.** A failed
+  export removes its staging directory, the latest two bundles are kept and
+  older ones removed, and at most 100 finished jobs are kept (#674).
+
+- **Deploy checks a project's path tokens only against install.sh 0.10.2
+  and earlier.** From anolis 0.11.0 install.sh rewrites every project path
+  to the directory it installs, so the check refused projects that install
+  correctly (#821).
+
+- **The release workflow accepts only an `X.Y.Z` version.** A suffixed
+  version could never match `version-locations.txt`, so it failed later in
+  the lockstep check. Mark a prerelease with the prerelease input (#675).
 
 - **Export refuses a provider command that is not a deploy token**, as
   `anolis-validate` does since #666. A project whose provider `command` was
