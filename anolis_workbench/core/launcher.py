@@ -26,7 +26,6 @@ from anolis_workbench.core.child_env import child_env
 _state: dict = {
     "project": None,  # active project name
     "process": None,  # subprocess.Popen handle
-    "log_file": None,  # open file handle for latest.log
     "log_lines_by_project": {},  # dict[str, list[str]] ring buffers (last 200 lines)
 }
 _state_lock = threading.Lock()
@@ -757,25 +756,37 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
     """
     cmd = _runtime_command(system, launch_config)
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(paths_module.DATA_ROOT),
-        bufsize=1,
-        text=True,
-        env=child_env(),
-    )
-
-    log_file = None
+    # The runtime writes its log file itself. A pipe the server read had no
+    # reader once the server exited, and a runtime left running after a
+    # desktop quit (#916) lost its providers: they share its stderr and die
+    # of SIGPIPE on their next write. The server follows the file instead.
+    # The previous run's log is set aside, and put back if the runtime does
+    # not start, so a failed launch keeps it (#672).
+    log_path = project_dir / "logs" / "latest.log"
+    previous_path = log_path.with_name("previous.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if log_path.exists():
+        os.replace(log_path, previous_path)
     try:
-        # Overwritten only once the runtime has started, so a launch that fails
-        # to start keeps the previous run's log (#672). The runtime's output
-        # waits in its pipe until the reader thread copies it here.
-        log_path = project_dir / "logs" / "latest.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_file = open(log_path, "w", buffering=1, encoding="utf-8")
+        with open(log_path, "wb") as runtime_output:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=runtime_output,
+                stderr=subprocess.STDOUT,
+                cwd=str(paths_module.DATA_ROOT),
+                env=child_env(),
+            )
+    except BaseException:
+        try:
+            if previous_path.exists():
+                os.replace(previous_path, log_path)
+            else:
+                log_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
+    try:
         # Write running.json
         running_data = {
             "pid": proc.pid,
@@ -791,22 +802,19 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
                 {
                     "project": name,
                     "process": proc,
-                    "log_file": log_file,
                 }
             )
-        threading.Thread(target=_read_logs, args=(proc, log_file, name), daemon=True).start()
+        threading.Thread(target=_read_logs, args=(proc, log_path, name), daemon=True).start()
     except BaseException:
         with _state_lock:
             if _state["process"] is proc:
-                _state.update({"project": None, "process": None, "log_file": None})
+                _state.update({"project": None, "process": None})
         proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        if log_file is not None:
-            log_file.close()
         raise
 
 
@@ -912,18 +920,37 @@ def _restart_locked(name: str, project_dir: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_logs(proc: subprocess.Popen, log_file, project: str) -> None:
-    if proc.stdout is None:
-        return
-    for line in proc.stdout:
-        log_file.write(line)
-        with _state_lock:
-            lines = _state["log_lines_by_project"].setdefault(project, [])
-            lines.append(line)
-            if len(lines) > 200:
-                lines.pop(0)
-        _notify_sse_subscribers(project, line)
-    _notify_sse_subscribers(project, None)  # sentinel: process stdout closed
+def _publish_log_line(project: str, line: str) -> None:
+    with _state_lock:
+        lines = _state["log_lines_by_project"].setdefault(project, [])
+        lines.append(line)
+        if len(lines) > 200:
+            lines.pop(0)
+    _notify_sse_subscribers(project, line)
+
+
+def _read_logs(proc: subprocess.Popen, log_path: pathlib.Path, project: str, poll_s: float = 0.2) -> None:
+    """Follow the log file the runtime writes until the runtime exits."""
+    try:
+        with open(log_path, "rb") as log:
+            partial = b""
+            while True:
+                chunk = log.readline()
+                if chunk:
+                    partial += chunk
+                    if partial.endswith(b"\n"):
+                        _publish_log_line(project, partial.decode("utf-8", errors="replace"))
+                        partial = b""
+                    continue
+                if proc.poll() is not None:
+                    rest = partial + log.read()
+                    for line in rest.decode("utf-8", errors="replace").splitlines(keepends=True):
+                        _publish_log_line(project, line)
+                    break
+                time.sleep(poll_s)
+    except OSError:
+        proc.wait()
+    _notify_sse_subscribers(project, None)  # sentinel: the runtime has exited
     _cleanup_after_exit(proc)
 
 
@@ -942,14 +969,8 @@ def _cleanup_after_exit(proc: subprocess.Popen) -> None:
         # Guard: don't clobber state if a new process was already started
         if _state["process"] is not proc:
             return
-        lf = _state["log_file"]
         project = _state["project"]
-        _state.update({"process": None, "log_file": None, "project": None})
-    if lf:
-        try:
-            lf.close()
-        except OSError:
-            pass
+        _state.update({"process": None, "project": None})
     if project:
         rj = running_json_path(project)
         try:
