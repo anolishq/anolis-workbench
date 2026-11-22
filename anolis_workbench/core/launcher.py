@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import queue
+import shutil
 import signal
 import socket
 import subprocess
@@ -762,31 +763,52 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
     # reader once the server exited, and a runtime left running after a
     # desktop quit (#916) lost its providers: they share its stderr and die
     # of SIGPIPE on their next write. The server follows the file instead.
-    # The previous run's log is set aside, and put back if the runtime does
-    # not start, so a failed launch keeps it (#672).
-    log_path = project_dir / "logs" / "latest.log"
-    previous_path = log_path.with_name("previous.log")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if log_path.exists():
-        os.replace(log_path, previous_path)
+    #
+    # The file is opened for append, so a truncation under a live writer
+    # cannot leave a run of NULs (review of #932). The last run's log is
+    # copied aside, not moved: no file another process holds open is renamed,
+    # which Windows refuses. The copy becomes previous.log only once the
+    # runtime has started; a failed launch puts latest.log back and leaves
+    # previous.log as it was (#672, review of #932).
+    log_dir = project_dir / "logs"
+    log_path = log_dir / "latest.log"
+    previous_path = log_dir / "previous.log"
+    kept_path = log_dir / "latest.log.kept"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    had_log = log_path.is_file()
+    if had_log:
+        shutil.copyfile(log_path, kept_path)
     try:
-        with open(log_path, "wb") as runtime_output:
+        fd = os.open(
+            log_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND | getattr(os, "O_BINARY", 0),
+            0o644,
+        )
+        try:
             proc = subprocess.Popen(
                 cmd,
-                stdout=runtime_output,
+                stdout=fd,
                 stderr=subprocess.STDOUT,
                 cwd=str(paths_module.DATA_ROOT),
                 env=child_env(),
             )
+        finally:
+            os.close(fd)
     except BaseException:
         try:
-            if previous_path.exists():
-                os.replace(previous_path, log_path)
+            if had_log:
+                shutil.copyfile(kept_path, log_path)
+                kept_path.unlink()
             else:
                 log_path.unlink(missing_ok=True)
         except OSError:
             pass
         raise
+    if had_log:
+        try:
+            os.replace(kept_path, previous_path)
+        except OSError:
+            pass  # previous.log stays one run older; the launch goes on
 
     try:
         # Write running.json
