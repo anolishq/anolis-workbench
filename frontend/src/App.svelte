@@ -452,6 +452,10 @@
         bind:saved
         unsaved={dirty}
         onOpenCompose={() => onTabClick("compose")}
+        onLaunchSaved={(body) => {
+          savedDoc = body;
+          dirty = JSON.stringify(system) !== savedDoc;
+        }}
       />
     {/key}
   {:else if workspace === "operate"}

@@ -35,6 +35,7 @@
     saved = $bindable(null),
     unsaved = false,
     onOpenCompose,
+    onLaunchSaved,
   }: {
     projectName: string | null;
     system: ProjectDoc | null;
@@ -48,6 +49,8 @@
     unsaved?: boolean;
     /** Switches to Compose, where the edits can be saved. */
     onOpenCompose?: () => void;
+    /** The project as written by a dev-launch variant change, serialized. */
+    onLaunchSaved?: (body: string) => void;
   } = $props();
 
   // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
@@ -98,13 +101,17 @@
       const path = `/api/projects/${encodeURIComponent(projectName)}`;
       const onDisk = await fetchJson<ProjectDoc>(path);
       onDisk.launch = { ...(onDisk.launch ?? {}), variant: next };
+      const body = JSON.stringify(onDisk);
       await fetchJson(path, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(onDisk),
+        body,
       });
       saved = savedLaunch(onDisk);
       system.launch = { ...(system.launch ?? {}), variant: next };
+      // The shell compares the draft with what is on disk, which now has the
+      // new variant; without this an undone Compose edit still read unsaved.
+      onLaunchSaved?.(body);
       // Preflight checks the variant dev-launch runs, so its result no longer
       // speaks for the next launch.
       preflightResults = null;
