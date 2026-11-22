@@ -31,7 +31,11 @@ import yaml
 from anolis_workbench.core import canonical, machine_profile, releases
 from anolis_workbench.core.executor import Executor, LocalExecutor
 from anolis_workbench.core.paths import DATA_ROOT, DEFAULT_INSTALL_PREFIX
-from anolis_workbench.core.release_verify import ReleaseVerificationError, verify_install_sh
+from anolis_workbench.core.release_verify import (
+    ReleaseVerificationError,
+    require_release_version,
+    verify_install_sh,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +154,10 @@ def materialize_project_dir(
     runtime_version = runtime_component.get("version") if isinstance(runtime_component, dict) else None
     if not isinstance(runtime_version, str) or runtime_version == "":
         raise DeployError("machine profile components.runtime.version is missing")
+    try:
+        require_release_version(runtime_version, "machine profile components.runtime.version")
+    except ReleaseVerificationError as exc:
+        raise DeployError(str(exc)) from exc
 
     runtime_profiles = profile.get("runtime_profiles")
     if not isinstance(runtime_profiles, dict) or not isinstance(runtime_profiles.get("manual"), str):
@@ -335,6 +343,10 @@ def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> tuple[pathlib.
     install.sh does not match its release's SHA256SUMS, the release has no
     SHA256SUMS or no line for it, or SHA256SUMS cannot be fetched.
     """
+    try:
+        require_release_version(runtime_version, "the runtime version")
+    except ReleaseVerificationError as exc:
+        raise DeployError(str(exc)) from exc
     url = f"https://github.com/{releases.RUNTIME_REPO}/releases/download/v{runtime_version}/install.sh"
     try:
         resp = requests.get(url, timeout=30)

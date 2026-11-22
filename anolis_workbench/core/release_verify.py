@@ -8,6 +8,7 @@ workbench checks it the way install.sh checks the tarballs it downloads
 from __future__ import annotations
 
 import hashlib
+import re
 
 import requests
 
@@ -32,6 +33,21 @@ def _expected_digest(sums: str, asset: str) -> str | None:
 OLDEST_VERIFIABLE_RELEASE = "0.1.50"
 
 
+_RELEASE_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def require_release_version(version: object, where: str) -> str:
+    """Return ``version`` if it is a plain X.Y.Z release number, else raise.
+
+    A version goes into a release download URL. Anything else (a suffix,
+    a path separator, a scheme) could point the download, and the checksum
+    that vouches for it, somewhere other than the release the profile names.
+    """
+    if not isinstance(version, str) or _RELEASE_VERSION_RE.fullmatch(version) is None:
+        raise ReleaseVerificationError(f"{where} must be a release number X.Y.Z, got {version!r}")
+    return version
+
+
 def _unverifiable(repo: str, version: str, what: str) -> ReleaseVerificationError:
     product = repo.rsplit("/", 1)[-1]
     return ReleaseVerificationError(
@@ -47,6 +63,7 @@ def verify_install_sh(repo: str, version: str, content: bytes, *, timeout: float
     mismatch, when the release has no SHA256SUMS (HTTP 404) or no line for
     install.sh, or when SHA256SUMS cannot be fetched (#533).
     """
+    require_release_version(version, "the release version")
     url = f"https://github.com/{repo}/releases/download/v{version}/SHA256SUMS"
     try:
         resp = requests.get(url, timeout=timeout)
