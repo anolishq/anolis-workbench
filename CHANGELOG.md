@@ -41,6 +41,10 @@ Upgrade notes:
   naming the file and saying to export it again. A bundle is also kept until
   its own job has said it is ready.
 
+- **Operate keeps a mode you set over an older poll's reply.** With the
+  event stream down, a status poll that left before you set the mode could
+  write the old mode back when it settled.
+
 - **`anolis-provision ... --system <dir>` refuses a directory name the
   workspace can't use** as a project name, such as one holding a space or a
   dot, or `/`. It used to create a project the workbench then rejected.
