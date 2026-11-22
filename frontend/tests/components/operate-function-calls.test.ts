@@ -467,6 +467,34 @@ describe("Operate.svelte — args in declared order (#807)", () => {
     expect(shownValues()).toEqual([["value", ""]]);
   });
 
+  // The call result beside a form follows the function, not just its id: a
+  // rebuilt provider's set_power must not show set_speed's "Accepted at".
+  it("does not show a call result under a different function that reuses the id", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const named = (name: string) => ({
+      capabilities: {
+        signals: [],
+        functions: [
+          {
+            ...PID_CAPS.capabilities.functions[0],
+            name,
+            args: { value: { type: "double", required: true } },
+          },
+        ],
+      },
+    });
+    const { rt, calls } = renderPid(named("set_speed"));
+    await screen.findByLabelText(/^value/);
+    await typeInto("value", "42");
+    await fireEvent.click(screen.getByRole("button", { name: /execute/i }));
+    expect(await screen.findByText(/^Accepted at /)).toBeInTheDocument();
+    expect(calls).toHaveLength(1);
+
+    await restartWith(rt, named("set_power"));
+
+    expect(screen.queryByText(/^Accepted at /)).toBeNull();
+  });
+
   // #840: a value kept from another type is not read for truthiness, so the
   // text "false" typed while the arg was a string does not become true.
   it("treats a value kept from a string arg as unset when the arg comes back a bool", async () => {

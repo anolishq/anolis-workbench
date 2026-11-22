@@ -21,6 +21,12 @@ Upgrade notes:
 
 ### Fixed
 
+- **A function's call result stays with that function across a restart.**
+  Operate keyed the result beside each form by device and function id only,
+  so when a rebuilt provider gave an id to a different function, the new one
+  showed the old one's `Accepted at` or error. Results now use the same
+  device, id and name key as the form values (#839).
+
 - **Export refuses a provider command that is not a deploy token**, as
   `anolis-validate` does since #666. A project whose provider `command` was
   edited to a host path exported a package its own validator then rejected.
