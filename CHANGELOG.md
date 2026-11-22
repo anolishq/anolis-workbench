@@ -36,6 +36,12 @@ Upgrade notes:
 
 ### Fixed
 
+- **A Ctrl-C in the workbench's terminal no longer reaches its runtime.**
+  A runtime the workbench launched shared the server's process group, so
+  stopping a workbench started from a terminal stopped the runtime too. It
+  now runs in its own session (its own process group on Windows); Stop
+  still ends it.
+
 - **A project name with a trailing newline is refused.** The name check let
   `$` match before a final newline, so `rig` followed by a newline passed and
   reached the paths and commands built from the name.

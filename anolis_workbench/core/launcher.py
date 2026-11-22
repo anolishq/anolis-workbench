@@ -13,6 +13,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -751,6 +752,12 @@ def _runtime_command(system: dict, launch_config: str) -> list[str]:
     return [str(runtime_exe), "--config", launch_config]
 
 
+def _detached_process_kwargs() -> dict[str, Any]:
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: str) -> None:
     """Start the runtime on `launch_config` and publish it as the tracked process.
 
@@ -791,6 +798,11 @@ def _spawn(name: str, system: dict, project_dir: pathlib.Path, launch_config: st
                 stderr=subprocess.STDOUT,
                 cwd=str(paths_module.DATA_ROOT),
                 env=child_env(),
+                # Its own session (process group on Windows): a Ctrl-C in the
+                # terminal that started the app or server must not reach a
+                # runtime that outlives them (review of #932). Stop signals it
+                # directly.
+                **_detached_process_kwargs(),
             )
         finally:
             os.close(fd)
