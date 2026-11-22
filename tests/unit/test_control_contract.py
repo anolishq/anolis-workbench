@@ -18,6 +18,8 @@ from typing import Any
 
 import pytest
 
+from anolis_workbench.core import launcher
+
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
@@ -268,6 +270,7 @@ def test_control_contract_status_detects_detached_runtime_and_stop_cleans_up(
                 "pid": runner.pid,
                 "project": project,
                 "started": datetime.now(timezone.utc).isoformat(),
+                "start_marker": launcher._start_marker(runner.pid),
             }
         ),
         encoding="utf-8",
@@ -338,6 +341,7 @@ def test_control_contract_restart_rejects_wrong_running_project(
                 "pid": runner.pid,
                 "project": running,
                 "started": datetime.now(timezone.utc).isoformat(),
+                "start_marker": launcher._start_marker(runner.pid),
             }
         ),
         encoding="utf-8",
