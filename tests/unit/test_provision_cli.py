@@ -678,6 +678,29 @@ class TestBundleHint:
         assert "sudo anolis-demo-0.16.0-x86_64/install.sh --local" in out
 
 
+@pytest.mark.parametrize("system", ["/srv/rig.v2 bench", "/"])
+def test_a_system_directory_name_the_workspace_refuses_is_refused(system: str) -> None:
+    from anolis_workbench.cli.provision_cli import _project_choice_error
+
+    args = argparse.Namespace(system=system, project=None, template=None)
+    error = _project_choice_error(args)
+    assert error is not None
+    assert "from --system's directory" in error and "Pass --project <name>" in error
+
+
+def test_a_system_directory_with_a_usable_name_passes() -> None:
+    from anolis_workbench.cli.provision_cli import _project_choice_error
+
+    assert _project_choice_error(argparse.Namespace(system="/srv/rig-v2_bench", project=None, template=None)) is None
+
+
+def test_project_overrides_an_unusable_system_directory_name() -> None:
+    from anolis_workbench.cli.provision_cli import _project_choice_error
+
+    args = argparse.Namespace(system="/srv/rig.v2 bench", project="rig-v2", template=None)
+    assert _project_choice_error(args) is None
+
+
 @pytest.mark.parametrize("target", ["-bad@mypi", "pi@-bad", "pi@my pi"])
 def test_a_target_ssh_could_read_as_an_option_is_refused(target: str) -> None:
     from anolis_workbench.cli.provision_cli import _parse_target
