@@ -21,6 +21,26 @@ Upgrade notes:
 
 ### Fixed
 
+- **Export refuses a provider command that is not a deploy token**, as
+  `anolis-validate` does since #666. A project whose provider `command` was
+  edited to a host path exported a package its own validator then rejected.
+
+- **An export or validation that cannot read its input says so.** A
+  behavior file the exporter cannot read is an export error naming the
+  file, and a package with an encrypted entry or an unsupported compression
+  method fails validation as unreadable. Both used to end in a traceback
+  from the CLI.
+
+- **Export rewrites a provider's `--config=<path>` too.** Only the two-token
+  `--config <path>` form was rewritten to the packaged config, so the
+  one-token form stayed beside an appended second `--config` pair.
+
+- **Downloading a bundle that newer exports removed says so.** Only the
+  latest two exported bundles are kept. An older job still reported its
+  bundle ready, then its download answered a bare 404; it now answers 410,
+  naming the file and saying to export it again. A bundle is also kept until
+  its own job has said it is ready.
+
 - **Operate keeps a mode you set over an older poll's reply.** With the
   event stream down, a status poll that left before you set the mode could
   write the old mode back when it settled.
