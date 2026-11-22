@@ -140,7 +140,9 @@ Upgrade notes:
   the app or the app's bootloader is gone, so also after an app crash or a
   startup the app gave up on. A runtime the workbench launched keeps running
   and is not signalled; it writes its own log, so its providers keep running
-  too. The next workbench start finds it.
+  too. The next workbench start finds it. While a deploy or a bundle export
+  runs, quitting asks first: quitting anyway ends the job, and a deploy
+  stops partway on its target.
 
 - **The desktop app's startup errors stay up and say what failed.** The
   dialog named port 3010 whatever failed, and the app exited before it

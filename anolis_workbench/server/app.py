@@ -193,6 +193,8 @@ class _Handler(BaseHTTPRequestHandler):
             compose.serve_templates(self)
         elif path == "/api/onboarding":
             onboarding.get_onboarding_status(self)
+        elif path == "/api/provision/active":
+            provision.get_active(self)
         elif path.startswith("/api/provision/status/"):
             job_id = path.split("/")[-1]
             provision.get_status(self, job_id)
