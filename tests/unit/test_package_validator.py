@@ -180,6 +180,48 @@ def test_an_archive_that_is_not_a_zip_fails_validation(
     assert capsys.readouterr().err.startswith("Validation failed: ")
 
 
+def _zip_with_patched_entry(path: pathlib.Path, *, flag_bits: int = 0, method: int | None = None) -> None:
+    """A one-entry zip, with its local and central headers patched: flag_bits
+    ORed into the general-purpose flags, and the compression method set."""
+    import struct
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("machine-profile.yaml", "schema_version: 1\n")
+    data = bytearray(path.read_bytes())
+    for signature, flags_at, method_at in ((b"PK\x03\x04", 6, 8), (b"PK\x01\x02", 8, 10)):
+        at = data.find(signature)
+        assert at >= 0
+        flags = struct.unpack_from("<H", data, at + flags_at)[0] | flag_bits
+        struct.pack_into("<H", data, at + flags_at, flags)
+        if method is not None:
+            struct.pack_into("<H", data, at + method_at, method)
+    path.write_bytes(bytes(data))
+
+
+@pytest.mark.parametrize(
+    ("label", "flag_bits", "method"),
+    [("encrypted", 0x1, None), ("unsupported compression", 0, 99)],
+)
+def test_an_archive_python_cannot_extract_fails_validation(
+    label: str,
+    flag_bits: int,
+    method: int | None,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Review of #903: an encrypted entry or an unsupported compression method
+    raised RuntimeError or NotImplementedError, a traceback from the CLI."""
+    archive = tmp_path / "odd.anpkg"
+    _zip_with_patched_entry(archive, flag_bits=flag_bits, method=method)
+
+    with pytest.raises(package_validator.PackageValidationError, match="odd.anpkg could not be read"):
+        package_validator.validate_package(archive)
+    assert _run_validate_cli(monkeypatch, archive) == 1
+    assert capsys.readouterr().err.startswith("Validation failed: ")
+
+
 # ---------------------------------------------------------------------------
 # A package carries each provider command as the deploy token (#666)
 # ---------------------------------------------------------------------------
