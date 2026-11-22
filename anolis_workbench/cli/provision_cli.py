@@ -401,6 +401,17 @@ def _project_choice_error(args: argparse.Namespace) -> str | None:
     """
     from anolis_workbench.core import projects as projects_module
 
+    # A --system project is named after its directory unless --project names
+    # it, and a directory name can be anything: refuse one the workspace
+    # would not accept, before anything is created.
+    project_name = _resolve_names(args)[0]
+    if problem := projects_module.validate_name(project_name):
+        source = (
+            "--system's directory"
+            if getattr(args, "system", None) is not None and getattr(args, "project", None) is None
+            else "--project"
+        )
+        return f"project name {project_name!r} (from {source}) is not usable: {problem} Pass --project <name>."
     if getattr(args, "system", None) is not None or getattr(args, "template", None) is not None:
         return None
     existing = [p["name"] for p in projects_module.list_projects()]

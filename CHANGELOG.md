@@ -21,6 +21,11 @@ Upgrade notes:
 
 ### Fixed
 
+- **`anolis-provision ... --system <dir>` refuses a directory name the
+  workspace can't use** as a project name, such as one holding a space or a
+  dot, or `/`. It used to create a project the workbench then rejected.
+  Pass `--project <name>` to name it.
+
 - **A trip-recovery step sends the bool the machine profile gives**. The
   machine-profile schema lets a bool argument be `true`, `"true"` or `1`,
   and `false`, `"false"` or `0`. Since an unreleased change, Operate sent
