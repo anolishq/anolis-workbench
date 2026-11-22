@@ -436,3 +436,23 @@ def test_a_trailing_bare_config_gets_the_packaged_path_and_validates(
     (tmp_path / "providers").mkdir()
     (tmp_path / "providers" / "x.yaml").write_text("{}\n", encoding="utf-8")
     package_validator._validate_runtime_provider_args(package_root=tmp_path, runtime_payload=runtime)
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs POSIX permissions, not root"
+)
+def test_a_behavior_file_that_cannot_be_read_is_an_export_error(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """Review of #902: a behavior file with no read permission raised a raw
+    PermissionError, a traceback from the CLI and a 500 over HTTP."""
+    behavior = project_dir / "behaviors" / "local.xml"
+    _patch_variant(
+        project_dir, canonical.MANUAL_VARIANT, automation={"enabled": True, "behavior_tree": "behaviors/local.xml"}
+    )
+    behavior.chmod(0)
+    try:
+        with pytest.raises(exporter.ExportError, match="local.xml could not be read"):
+            exporter.build_package(project_dir=project_dir, out_path=tmp_path / "out.anpkg")
+    finally:
+        behavior.chmod(0o644)

@@ -73,7 +73,9 @@ def _materialize_package_root(package_path: pathlib.Path) -> Iterator[pathlib.Pa
         try:
             with zipfile.ZipFile(path, mode="r") as archive:
                 archive.extractall(root)
-        except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError) as exc:
+        # An encrypted entry raises RuntimeError and an unsupported compression
+        # method NotImplementedError; both mean this archive cannot be read.
+        except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, RuntimeError, NotImplementedError) as exc:
             raise PackageValidationError(f"Package archive {path.name} could not be read: {exc}") from exc
         yield root
 
