@@ -21,6 +21,10 @@ Upgrade notes:
 
 ### Fixed
 
+- **Export refuses a provider command that is not a deploy token**, as
+  `anolis-validate` does since #666. A project whose provider `command` was
+  edited to a host path exported a package its own validator then rejected.
+
 - **An export or validation that cannot read its input says so.** A
   behavior file the exporter cannot read is an export error naming the
   file, and a package with an encrypted entry or an unsupported compression
